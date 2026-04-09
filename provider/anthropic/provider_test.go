@@ -404,3 +404,69 @@ func TestMapFinishReason(t *testing.T) {
 		})
 	}
 }
+
+// ==============================
+// Options 模式测试
+// ==============================
+
+func TestNewProviderWithOptions(t *testing.T) {
+	t.Run("仅 WithAPIKey", func(t *testing.T) {
+		p := NewProviderWithOptions(WithAPIKey("test-key"))
+		if p == nil {
+			t.Fatal("NewProviderWithOptions() returned nil")
+		}
+		_ = p.GetAvailableModels()
+	})
+
+	t.Run("WithAPIKey + WithBaseURL", func(t *testing.T) {
+		p := NewProviderWithOptions(
+			WithAPIKey("test-key"),
+			WithBaseURL("https://custom.example.com"),
+		)
+		if p == nil {
+			t.Fatal("NewProviderWithOptions with BaseURL returned nil")
+		}
+		_ = p.GetAvailableModels()
+	})
+
+	t.Run("完整选项", func(t *testing.T) {
+		p := NewProviderWithOptions(
+			WithAPIKey("test-key"),
+			WithBaseURL("https://custom.example.com"),
+			WithHeader("X-Custom", "test-value"),
+		)
+		if p == nil {
+			t.Fatal("NewProviderWithOptions with full options returned nil")
+		}
+		_ = p.GetAvailableModels()
+	})
+}
+
+func TestNewProvider_BackwardCompatible(t *testing.T) {
+	p := NewProvider("test-api-key")
+	if p == nil {
+		t.Fatal("NewProvider(string) returned nil")
+	}
+	if got := p.GetProviderType(); got != provider.ProviderAnthropic {
+		t.Errorf("GetProviderType() = %v, want %v", got, provider.ProviderAnthropic)
+	}
+}
+
+func TestNewProviderWithOptions_EmptyOptions(t *testing.T) {
+	p := NewProviderWithOptions()
+	if p == nil {
+		t.Fatal("NewProviderWithOptions() with no args returned nil")
+	}
+}
+
+func TestWithHeader_MultipleHeaders(t *testing.T) {
+	p := NewProviderWithOptions(
+		WithAPIKey("test-key"),
+		WithHeader("X-Header-1", "value-1"),
+		WithHeader("X-Header-2", "value-2"),
+	)
+	if p == nil {
+		t.Fatal("failed with multiple headers")
+	}
+	_ = p.GetAvailableModels()
+}

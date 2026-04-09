@@ -4,13 +4,13 @@ package provider
 // 常量类型相关的定义
 // ============================================
 
-// ProviderType AI 服务提供商类型
+// ProviderType AI 对话协议类型标识
 type ProviderType string
 
 const (
-	ProviderAnthropic         ProviderType = "anthropic"          // Claude 系列
-	ProviderOpenAIResponses   ProviderType = "openai-responses"   // GPT 系列 (Responses API)
-	ProviderOpenAICompletions ProviderType = "openai-completions" // GPT 系列 (Chat Completions API)
+	ProviderAnthropic         ProviderType = "anthropic"          // Anthropic Messages 协议
+	ProviderOpenAIResponses   ProviderType = "openai-responses"   // OpenAI Responses 协议
+	ProviderOpenAICompletions ProviderType = "openai-completions" // OpenAI Chat Completions 协议
 )
 
 // MessageRole 消息角色

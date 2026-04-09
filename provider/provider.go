@@ -4,20 +4,22 @@ import (
 	"context"
 )
 
-// BaseProvider 是所有具体 AI 服务提供商实现的通用基础结构体，封装了特定于厂商的请求客户端 SDK 实例。
+// BaseProvider 是所有协议适配器实现的通用基础结构体，封装了协议特定的底层客户端实例。
 //
 // 该结构体通过泛型参数 T 允许嵌入不同类型的底层客户端，不支持并发安全的直接修改，
-// 通常作为匿名结构体嵌套在各个具体的提供商实现中以复用公共字段。
+// 通常作为匿名结构体嵌套在各个具体的协议适配器实现中以复用公共字段。
 //
-// Client 请求客户端 SDK，用于与具体的 AI 服务端点进行通信和流式数据交互。
+// Client 底层协议客户端，用于与目标端点进行通信和流式数据交互。
+// 目标端点可以是官方 API、自建网关、代理服务或任何兼容第三方。
 type BaseProvider[T any] struct {
 	Client T `json:"client"` // 请求客户端 SDK
 }
 
-// Provider AI 服务提供商的核心接口
+// Provider AI 对话协议适配器的核心接口
 //
-// 该接口定义了与 AI 模型交互的统一方式，支持多种 AI 服务提供商
-// （如 Anthropic/Claude、OpenAI、DeepSeek、通义千问等）
+// 该接口定义了与 AI 模型交互的统一方式，支持多种 AI 对话协议
+// （如 Anthropic Messages 协议、OpenAI Chat Completions 协议、OpenAI Responses 协议等）。
+// 每个实现可独立配置目标端点，从而对接任意兼容该协议的服务。
 type Provider interface {
 	// Chat 流式对话
 	//

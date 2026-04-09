@@ -262,3 +262,56 @@ func TestResponsesProvider_handleStreamEvent(t *testing.T) {
 		})
 	}
 }
+
+// ==============================
+// Options 模式测试
+// ==============================
+
+func TestNewResponsesProviderWithOptions(t *testing.T) {
+	t.Run("仅 WithAPIKey", func(t *testing.T) {
+		p := NewResponsesProviderWithOptions(WithAPIKey("test-key"))
+		if p == nil {
+			t.Fatal("returned nil")
+		}
+	})
+
+	t.Run("WithAPIKey + WithBaseURL", func(t *testing.T) {
+		p := NewResponsesProviderWithOptions(
+			WithAPIKey("test-key"),
+			WithBaseURL("https://gateway.example.com/v1"),
+		)
+		if p == nil {
+			t.Fatal("with BaseURL returned nil")
+		}
+		_ = p.GetAvailableModels()
+	})
+
+	t.Run("完整选项", func(t *testing.T) {
+		p := NewResponsesProviderWithOptions(
+			WithAPIKey("test-key"),
+			WithBaseURL("https://gateway.example.com/v1"),
+			WithHeader("X-Custom", "value"),
+		)
+		if p == nil {
+			t.Fatal("with full options returned nil")
+		}
+		_ = p.GetAvailableModels()
+	})
+}
+
+func TestNewResponsesProvider_BackwardCompatible(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+	if p == nil {
+		t.Fatal("NewResponsesProvider(string) returned nil")
+	}
+	if got := p.GetProviderType(); got != provider.ProviderOpenAIResponses {
+		t.Errorf("GetProviderType() = %v, want %v", got, provider.ProviderOpenAIResponses)
+	}
+}
+
+func TestNewResponsesProviderWithOptions_EmptyOptions(t *testing.T) {
+	p := NewResponsesProviderWithOptions()
+	if p == nil {
+		t.Fatal("with no args returned nil")
+	}
+}

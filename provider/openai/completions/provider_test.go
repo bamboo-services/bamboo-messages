@@ -336,3 +336,56 @@ func TestCompletions_mapFinishReason(t *testing.T) {
 		})
 	}
 }
+
+// ==============================
+// Options 模式测试
+// ==============================
+
+func TestNewCompletionsProviderWithOptions(t *testing.T) {
+	t.Run("仅 WithAPIKey", func(t *testing.T) {
+		p := NewCompletionsProviderWithOptions(WithAPIKey("test-key"))
+		if p == nil {
+			t.Fatal("returned nil")
+		}
+	})
+
+	t.Run("WithAPIKey + WithBaseURL", func(t *testing.T) {
+		p := NewCompletionsProviderWithOptions(
+			WithAPIKey("test-key"),
+			WithBaseURL("https://ollama.local/v1"),
+		)
+		if p == nil {
+			t.Fatal("with BaseURL returned nil")
+		}
+		_ = p.GetAvailableModels()
+	})
+
+	t.Run("完整选项", func(t *testing.T) {
+		p := NewCompletionsProviderWithOptions(
+			WithAPIKey("test-key"),
+			WithBaseURL("https://ollama.local/v1"),
+			WithHeader("X-Custom", "value"),
+		)
+		if p == nil {
+			t.Fatal("with full options returned nil")
+		}
+		_ = p.GetAvailableModels()
+	})
+}
+
+func TestNewCompletionsProvider_BackwardCompatible(t *testing.T) {
+	p := NewCompletionsProvider("test-api-key")
+	if p == nil {
+		t.Fatal("NewCompletionsProvider(string) returned nil")
+	}
+	if got := p.GetProviderType(); got != provider.ProviderOpenAICompletions {
+		t.Errorf("GetProviderType() = %v, want %v", got, provider.ProviderOpenAICompletions)
+	}
+}
+
+func TestNewCompletionsProviderWithOptions_EmptyOptions(t *testing.T) {
+	p := NewCompletionsProviderWithOptions()
+	if p == nil {
+		t.Fatal("with no args returned nil")
+	}
+}
