@@ -32,6 +32,14 @@ const (
 	FinishReasonToolCalls FinishReason = "tool_calls" // 工具调用
 )
 
+// CompletionResult 非流式调用的完整响应结果
+type CompletionResult struct {
+	Content      string        `json:"content"`                // 文本响应内容
+	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`   // 工具调用列表
+	FinishReason FinishReason  `json:"finish_reason"`          // 结束原因
+	Usage        UsageData     `json:"usage"`                  // Token 用量统计
+}
+
 // ============================================
 // 消息相关结构体
 // ============================================

@@ -36,6 +36,23 @@ type Provider interface {
 	// 这是 Chat 的便捷方法，会自动在 messages 前添加 system 消息
 	ChatWithSystem(ctx context.Context, systemPrompt string, messages []Message, config *ChatConfig) <-chan StreamEvent
 
+	// Complete 同步对话，返回完整响应
+	//
+	// messages: 对话历史（按时间顺序）
+	// config: 请求配置
+	//
+	// 返回完整的 CompletionResult，适用于不需要流式输出的场景
+	Complete(ctx context.Context, messages []Message, config *ChatConfig) (*CompletionResult, error)
+
+	// CompleteWithSystem 带系统提示的同步对话
+	//
+	// systemPrompt: 系统提示词，用于设定 AI 的角色和行为
+	// messages: 对话历史（不含 system 消息）
+	// config: 请求配置
+	//
+	// 这是 Complete 的便捷方法，会自动在 messages 前添加 system 消息
+	CompleteWithSystem(ctx context.Context, systemPrompt string, messages []Message, config *ChatConfig) (*CompletionResult, error)
+
 	// GetProviderType 获取提供商类型
 	//
 	// 返回当前 Provider 的类型标识，用于日志和调试

@@ -9,8 +9,6 @@ import (
 )
 
 // unmarshalEvent 将 JSON 字符串反序列化为 Anthropic 流事件 Union 类型。
-// SDK 的 Union 类型通过 apijson.UnmarshalRoot 填充 JSON.raw 字段，
-// 使 As*() 方法能够正确地从 raw JSON 反序列化为具体变体。
 func unmarshalEvent(t *testing.T, rawJSON string) anthropic.BetaRawMessageStreamEventUnion {
 	t.Helper()
 	var event anthropic.BetaRawMessageStreamEventUnion
@@ -377,6 +375,31 @@ func TestProvider_handleStreamEvent(t *testing.T) {
 			}
 			if tt.check != nil {
 				tt.check(t, result)
+			}
+		})
+	}
+}
+
+// ==============================
+// mapFinishReason 测试
+// ==============================
+
+func TestMapFinishReason(t *testing.T) {
+	tests := []struct {
+		name   string
+		reason anthropic.BetaStopReason
+		want   provider.FinishReason
+	}{
+		{"end_turn", anthropic.BetaStopReasonEndTurn, provider.FinishReasonStop},
+		{"max_tokens", anthropic.BetaStopReasonMaxTokens, provider.FinishReasonLength},
+		{"tool_use", anthropic.BetaStopReasonToolUse, provider.FinishReasonToolCalls},
+		{"unknown", "unknown_reason", provider.FinishReasonStop},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mapFinishReason(tt.reason); got != tt.want {
+				t.Errorf("mapFinishReason(%v) = %v, want %v", tt.reason, got, tt.want)
 			}
 		})
 	}

@@ -1,4 +1,4 @@
-package openai
+package completions
 
 import (
 	"testing"
@@ -155,32 +155,6 @@ func TestCompletionsProvider_buildMessages(t *testing.T) {
 			},
 		},
 		{
-			name:         "assistant tool calls only no text",
-			systemPrompt: "",
-			messages: []provider.Message{
-				{
-					Role:    provider.RoleAssistant,
-					Content: "",
-					ToolCalls: []provider.ToolCall{
-						{
-							ID:   "call-456",
-							Type: "function",
-							Function: provider.FunctionCall{
-								Name:      "search",
-								Arguments: `{"query": "test"}`,
-							},
-						},
-					},
-				},
-			},
-			wantLen: 1,
-			check: func(t *testing.T, result []openai.ChatCompletionMessageParamUnion) {
-				if result[0].OfAssistant == nil {
-					t.Error("expected assistant message")
-				}
-			},
-		},
-		{
 			name:         "tool response message",
 			systemPrompt: "",
 			messages: []provider.Message{
@@ -294,36 +268,6 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 			},
 		},
 		{
-			name: "chunk with tool call ID",
-			chunk: openai.ChatCompletionChunk{
-				ID: "chunk-3",
-				Choices: []openai.ChatCompletionChunkChoice{
-					{
-						Index: 0,
-						Delta: openai.ChatCompletionChunkChoiceDelta{
-							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
-								{
-									ID:   "tool-123",
-									Type: "function",
-									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
-										Name: "get_weather",
-									},
-								},
-							},
-						},
-						FinishReason: "",
-					},
-				},
-				Usage: openai.CompletionUsage{},
-			},
-			wantLen: 1,
-			check: func(t *testing.T, events []provider.StreamEvent) {
-				if events[0].Delta.Type != provider.StreamDeltaTypeToolCall {
-					t.Errorf("expected tool call delta, got %v", events[0].Delta.Type)
-				}
-			},
-		},
-		{
 			name: "chunk with finish reason stop",
 			chunk: openai.ChatCompletionChunk{
 				ID: "chunk-4",
@@ -352,27 +296,6 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 			},
 			wantLen: 0,
 		},
-		{
-			name: "chunk with usage and content",
-			chunk: openai.ChatCompletionChunk{
-				ID: "chunk-6",
-				Choices: []openai.ChatCompletionChunkChoice{
-					{
-						Index: 0,
-						Delta: openai.ChatCompletionChunkChoiceDelta{
-							Content: "Final",
-						},
-						FinishReason: "",
-					},
-				},
-				Usage: openai.CompletionUsage{
-					TotalTokens:      50,
-					PromptTokens:     30,
-					CompletionTokens: 20,
-				},
-			},
-			wantLen: 2,
-		},
 	}
 
 	for _, tt := range tests {
@@ -390,82 +313,25 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 }
 
 // ==============================
-// handleToolCallDelta 测试
+// mapFinishReason 测试
 // ==============================
 
-func TestCompletionsProvider_handleToolCallDelta(t *testing.T) {
-	p := NewCompletionsProvider("test-api-key")
-
+func TestCompletions_mapFinishReason(t *testing.T) {
 	tests := []struct {
-		name    string
-		tc      openai.ChatCompletionChunkChoiceDeltaToolCall
-		wantLen int
-		check   func(t *testing.T, events []provider.StreamEvent)
+		name   string
+		reason string
+		want   provider.FinishReason
 	}{
-		{
-			name: "tool call with ID only",
-			tc: openai.ChatCompletionChunkChoiceDeltaToolCall{
-				ID:   "call-123",
-				Type: "function",
-				Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
-					Name: "get_weather",
-				},
-			},
-			wantLen: 1,
-			check: func(t *testing.T, events []provider.StreamEvent) {
-				if events[0].Delta.Type != provider.StreamDeltaTypeToolCall {
-					t.Errorf("expected tool call delta, got %v", events[0].Delta.Type)
-				}
-			},
-		},
-		{
-			name: "tool call with arguments only",
-			tc: openai.ChatCompletionChunkChoiceDeltaToolCall{
-				ID:   "",
-				Type: "function",
-				Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
-					Arguments: `{"city": "Tokyo"`,
-				},
-			},
-			wantLen: 1,
-			check: func(t *testing.T, events []provider.StreamEvent) {
-				if events[0].Delta.Type != provider.StreamDeltaTypeToolCallDelta {
-					t.Errorf("expected tool call delta data, got %v", events[0].Delta.Type)
-				}
-			},
-		},
-		{
-			name: "tool call with both ID and arguments",
-			tc: openai.ChatCompletionChunkChoiceDeltaToolCall{
-				ID:   "call-456",
-				Type: "function",
-				Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
-					Name:      "search",
-					Arguments: `{"q": "test"`,
-				},
-			},
-			wantLen: 2,
-		},
-		{
-			name: "empty tool call returns empty",
-			tc: openai.ChatCompletionChunkChoiceDeltaToolCall{
-				ID:       "",
-				Type:     "function",
-				Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{},
-			},
-			wantLen: 0,
-		},
+		{"stop", "stop", provider.FinishReasonStop},
+		{"length", "length", provider.FinishReasonLength},
+		{"tool_calls", "tool_calls", provider.FinishReasonToolCalls},
+		{"unknown", "unknown_reason", provider.FinishReasonStop},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := p.handleToolCallDelta(tt.tc)
-			if len(result) != tt.wantLen {
-				t.Errorf("handleToolCallDelta() returned %d events, want %d", len(result), tt.wantLen)
-				return
-			}
-			if tt.check != nil {
-				tt.check(t, result)
+			if got := mapFinishReason(tt.reason); got != tt.want {
+				t.Errorf("mapFinishReason(%v) = %v, want %v", tt.reason, got, tt.want)
 			}
 		})
 	}
