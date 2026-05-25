@@ -16,6 +16,10 @@ func (p *Provider) Complete(ctx context.Context, messages []provider.Message, co
 
 // CompleteWithSystem 带系统提示的非流式对话
 func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
+	if config == nil {
+		config = &provider.ChatConfig{}
+	}
+
 	params := anthropic.BetaMessageNewParams{
 		MaxTokens: config.MaxTokens,
 		Messages:  p.buildMessages(messages),
@@ -35,6 +39,13 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	}
 	if config.TopP != nil {
 		params.TopP = anthropic.Float(*config.TopP)
+	}
+
+	if len(config.Stop) > 0 {
+		params.StopSequences = config.Stop
+	}
+	if tools := buildTools(config.Tools); tools != nil {
+		params.Tools = tools
 	}
 
 	// 调用非流式 SDK 方法

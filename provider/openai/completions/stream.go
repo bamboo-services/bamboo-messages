@@ -44,7 +44,7 @@ func (p *CompletionsProvider) handleChoice(choice openai.ChatCompletionChunkChoi
 	}
 
 	// 处理完成原因
-	if choice.FinishReason == "stop" {
+	if choice.FinishReason != "" {
 		events = append(events, provider.StreamEvent{
 			Type: provider.StreamTypeStop,
 		})

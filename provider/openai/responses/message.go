@@ -37,7 +37,7 @@ func (p *ResponsesProvider) buildInput(systemPrompt string, messages []provider.
 				},
 			})
 		case provider.RoleAssistant:
-			items = append(items, p.buildAssistantItem(msg))
+			items = append(items, p.buildAssistantItem(msg)...)
 		case provider.RoleTool:
 			items = append(items, responses.ResponseInputItemUnionParam{
 				OfFunctionCallOutput: &responses.ResponseInputItemFunctionCallOutputParam{
@@ -56,7 +56,7 @@ func (p *ResponsesProvider) buildInput(systemPrompt string, messages []provider.
 }
 
 // buildAssistantItem 构建助手消息项（支持文本和工具调用）
-func (p *ResponsesProvider) buildAssistantItem(msg provider.Message) responses.ResponseInputItemUnionParam {
+func (p *ResponsesProvider) buildAssistantItem(msg provider.Message) []responses.ResponseInputItemUnionParam {
 	items := make([]responses.ResponseInputItemUnionParam, 0, len(msg.ToolCalls)+1)
 
 	if msg.Content != "" {
@@ -80,8 +80,9 @@ func (p *ResponsesProvider) buildAssistantItem(msg provider.Message) responses.R
 		})
 	}
 
-	if len(items) == 1 {
-		return items[0]
+	if len(items) == 0 {
+		return items
 	}
-	return items[0]
+
+	return items
 }

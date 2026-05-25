@@ -288,6 +288,46 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 			},
 		},
 		{
+			name: "chunk with finish reason tool_calls",
+			chunk: openai.ChatCompletionChunk{
+				ID: "chunk-tc",
+				Choices: []openai.ChatCompletionChunkChoice{
+					{
+						Index:        0,
+						Delta:        openai.ChatCompletionChunkChoiceDelta{},
+						FinishReason: "tool_calls",
+					},
+				},
+				Usage: openai.CompletionUsage{},
+			},
+			wantLen: 1,
+			check: func(t *testing.T, events []provider.StreamEvent) {
+				if events[0].Type != provider.StreamTypeStop {
+					t.Errorf("expected stop event for tool_calls, got %v", events[0].Type)
+				}
+			},
+		},
+		{
+			name: "chunk with finish reason length",
+			chunk: openai.ChatCompletionChunk{
+				ID: "chunk-len",
+				Choices: []openai.ChatCompletionChunkChoice{
+					{
+						Index:        0,
+						Delta:        openai.ChatCompletionChunkChoiceDelta{},
+						FinishReason: "length",
+					},
+				},
+				Usage: openai.CompletionUsage{},
+			},
+			wantLen: 1,
+			check: func(t *testing.T, events []provider.StreamEvent) {
+				if events[0].Type != provider.StreamTypeStop {
+					t.Errorf("expected stop event for length, got %v", events[0].Type)
+				}
+			},
+		},
+		{
 			name: "empty chunk returns nil",
 			chunk: openai.ChatCompletionChunk{
 				ID:      "chunk-5",

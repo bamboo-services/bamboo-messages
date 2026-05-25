@@ -15,6 +15,10 @@ func (p *CompletionsProvider) Complete(ctx context.Context, messages []provider.
 
 // CompleteWithSystem 带系统提示的非流式对话
 func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
+	if config == nil {
+		config = &provider.ChatConfig{}
+	}
+
 	params := openai.ChatCompletionNewParams{
 		Model:    config.Model,
 		Messages: p.buildMessages(systemPrompt, messages),
@@ -30,6 +34,14 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 
 	if config.TopP != nil {
 		params.TopP = openai.Float(*config.TopP)
+	}
+
+	if len(config.Stop) > 0 {
+		params.Stop = buildStop(config.Stop)
+	}
+
+	if tools := buildTools(config.Tools); tools != nil {
+		params.Tools = tools
 	}
 
 	// 调用非流式 SDK 方法

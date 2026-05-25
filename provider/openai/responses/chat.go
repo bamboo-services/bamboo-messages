@@ -21,9 +21,15 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 	go func() {
 		defer close(eventCh)
 
+		if config == nil {
+			config = &provider.ChatConfig{}
+		}
+
 		// 发送流开始事件
-		eventCh <- provider.StreamEvent{
-			Type: provider.StreamTypeStart,
+		select {
+		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
+		case <-ctx.Done():
+			return
 		}
 
 		params := responses.ResponseNewParams{
@@ -35,27 +41,48 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			params.MaxOutputTokens = openai.Int(config.MaxTokens)
 		}
 
+		if config.Temperature != nil {
+			params.Temperature = openai.Float(*config.Temperature)
+		}
+
+		if config.TopP != nil {
+			params.TopP = openai.Float(*config.TopP)
+		}
+
+		if tools := buildTools(config.Tools); tools != nil {
+			params.Tools = tools
+		}
+
 		stream := p.Client.Responses.NewStreaming(ctx, params)
+		defer stream.Close()
 
 		for stream.Next() {
 			event := stream.Current()
-			events := p.handleStreamEvent(event)
+			events := p.handleStreamEvent(ctx, event)
 			for _, e := range events {
-				eventCh <- e
+				select {
+				case eventCh <- e:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 
 		if err := stream.Err(); err != nil {
-			eventCh <- provider.StreamEvent{
+			select {
+			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
 				Err:  xError.NewError(ctx, xError.OperationFailed, "OpenAI 流式对话失败", false, err),
+			}:
+			case <-ctx.Done():
 			}
 			return
 		}
 
 		// 发送完成事件
-		eventCh <- provider.StreamEvent{
-			Type: provider.StreamTypeDone,
+		select {
+		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone}:
+		case <-ctx.Done():
 		}
 	}()
 

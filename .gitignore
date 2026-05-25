@@ -33,3 +33,6 @@ Thumbs.db
 
 # Develop
 develop/
+
+### AI ###
+.sisyphus/

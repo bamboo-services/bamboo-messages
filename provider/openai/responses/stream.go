@@ -13,7 +13,7 @@ import (
 // ==============================
 
 // handleStreamEvent 根据事件类型分发到对应的处理方法
-func (p *ResponsesProvider) handleStreamEvent(event responses.ResponseStreamEventUnion) []provider.StreamEvent {
+func (p *ResponsesProvider) handleStreamEvent(ctx context.Context, event responses.ResponseStreamEventUnion) []provider.StreamEvent {
 	switch event.Type {
 	case "response.created":
 		return p.contentResponseCreated(event)
@@ -30,7 +30,7 @@ func (p *ResponsesProvider) handleStreamEvent(event responses.ResponseStreamEven
 	case "response.completed":
 		return p.contentResponseCompleted(event)
 	case "response.failed":
-		return p.contentResponseFailed(event)
+		return p.contentResponseFailed(ctx, event)
 	case "response.incomplete":
 		return p.contentResponseIncomplete(event)
 	default:
@@ -105,7 +105,7 @@ func (p *ResponsesProvider) contentResponseCompleted(event responses.ResponseStr
 }
 
 // contentResponseFailed 处理响应失败事件
-func (p *ResponsesProvider) contentResponseFailed(event responses.ResponseStreamEventUnion) []provider.StreamEvent {
+func (p *ResponsesProvider) contentResponseFailed(ctx context.Context, event responses.ResponseStreamEventUnion) []provider.StreamEvent {
 	e := event.AsResponseFailed()
 	errMsg := "OpenAI 响应失败"
 	if e.Response.Error.Message != "" {
@@ -113,7 +113,7 @@ func (p *ResponsesProvider) contentResponseFailed(event responses.ResponseStream
 	}
 	return []provider.StreamEvent{{
 		Type: provider.StreamTypeError,
-		Err:  xError.NewError(context.TODO(), xError.OperationFailed, xError.ErrMessage(errMsg), false, nil),
+		Err:  xError.NewError(ctx, xError.OperationFailed, xError.ErrMessage(errMsg), false, nil),
 	}}
 }
 

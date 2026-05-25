@@ -20,9 +20,15 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 	go func() {
 		defer close(eventCh)
 
+		if config == nil {
+			config = &provider.ChatConfig{}
+		}
+
 		// 发送流开始事件
-		eventCh <- provider.StreamEvent{
-			Type: provider.StreamTypeStart,
+		select {
+		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
+		case <-ctx.Done():
+			return
 		}
 
 		params := anthropic.BetaMessageNewParams{
@@ -46,27 +52,43 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			params.TopP = anthropic.Float(*config.TopP)
 		}
 
+		if len(config.Stop) > 0 {
+			params.StopSequences = config.Stop
+		}
+		if tools := buildTools(config.Tools); tools != nil {
+			params.Tools = tools
+		}
+
 		stream := p.Client.Beta.Messages.NewStreaming(ctx, params)
+		defer stream.Close()
 
 		for stream.Next() {
 			event := stream.Current()
 			events := p.handleStreamEvent(event)
 			for _, e := range events {
-				eventCh <- e
+				select {
+				case eventCh <- e:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 
 		if err := stream.Err(); err != nil {
-			eventCh <- provider.StreamEvent{
+			select {
+			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
 				Err:  xError.NewError(ctx, xError.OperationFailed, "Anthropic 流式对话失败", false, err),
+			}:
+			case <-ctx.Done():
 			}
 			return
 		}
 
 		// 发送完成事件
-		eventCh <- provider.StreamEvent{
-			Type: provider.StreamTypeDone,
+		select {
+		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone}:
+		case <-ctx.Done():
 		}
 	}()
 

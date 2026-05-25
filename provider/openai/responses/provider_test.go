@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -246,7 +247,7 @@ func TestResponsesProvider_handleStreamEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			event := unmarshalResponseEvent(t, tt.rawJSON)
-			result := p.handleStreamEvent(event)
+			result := p.handleStreamEvent(context.Background(), event)
 			if len(result) != tt.wantLen {
 				t.Errorf("handleStreamEvent() returned %d events, want %d", len(result), tt.wantLen)
 				return
@@ -313,5 +314,166 @@ func TestNewResponsesProviderWithOptions_EmptyOptions(t *testing.T) {
 	p := NewResponsesProviderWithOptions()
 	if p == nil {
 		t.Fatal("with no args returned nil")
+	}
+}
+
+// ==============================
+// buildAssistantItem 测试
+// ==============================
+
+func TestResponsesProvider_buildAssistantItem(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	tests := []struct {
+		name      string
+		msg       provider.Message
+		wantCount int
+		check     func(t *testing.T, items []responses.ResponseInputItemUnionParam)
+	}{
+		{
+			name: "text-only assistant message",
+			msg: provider.Message{
+				Role:    provider.RoleAssistant,
+				Content: "Hello, how can I help you?",
+			},
+			wantCount: 1,
+			check: func(t *testing.T, items []responses.ResponseInputItemUnionParam) {
+				if items[0].OfMessage == nil {
+					t.Error("expected message item")
+				}
+				if items[0].OfMessage.Role != responses.EasyInputMessageRoleAssistant {
+					t.Error("expected assistant role")
+				}
+			},
+		},
+		{
+			name: "tool-calls-only assistant message (single)",
+			msg: provider.Message{
+				Role: provider.RoleAssistant,
+				ToolCalls: []provider.ToolCall{
+					{
+						ID: "call_123",
+						Function: provider.FunctionCall{
+							Name:      "get_weather",
+							Arguments: `{"city":"Beijing"}`,
+						},
+					},
+				},
+			},
+			wantCount: 1,
+			check: func(t *testing.T, items []responses.ResponseInputItemUnionParam) {
+				if items[0].OfFunctionCall == nil {
+					t.Error("expected function call item")
+				}
+				if items[0].OfFunctionCall.Name != "get_weather" {
+					t.Errorf("expected function name 'get_weather', got '%s'", items[0].OfFunctionCall.Name)
+				}
+			},
+		},
+		{
+			name: "tool-calls-only assistant message (multiple)",
+			msg: provider.Message{
+				Role: provider.RoleAssistant,
+				ToolCalls: []provider.ToolCall{
+					{
+						ID: "call_123",
+						Function: provider.FunctionCall{
+							Name:      "get_weather",
+							Arguments: `{"city":"Beijing"}`,
+						},
+					},
+					{
+						ID: "call_456",
+						Function: provider.FunctionCall{
+							Name:      "get_time",
+							Arguments: `{"timezone":"UTC"}`,
+						},
+					},
+				},
+			},
+			wantCount: 2,
+			check: func(t *testing.T, items []responses.ResponseInputItemUnionParam) {
+				for i, item := range items {
+					if item.OfFunctionCall == nil {
+						t.Errorf("item %d: expected function call item", i)
+					}
+				}
+			},
+		},
+		{
+			name: "mixed text + tool calls",
+			msg: provider.Message{
+				Role:    provider.RoleAssistant,
+				Content: "I'll help you get the weather information.",
+				ToolCalls: []provider.ToolCall{
+					{
+						ID: "call_123",
+						Function: provider.FunctionCall{
+							Name:      "get_weather",
+							Arguments: `{"city":"Shanghai"}`,
+						},
+					},
+					{
+						ID: "call_456",
+						Function: provider.FunctionCall{
+							Name:      "get_time",
+							Arguments: `{"timezone":"Asia/Shanghai"}`,
+						},
+					},
+				},
+			},
+			wantCount: 3,
+			check: func(t *testing.T, items []responses.ResponseInputItemUnionParam) {
+				// First item should be text message
+				if items[0].OfMessage == nil {
+					t.Error("first item should be message")
+				}
+				if items[0].OfMessage.Role != responses.EasyInputMessageRoleAssistant {
+					t.Error("first item should have assistant role")
+				}
+
+				// Remaining items should be function calls
+				for i := 1; i < len(items); i++ {
+					if items[i].OfFunctionCall == nil {
+						t.Errorf("item %d: expected function call", i)
+					}
+				}
+			},
+		},
+		{
+			name: "empty assistant message (no text, no tool calls)",
+			msg: provider.Message{
+				Role:    provider.RoleAssistant,
+				Content: "",
+				ToolCalls: []provider.ToolCall{},
+			},
+			wantCount: 0,
+		},
+		{
+			name: "empty tool calls slice",
+			msg: provider.Message{
+				Role:       provider.RoleAssistant,
+				Content:    "Hello",
+				ToolCalls:  []provider.ToolCall{},
+			},
+			wantCount: 1,
+			check: func(t *testing.T, items []responses.ResponseInputItemUnionParam) {
+				if items[0].OfMessage == nil {
+					t.Error("expected message item")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := p.buildAssistantItem(tt.msg)
+			if len(result) != tt.wantCount {
+				t.Errorf("buildAssistantItem() returned %d items, want %d", len(result), tt.wantCount)
+			}
+			if tt.check != nil {
+				tt.check(t, result)
+			}
+		})
 	}
 }

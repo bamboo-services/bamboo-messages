@@ -16,6 +16,10 @@ func (p *ResponsesProvider) Complete(ctx context.Context, messages []provider.Me
 
 // CompleteWithSystem 带系统提示的非流式对话
 func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
+	if config == nil {
+		config = &provider.ChatConfig{}
+	}
+
 	params := responses.ResponseNewParams{
 		Model: config.Model,
 		Input: p.buildInput(systemPrompt, messages),
@@ -23,6 +27,18 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 
 	if config.MaxTokens > 0 {
 		params.MaxOutputTokens = openai.Int(config.MaxTokens)
+	}
+
+	if config.Temperature != nil {
+		params.Temperature = openai.Float(*config.Temperature)
+	}
+
+	if config.TopP != nil {
+		params.TopP = openai.Float(*config.TopP)
+	}
+
+	if tools := buildTools(config.Tools); tools != nil {
+		params.Tools = tools
 	}
 
 	response, err := p.Client.Responses.New(ctx, params)
@@ -56,7 +72,9 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 	}
 
 	// 设置完成原因
-	if len(result.ToolCalls) > 0 {
+	if response.Status == "incomplete" {
+		result.FinishReason = provider.FinishReasonLength
+	} else if len(result.ToolCalls) > 0 {
 		result.FinishReason = provider.FinishReasonToolCalls
 	} else {
 		result.FinishReason = provider.FinishReasonStop
