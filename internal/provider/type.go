@@ -4,7 +4,10 @@ package provider
 // 常量类型相关的定义
 // ============================================
 
-// ProviderType AI 对话协议类型标识
+// ProviderType AI 对话协议的类型标识。
+//
+// 用于区分不同的 AI 对话协议实现，支持 Anthropic Messages、
+// OpenAI Chat Completions 和 OpenAI Responses 等协议。
 type ProviderType string
 
 const (
@@ -23,7 +26,10 @@ const (
 	ProviderExtraKeyResponseFormat   = "response_format"
 )
 
-// MessageRole 消息角色
+// MessageRole 消息角色。
+//
+// 定义了对话中不同参与者的角色类型，包括系统提示、
+// 用户消息、助手响应和工具响应。
 type MessageRole string
 
 const (
@@ -33,7 +39,10 @@ const (
 	RoleTool      MessageRole = "tool"      // 工具响应
 )
 
-// FinishReason 完成原因
+// FinishReason 完成原因。
+//
+// 表示 AI 对话结束的具体原因，如正常结束、达到最大长度
+// 或触发工具调用等。
 type FinishReason string
 
 const (
@@ -42,7 +51,10 @@ const (
 	FinishReasonToolCalls FinishReason = "tool_calls" // 工具调用
 )
 
-// CompletionResult 非流式调用的完整响应结果
+// CompletionResult 非流式调用的完整响应结果。
+//
+// 包含 AI 模型返回的文本内容、工具调用列表、结束原因
+// 和 Token 用量统计。适用于不需要流式输出的同步请求场景。
 type CompletionResult struct {
 	Content      string        `json:"content"`                // 文本响应内容
 	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`   // 工具调用列表
@@ -54,7 +66,10 @@ type CompletionResult struct {
 // 消息相关结构体
 // ============================================
 
-// Message 对话消息
+// Message 对话消息。
+//
+// 表示对话中的一条消息，包含角色、内容、工具调用信息
+// 和工具响应的调用 ID。
 type Message struct {
 	Role       MessageRole `json:"role"`                   // 消息角色
 	Content    string      `json:"content,omitempty"`      // 消息内容
@@ -62,14 +77,20 @@ type Message struct {
 	ToolCallID string      `json:"tool_call_id,omitempty"` // 工具响应的调用 ID
 }
 
-// ToolCall 工具调用
+// ToolCall 工具调用。
+//
+// 表示 AI 模型发起的工具调用，包含调用 ID、类型
+// 和函数调用详情。
 type ToolCall struct {
 	ID       string       `json:"id"`       // 调用 ID
 	Type     string       `json:"type"`     // 类型，通常为 "function"
 	Function FunctionCall `json:"function"` // 函数调用详情
 }
 
-// FunctionCall 函数调用详情
+// FunctionCall 函数调用详情。
+//
+// 包含函数名称和 JSON 格式的参数，用于描述工具调用的
+// 具体内容。
 type FunctionCall struct {
 	Name      string `json:"name"`      // 函数名
 	Arguments string `json:"arguments"` // JSON 格式的参数
@@ -79,13 +100,18 @@ type FunctionCall struct {
 // 工具定义相关结构体
 // ============================================
 
-// Tool 工具定义
+// Tool 工具定义。
+//
+// 定义了可用工具的类型和函数规格，供 AI 模型在对话中调用。
 type Tool struct {
 	Type     string      `json:"type"`     // 类型，通常为 "function"
 	Function FunctionDef `json:"function"` // 函数定义
 }
 
-// FunctionDef 函数定义
+// FunctionDef 函数定义。
+//
+// 描述函数的名称、描述和参数结构，使用 JSON Schema 格式
+// 定义参数类型和约束。
 type FunctionDef struct {
 	Name        string         `json:"name"`                  // 函数名
 	Description string         `json:"description,omitempty"` // 函数描述
@@ -96,7 +122,11 @@ type FunctionDef struct {
 // 配置相关结构体
 // ============================================
 
-// ThinkingConfig 思考/推理配置，统一 Anthropic Thinking 和 OpenAI Reasoning 参数
+// ThinkingConfig 思考/推理配置。
+//
+// 统一 Anthropic Thinking 和 OpenAI Reasoning 参数，
+// 支持通过 Enabled/BudgetTokens 配置 Anthropic 思考模式，
+// 或通过 ReasoningEffort/Summary 配置 OpenAI 推理模式。
 type ThinkingConfig struct {
 	Enabled         *bool  `json:"enabled,omitempty"`          // 是否启用思考/推理模式
 	BudgetTokens    *int64 `json:"budget_tokens,omitempty"`    // Anthropic: 思考 token 预算
@@ -104,7 +134,10 @@ type ThinkingConfig struct {
 	Summary         string `json:"summary,omitempty"`          // OpenAI Responses: auto/concise/detailed
 }
 
-// ChatConfig 聊天请求配置
+// ChatConfig 聊天请求配置。
+//
+// 包含模型选择、温度参数、Token 限制、工具定义、
+// 思考配置和 Provider 特有参数等完整请求配置。
 type ChatConfig struct {
 	Model          string            `json:"model,omitempty"`          // 模型名称
 	Temperature    *float64          `json:"temperature,omitempty"`    // 温度参数 (0-2)
@@ -117,7 +150,13 @@ type ChatConfig struct {
 	ProviderExtra  map[string]any    `json:"provider_extra,omitempty"`  // Provider 特有参数
 }
 
-// GetExtraFloat64 从 ProviderExtra 中安全获取 float64 值
+// GetExtraFloat64 从 ProviderExtra 中安全获取 float64 值。
+//
+// 参数:
+//   - extra - ProviderExtra 映射表，为 nil 时返回 (0, false)
+//   - key - 要查找的键名
+//
+// 返回值中的 bool 表示是否成功找到并完成类型断言。
 func GetExtraFloat64(extra map[string]any, key string) (float64, bool) {
 	if extra == nil {
 		return 0, false

@@ -3,6 +3,7 @@ package bamboo
 import "github.com/bamboo-services/bamboo-messages/internal/provider"
 
 // ThinkingConfig 思考/推理配置，控制模型的推理行为。
+//
 // 类型别名，指向 provider 层的 ThinkingConfig。
 type ThinkingConfig = provider.ThinkingConfig
 
@@ -12,32 +13,23 @@ type ThinkingConfig = provider.ThinkingConfig
 //   - nil: 未设置，使用服务端默认值
 //   - &0.0: 显式设置为 0
 type RequestConfig struct {
-	// Model 模型名称，如 "claude-sonnet-4-20250514"
-	Model string `json:"model"`
+	Model string `json:"model"` // 模型名称，如 "claude-sonnet-4-20250514"
 
-	// MaxTokens 最大生成 token 数量
-	MaxTokens int64 `json:"max_tokens"`
+	MaxTokens int64 `json:"max_tokens"` // 最大生成 token 数量
 
-	// Temperature 温度参数 (0-2)，控制输出的随机性
-	Temperature *float64 `json:"temperature,omitempty"`
+	Temperature *float64 `json:"temperature,omitempty"` // 温度参数 (0-2)，控制输出的随机性
 
-	// TopP Top-p 采样参数，控制输出的多样性
-	TopP *float64 `json:"top_p,omitempty"`
+	TopP *float64 `json:"top_p,omitempty"` // Top-p 采样参数，控制输出的多样性
 
-	// StopSequences 停止序列列表，模型遇到其中任一序列时停止生成
-	StopSequences []string `json:"stop_sequences,omitempty"`
+	StopSequences []string `json:"stop_sequences,omitempty"` // 停止序列列表，模型遇到其中任一序列时停止生成
 
-	// Tools 可用工具列表
-	Tools []Tool `json:"tools,omitempty"`
+	Tools []Tool `json:"tools,omitempty"` // 可用工具列表
 
-	// Metadata 附加元数据，用于传递请求级别的自定义信息
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"` // 附加元数据，用于传递请求级别的自定义信息
 
-	// ThinkingConfig 思考/推理配置
-	ThinkingConfig *ThinkingConfig `json:"thinking_config,omitempty"`
+	ThinkingConfig *ThinkingConfig `json:"thinking_config,omitempty"` // 思考/推理配置
 
-	// ProviderExtra Provider 特有参数，用于传递各 Provider 独有的扩展配置
-	ProviderExtra map[string]any `json:"provider_extra,omitempty"`
+	ProviderExtra map[string]any `json:"provider_extra,omitempty"` // Provider 特有参数，用于传递各 Provider 独有的扩展配置
 }
 
 // PtrFloat64 返回 float64 指针，用于设置 RequestConfig 的可选字段。

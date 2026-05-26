@@ -27,6 +27,9 @@ type BambooClient interface {
 }
 
 // client SDK 客户端实现，封装 provider.Provider 进行协议适配。
+//
+// client 内部持有 provider.Provider 实例，将上层 BambooMessage / RequestConfig
+// 转换为 provider 层的类型，并将 provider 层的响应结果转换回 bamboo 层的类型。
 type client struct {
 	provider     provider.Provider
 	defaultModel string

@@ -4,7 +4,10 @@ import (
 	"github.com/openai/openai-go/v3"
 )
 
-// GetAvailableModels 获取可用模型列表
+// GetAvailableModels 获取可用模型列表。
+//
+// 返回 OpenAI Responses 协议支持的模型名称列表，
+// 包括 GPT-4.1、GPT-4o、O3、O4 等系列模型。
 func (p *ResponsesProvider) GetAvailableModels() []string {
 	return []string{
 		openai.ChatModelGPT4o,

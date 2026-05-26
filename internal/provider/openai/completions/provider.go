@@ -6,24 +6,32 @@ import (
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
 
-// CompletionsProvider OpenAI Chat Completions 协议适配器实现
+// CompletionsProvider OpenAI Chat Completions 协议适配器实现。
+//
+// 基于泛型基座 provider.BaseProvider，封装 OpenAI Chat Completions SDK Client。
 type CompletionsProvider provider.BaseProvider[openai.Client]
 
 // ============================================
 // Options 模式 — Functional Options
 // ============================================
 
-// Option 配置 CompletionsProvider 的函数选项
+// Option 配置 CompletionsProvider 的函数选项。
+//
+// 通过 WithAPIKey、WithBaseURL、WithHeader 等选项函数应用配置。
 type Option func(*config)
 
-// config Provider 运行时配置
+// config Provider 运行时配置。
+//
+// 存储 API Key、BaseURL、Headers 等配置项。
 type config struct {
 	apiKey  string
 	baseURL string
 	headers map[string]string
 }
 
-// WithAPIKey 设置 API 密钥
+// WithAPIKey 设置 API 密钥。
+//
+// 用于向 OpenAI API 进行身份验证。
 func WithAPIKey(key string) Option {
 	return func(c *config) { c.apiKey = key }
 }
@@ -54,14 +62,14 @@ func WithHeader(key, value string) Option {
 // 构造函数
 // ============================================
 
-// NewCompletionsProvider 创建 OpenAI Chat Completions 协议适配器实例（最简形式）
+// NewCompletionsProvider 创建 OpenAI Chat Completions 协议适配器实例（最简形式）。
 //
 // 仅指定 API Key，默认连接 SDK 默认端点。
 func NewCompletionsProvider(apiKey string) *CompletionsProvider {
 	return NewCompletionsProviderWithOptions(WithAPIKey(apiKey))
 }
 
-// NewCompletionsProviderWithOptions 创建 OpenAI Chat Completions 协议适配器实例（Options 模式）
+// NewCompletionsProviderWithOptions 创建 OpenAI Chat Completions 协议适配器实例（Options 模式）。
 //
 // 支持完整的配置选项，包括自定义 BaseURL、Headers 等。
 func NewCompletionsProviderWithOptions(opts ...Option) *CompletionsProvider {
@@ -94,7 +102,9 @@ func applyOptions(opts ...Option) *config {
 	return cfg
 }
 
-// GetProviderType 获取协议类型标识
+// GetProviderType 获取协议类型标识。
+//
+// 返回 provider.ProviderOpenAICompletions 常量，标识当前使用的协议类型。
 func (p *CompletionsProvider) GetProviderType() provider.ProviderType {
 	return provider.ProviderOpenAICompletions
 }

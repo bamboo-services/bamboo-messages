@@ -1,6 +1,8 @@
 package bamboo
 
 // StreamEventType 流事件类型标识。
+//
+// 用于标识流式传输过程中的不同事件类型，如消息开始、内容块增量、消息结束等。
 type StreamEventType string
 
 const (
@@ -30,6 +32,8 @@ const (
 )
 
 // StreamDeltaType 流增量数据类型标识。
+//
+// 用于标识不同类型的流增量数据，如文本增量、思考过程增量、工具调用参数增量等。
 type StreamDeltaType string
 
 const (
@@ -47,30 +51,24 @@ const (
 )
 
 // StreamDelta 流增量数据，用于内容块增量事件中携带具体的增量内容。
+//
+// 不同增量类型对应不同字段：文本增量使用 Text 字段、思考过程增量使用 Thinking 字段、
+// 工具调用参数增量使用 PartialJSON 字段、思考签名增量使用 Signature 字段。
 type StreamDelta struct {
-	// Type 增量类型
-	Type StreamDeltaType `json:"type"`
-
-	// Text 文本增量内容（Type 为 DeltaTextDelta 时使用）
-	Text string `json:"text,omitempty"`
-
-	// Thinking 思考过程增量内容（Type 为 DeltaThinkingDelta 时使用）
-	Thinking string `json:"thinking,omitempty"`
-
-	// Signature 思考签名增量（Type 为 DeltaSignature 时使用）
-	Signature string `json:"signature,omitempty"`
-
-	// PartialJSON 工具调用参数增量（Type 为 DeltaInputJSON 时使用）
-	PartialJSON string `json:"partial_json,omitempty"`
+	Type        StreamDeltaType `json:"type"`                 // 增量类型
+	Text        string          `json:"text,omitempty"`       // 文本增量内容（Type 为 DeltaTextDelta 时使用）
+	Thinking    string          `json:"thinking,omitempty"`   // 思考过程增量内容（Type 为 DeltaThinkingDelta 时使用）
+	Signature   string          `json:"signature,omitempty"`  // 思考签名增量（Type 为 DeltaSignature 时使用）
+	PartialJSON string          `json:"partial_json,omitempty"` // 工具调用参数增量（Type 为 DeltaInputJSON 时使用）
 }
 
 // MessageDelta 消息增量，用于 message_delta 事件中携带停止原因和用量统计。
+//
+// 在消息传输结束时触发，提供完整的停止原因（如正常结束、达到最大 token 数、工具调用等）
+// 和最终的 Token 用量统计。
 type MessageDelta struct {
-	// StopReason 停止原因
-	StopReason FinishReason `json:"stop_reason"`
-
-	// StopSequence 触发停止的序列（可选）
-	StopSequence string `json:"stop_sequence,omitempty"`
+	StopReason   FinishReason `json:"stop_reason"`          // 停止原因
+	StopSequence string       `json:"stop_sequence,omitempty"` // 触发停止的序列（可选）
 }
 
 // StreamEvent 流事件，由流式对话的 channel 逐步返回。
@@ -88,24 +86,11 @@ type MessageDelta struct {
 // Delta 字段使用 any 类型以兼容 StreamDelta 和 MessageDelta 两种类型，
 // 调用方可通过类型断言获取具体类型。
 type StreamEvent struct {
-	// Type 事件类型
-	Type StreamEventType `json:"type"`
-
-	// Message 完整消息（仅 message_start 事件使用）
-	Message *BambooMessage `json:"message,omitempty"`
-
-	// Index 内容块索引（content_block_start/delta/stop 事件使用）
-	Index int `json:"index,omitempty"`
-
-	// ContentBlock 内容块（仅 content_block_start 事件使用）
-	ContentBlock *ContentBlock `json:"content_block,omitempty"`
-
-	// Delta 增量数据，可为 *StreamDelta 或 *MessageDelta（通过 any 兼容两种类型）
-	Delta any `json:"delta,omitempty"`
-
-	// Usage Token 用量统计（message_start 和 message_delta 事件使用）
-	Usage *Usage `json:"usage,omitempty"`
-
-	// Error 错误详情（仅 error 事件使用）
-	Error *BambooError `json:"error,omitempty"`
+	Type         StreamEventType `json:"type"`                    // 事件类型
+	Message      *BambooMessage  `json:"message,omitempty"`       // 完整消息（仅 message_start 事件使用）
+	Index        int             `json:"index,omitempty"`         // 内容块索引（content_block_start/delta/stop 事件使用）
+	ContentBlock *ContentBlock   `json:"content_block,omitempty"` // 内容块（仅 content_block_start 事件使用）
+	Delta        any             `json:"delta,omitempty"`         // 增量数据，可为 *StreamDelta 或 *MessageDelta（通过 any 兼容两种类型）
+	Usage        *Usage          `json:"usage,omitempty"`         // Token 用量统计（message_start 和 message_delta 事件使用）
+	Error        *BambooError    `json:"error,omitempty"`         // 错误详情（仅 error 事件使用）
 }

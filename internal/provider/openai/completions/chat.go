@@ -9,12 +9,17 @@ import (
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
 
-// Chat 流式对话
+// Chat 流式对话。
+//
+// 将统一的 provider.Message 转换为 OpenAI Chat Completions 格式，
+// 通过底层 SDK 发起流式请求，返回 StreamEvent channel。
 func (p *CompletionsProvider) Chat(ctx context.Context, messages []provider.Message, config *provider.ChatConfig) <-chan provider.StreamEvent {
 	return p.ChatWithSystem(ctx, "", messages, config)
 }
 
-// ChatWithSystem 带系统提示的流式对话
+// ChatWithSystem 带系统提示的流式对话。
+//
+// 在消息列表前插入系统提示，然后发起流式对话。
 func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) <-chan provider.StreamEvent {
 	eventCh := make(chan provider.StreamEvent, 64)
 

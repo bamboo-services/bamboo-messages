@@ -6,7 +6,10 @@ import (
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
 
-// buildTools 将内部工具定义转换为 OpenAI Responses SDK 工具参数格式
+// buildTools 将内部工具定义转换为 OpenAI Responses SDK 工具参数格式。
+//
+// 将 provider.Tool 数组转换为 openai-go/v3 的 ToolUnionParam 列表，
+// 目前仅支持 function 类型的工具。
 func buildTools(tools []provider.Tool) []responses.ToolUnionParam {
 	if len(tools) == 0 {
 		return nil

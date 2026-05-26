@@ -10,7 +10,9 @@ import (
 // 内部方法
 // ==============================
 
-// buildMessages 将内部消息格式转换为 OpenAI Chat Completions API 消息格式
+// buildMessages 将内部消息格式转换为 OpenAI Chat Completions API 消息格式。
+//
+// 将 provider.Message 映射为 OpenAI SDK 的 System/User/Assistant/Tool 消息。
 func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []provider.Message) []openai.ChatCompletionMessageParamUnion {
 	result := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages)+1)
 
@@ -32,7 +34,9 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 	return result
 }
 
-// buildAssistantMessage 构建助手消息（支持文本和工具调用）
+// buildAssistantMessage 构建助手消息（支持文本和工具调用）。
+//
+// 将 provider.Message 映射为 OpenAI SDK 的 Assistant 消息，包含 Content 和 ToolCalls。
 func (p *CompletionsProvider) buildAssistantMessage(msg provider.Message) openai.ChatCompletionMessageParamUnion {
 	assistantMsg := openai.ChatCompletionAssistantMessageParam{
 		ToolCalls: []openai.ChatCompletionMessageToolCallUnionParam{},

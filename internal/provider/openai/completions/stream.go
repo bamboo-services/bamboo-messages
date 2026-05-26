@@ -7,7 +7,9 @@ import (
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
 
-// handleChunk 处理单个 ChatCompletionChunk，提取 delta 数据转换为统一事件
+// handleChunk 处理单个 ChatCompletionChunk，提取 delta 数据转换为统一事件。
+//
+// 解析 usage 和 choices 数据，调用 handleChoice 处理每个 choice。
 func (p *CompletionsProvider) handleChunk(chunk openai.ChatCompletionChunk, textBlockStarted *bool, thinkingBlockStarted *bool) []provider.StreamEvent {
 	var events []provider.StreamEvent
 
@@ -27,7 +29,9 @@ func (p *CompletionsProvider) handleChunk(chunk openai.ChatCompletionChunk, text
 	return events
 }
 
-// handleChoice 处理单个 choice 的 delta 数据
+// handleChoice 处理单个 choice 的 delta 数据。
+//
+// 提取 reasoning_content、文本内容和工具调用增量，合成 BlockStart 事件。
 func (p *CompletionsProvider) handleChoice(choice openai.ChatCompletionChunkChoice, textBlockStarted *bool, thinkingBlockStarted *bool) []provider.StreamEvent {
 	delta := choice.Delta
 	var events []provider.StreamEvent
@@ -81,7 +85,9 @@ func (p *CompletionsProvider) handleChoice(choice openai.ChatCompletionChunkChoi
 	return events
 }
 
-// handleToolCallDelta 处理工具调用增量数据
+// handleToolCallDelta 处理工具调用增量数据。
+//
+// 提取工具 ID、函数名称和参数增量，转换为统一的 ToolCallDelta 事件。
 func (p *CompletionsProvider) handleToolCallDelta(tc openai.ChatCompletionChunkChoiceDeltaToolCall) []provider.StreamEvent {
 	var events []provider.StreamEvent
 

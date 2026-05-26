@@ -12,7 +12,10 @@ import (
 // 流式事件处理
 // ==============================
 
-// handleStreamEvent 根据事件类型分发到对应的处理方法
+// handleStreamEvent 根据事件类型分发到对应的处理方法。
+//
+// 接收 OpenAI Responses SSE 事件，根据事件类型调用对应的处理函数，
+// 返回统一格式的 StreamEvent 列表。
 func (p *ResponsesProvider) handleStreamEvent(ctx context.Context, event responses.ResponseStreamEventUnion, textBlockStarted *bool, thinkingBlockStarted *bool) []provider.StreamEvent {
 	switch event.Type {
 	case "response.created":
@@ -38,13 +41,19 @@ func (p *ResponsesProvider) handleStreamEvent(ctx context.Context, event respons
 	}
 }
 
-// contentResponseCreated 处理响应创建事件
+// contentResponseCreated 处理响应创建事件。
+//
+// OpenAI Responses 响应创建时触发，已在 ChatWithSystem 中发送 StreamTypeStart，
+// 此处无需额外处理。
 func (p *ResponsesProvider) contentResponseCreated(_ responses.ResponseStreamEventUnion) []provider.StreamEvent {
 	// 响应创建，已在 ChatWithSystem 中发送 StreamTypeStart
 	return nil
 }
 
-// contentOutputItemAdded 处理输出项添加事件
+// contentOutputItemAdded 处理输出项添加事件。
+//
+// 当新输出项（如 function_call）被添加到响应时触发，
+// 返回对应工具调用开始的 StreamEvent。
 func (p *ResponsesProvider) contentOutputItemAdded(event responses.ResponseStreamEventUnion) []provider.StreamEvent {
 	e := event.AsResponseOutputItemAdded()
 	switch e.Item.Type {
@@ -58,7 +67,10 @@ func (p *ResponsesProvider) contentOutputItemAdded(event responses.ResponseStrea
 	}
 }
 
-// contentOutputTextDelta 处理文本输出增量事件
+// contentOutputTextDelta 处理文本输出增量事件。
+//
+// 处理普通文本增量，首次文本增量时合成 BlockStart 事件，
+// 确保与 Anthropic 协议的一致性。
 func (p *ResponsesProvider) contentOutputTextDelta(event responses.ResponseStreamEventUnion, textBlockStarted *bool) []provider.StreamEvent {
 	e := event.AsResponseOutputTextDelta()
 
@@ -83,7 +95,10 @@ func (p *ResponsesProvider) contentOutputTextDelta(event responses.ResponseStrea
 	}}
 }
 
-// contentReasoningTextDelta 处理推理文本增量事件
+// contentReasoningTextDelta 处理推理文本增量事件。
+//
+// 处理 Reasoning/Thinking 过程的文本增量，首次推理增量时合成 BlockStart 事件，
+// 确保流式事件的一致性。
 func (p *ResponsesProvider) contentReasoningTextDelta(event responses.ResponseStreamEventUnion, thinkingBlockStarted *bool) []provider.StreamEvent {
 	e := event.AsResponseReasoningTextDelta()
 
@@ -108,7 +123,9 @@ func (p *ResponsesProvider) contentReasoningTextDelta(event responses.ResponseSt
 	}}
 }
 
-// contentFunctionCallDelta 处理函数调用参数增量事件
+// contentFunctionCallDelta 处理函数调用参数增量事件。
+//
+// 处理工具调用参数的流式增量，返回包含参数片段的 StreamEvent。
 func (p *ResponsesProvider) contentFunctionCallDelta(event responses.ResponseStreamEventUnion) []provider.StreamEvent {
 	e := event.AsResponseFunctionCallArgumentsDelta()
 	return []provider.StreamEvent{{
@@ -117,13 +134,17 @@ func (p *ResponsesProvider) contentFunctionCallDelta(event responses.ResponseStr
 	}}
 }
 
-// contentFunctionCallDone 处理函数调用完成事件
+// contentFunctionCallDone 处理函数调用完成事件。
+//
+// 当工具调用参数传输完成时触发，OpenAI Responses 协议中此事件无需特殊处理。
 func (p *ResponsesProvider) contentFunctionCallDone(_ responses.ResponseStreamEventUnion) []provider.StreamEvent {
 	// 函数调用完成，无需特殊处理
 	return nil
 }
 
-// contentResponseCompleted 处理响应完成事件（包含 usage）
+// contentResponseCompleted 处理响应完成事件（包含 usage）。
+//
+// 当 OpenAI 响应完成时触发，提取 Token 用量信息并返回 UsageDelta 事件。
 func (p *ResponsesProvider) contentResponseCompleted(event responses.ResponseStreamEventUnion) []provider.StreamEvent {
 	e := event.AsResponseCompleted()
 	usage := e.Response.Usage
@@ -136,7 +157,9 @@ func (p *ResponsesProvider) contentResponseCompleted(event responses.ResponseStr
 	return nil
 }
 
-// contentResponseFailed 处理响应失败事件
+// contentResponseFailed 处理响应失败事件。
+//
+// 当 OpenAI 请求失败时触发，包装错误信息并返回 ErrorEvent。
 func (p *ResponsesProvider) contentResponseFailed(ctx context.Context, event responses.ResponseStreamEventUnion) []provider.StreamEvent {
 	e := event.AsResponseFailed()
 	errMsg := "OpenAI 响应失败"
@@ -149,7 +172,9 @@ func (p *ResponsesProvider) contentResponseFailed(ctx context.Context, event res
 	}}
 }
 
-// contentResponseIncomplete 处理响应未完成事件
+// contentResponseIncomplete 处理响应未完成事件。
+//
+// 当响应因长度限制等原因未完成时触发，发送停止事件结束流。
 func (p *ResponsesProvider) contentResponseIncomplete(_ responses.ResponseStreamEventUnion) []provider.StreamEvent {
 	// 响应未完成，发送停止事件
 	return []provider.StreamEvent{{

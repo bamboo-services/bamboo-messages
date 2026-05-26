@@ -6,7 +6,9 @@ import (
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
 
-// buildTools 将内部工具定义转换为 OpenAI Completions SDK 工具参数格式
+// buildTools 将内部工具定义转换为 OpenAI Completions SDK 工具参数格式。
+//
+// 将 provider.Tool 映射为 OpenAI SDK 的 FunctionTool，仅支持 function 类型。
 func buildTools(tools []provider.Tool) []openai.ChatCompletionToolUnionParam {
 	if len(tools) == 0 {
 		return nil
@@ -24,7 +26,9 @@ func buildTools(tools []provider.Tool) []openai.ChatCompletionToolUnionParam {
 	return result
 }
 
-// buildStop 将停止词列表转换为 OpenAI Completions SDK Stop 参数格式
+// buildStop 将停止词列表转换为 OpenAI Completions SDK Stop 参数格式。
+//
+// 将字符串数组包装为 ChatCompletionNewParamsStopUnion。
 func buildStop(stop []string) openai.ChatCompletionNewParamsStopUnion {
 	if len(stop) == 0 {
 		return openai.ChatCompletionNewParamsStopUnion{}

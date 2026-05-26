@@ -6,24 +6,35 @@ import (
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
 
-// ResponsesProvider OpenAI Responses 协议适配器实现
+// ResponsesProvider OpenAI Responses 协议适配器实现。
+//
+// 基于 openai-go/v3 SDK，提供流式和非流式对话能力，
+// 支持自定义端点、请求头、Thinking/Reasoning 参数等高级特性。
 type ResponsesProvider provider.BaseProvider[openai.Client]
 
 // ============================================
 // Options 模式 — Functional Options
 // ============================================
 
-// Option 配置 ResponsesProvider 的函数选项
+// Option 配置 ResponsesProvider 的函数选项。
+//
+// 用于 Functional Options 模式构造 ResponsesProvider 实例，
+// 支持设置 API 密钥、自定义端点、附加请求头等配置。
 type Option func(*config)
 
-// config Provider 运行时配置
+// config Provider 运行时配置。
+//
+// 保存 ResponsesProvider 的配置信息，
+// 包括 API 密钥、自定义基础 URL 和附加请求头。
 type config struct {
 	apiKey  string
 	baseURL string
-headers map[string]string
+	headers map[string]string
 }
 
-// WithAPIKey 设置 API 密钥
+// WithAPIKey 设置 API 密钥。
+//
+// 用于 OpenAI 官方 API 认证，或兼容端点的密钥认证。
 func WithAPIKey(key string) Option {
 	return func(c *config) { c.apiKey = key }
 }
@@ -85,7 +96,9 @@ func NewResponsesProviderWithOptions(opts ...Option) *ResponsesProvider {
 	}
 }
 
-// applyOptions 将选项列表应用到默认配置
+// applyOptions 将选项列表应用到默认配置。
+//
+// 按顺序应用所有 Option 函数到初始配置，返回最终配置实例。
 func applyOptions(opts ...Option) *config {
 	cfg := &config{}
 	for _, opt := range opts {
@@ -94,7 +107,9 @@ func applyOptions(opts ...Option) *config {
 	return cfg
 }
 
-// GetProviderType 获取协议类型标识
+// GetProviderType 获取协议类型标识。
+//
+// 返回 provider.ProviderOpenAIResponses，标识此 Provider 使用 OpenAI Responses 协议。
 func (p *ResponsesProvider) GetProviderType() provider.ProviderType {
 	return provider.ProviderOpenAIResponses
 }

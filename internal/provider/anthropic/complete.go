@@ -10,12 +10,19 @@ import (
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
 
-// Complete 非流式对话
+// Complete 非流式对话。
+//
+// 无系统提示的非流式对话，内部调用 CompleteWithSystem 并传入空 systemPrompt。
+// 同步返回完整响应和可能的错误。
 func (p *Provider) Complete(ctx context.Context, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
 	return p.CompleteWithSystem(ctx, "", messages, config)
 }
 
-// CompleteWithSystem 带系统提示的非流式对话
+// CompleteWithSystem 带系统提示的非流式对话。
+//
+// 将统一 provider.Message 转换为 Anthropic 协议格式，
+// 通过底层 SDK 发起同步请求，返回 CompletionResult。
+// 支持系统提示、温度、TopP、Stop 序列、工具调用、Thinking 配置、TopK、ToolChoice 等参数。
 func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
 	if config == nil {
 		config = &provider.ChatConfig{}
@@ -113,7 +120,9 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	return result, nil
 }
 
-// mapFinishReason 将 Anthropic 停止原因映射为统一的 FinishReason
+// mapFinishReason 将 Anthropic 停止原因映射为统一的 FinishReason。
+//
+// Anthropic: end_turn → Stop, max_tokens → Length, tool_use → ToolCalls，其他默认为 Stop。
 func mapFinishReason(reason anthropic.BetaStopReason) provider.FinishReason {
 	switch reason {
 	case anthropic.BetaStopReasonEndTurn:

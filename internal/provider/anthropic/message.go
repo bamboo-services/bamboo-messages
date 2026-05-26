@@ -9,7 +9,12 @@ import (
 // 内部方法
 // ==============================
 
-// buildMessages 将内部消息格式转换为 Anthropic SDK 消息格式
+// buildMessages 将内部消息格式转换为 Anthropic SDK 消息格式。
+//
+// 根据 Role 构建对应的 Anthropic BetaMessageParam：
+// - RoleUser: NewBetaUserMessage(BetaTextBlock)
+// - RoleAssistant: 支持普通文本和工具调用，工具调用时需包含 text 和 tool_use blocks
+// - RoleTool: NewBetaUserMessage(BetaToolResultBlock)
 func (p *Provider) buildMessages(messages []provider.Message) []anthropic.BetaMessageParam {
 	result := make([]anthropic.BetaMessageParam, 0, len(messages))
 	for _, msg := range messages {

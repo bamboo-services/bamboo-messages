@@ -5,7 +5,9 @@ import (
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
 
-// buildTools 将内部工具定义转换为 Anthropic SDK 工具参数格式
+// buildTools 将内部工具定义转换为 Anthropic SDK 工具参数格式。
+//
+// 仅转换 type="function" 的工具，构建 BetaToolParam 包含 name、description、input_schema。
 func buildTools(tools []provider.Tool) []anthropic.BetaToolUnionParam {
 	if len(tools) == 0 {
 		return nil

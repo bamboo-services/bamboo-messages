@@ -6,24 +6,32 @@ import (
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
 
-// Provider Anthropic Messages 协议适配器实现
+// Provider Anthropic Messages 协议适配器实现。
+//
+// 类型别名自 BaseProvider，嵌入 Anthropic SDK Client。
 type Provider provider.BaseProvider[anthropic.Client]
 
 // ============================================
 // Options 模式 — Functional Options
 // ============================================
 
-// Option 配置 Provider 的函数选项
+// Option 配置 Provider 的函数选项。
+//
+// 支持配置 API Key、BaseURL、Headers 等。
 type Option func(*config)
 
-// config Provider 运行时配置
+// config Provider 运行时配置。
+//
+// 存储 API Key、BaseURL、自定义 Headers 等配置。
 type config struct {
 	apiKey  string
 	baseURL string
 	headers map[string]string
 }
 
-// WithAPIKey 设置 API 密钥
+// WithAPIKey 设置 API 密钥。
+//
+// 用于 Anthropic API 认证。
 func WithAPIKey(key string) Option {
 	return func(c *config) { c.apiKey = key }
 }
@@ -40,7 +48,9 @@ func WithBaseURL(url string) Option {
 	return func(c *config) { c.baseURL = url }
 }
 
-// WithHeader 添加自定义 HTTP 请求头
+// WithHeader 添加自定义 HTTP 请求头。
+//
+// 可用于传递追踪 ID、认证 token 等自定义头。
 func WithHeader(key, value string) Option {
 	return func(c *config) {
 		if c.headers == nil {
@@ -87,7 +97,9 @@ func NewProviderWithOptions(opts ...Option) *Provider {
 	}
 }
 
-// applyOptions 将选项列表应用到默认配置
+// applyOptions 将选项列表应用到默认配置。
+//
+// 创建空 config，遍历所有 Option 并应用。
 func applyOptions(opts ...Option) *config {
 	cfg := &config{}
 	for _, opt := range opts {
@@ -96,7 +108,9 @@ func applyOptions(opts ...Option) *config {
 	return cfg
 }
 
-// GetProviderType 获取协议类型标识
+// GetProviderType 获取协议类型标识。
+//
+// 返回 ProviderAnthropic 常量，用于识别协议类型。
 func (p *Provider) GetProviderType() provider.ProviderType {
 	return provider.ProviderAnthropic
 }

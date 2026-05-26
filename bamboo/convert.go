@@ -11,6 +11,8 @@ import (
 )
 
 // finishReasonMap provider.FinishReason → bamboo.FinishReason 映射表。
+//
+// 用于将底层 provider 的完成原因映射为上层 bamboo 的标准完成原因。
 var finishReasonMap = map[provider.FinishReason]FinishReason{
 	provider.FinishReasonStop:      FinishReasonEndTurn,
 	provider.FinishReasonLength:    FinishReasonMaxTokens,
@@ -18,7 +20,9 @@ var finishReasonMap = map[provider.FinishReason]FinishReason{
 }
 
 // messagesToProvider 将 bamboo.BambooMessage 列表转换为 provider.Message 列表。
-// tool_result 消息会被拆分为独立的 Role=tool 消息；image/document 当前不支持。
+//
+// tool_result 消息会被拆分为独立的 Role=tool 消息；
+// image/document 类型当前不支持，遇到时会返回错误。
 func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 	var result []provider.Message
 	for _, msg := range msgs {
@@ -83,6 +87,9 @@ func providerRole(role MessageRole) provider.MessageRole {
 }
 
 // configToProvider 将 bamboo.RequestConfig 转换为 provider.ChatConfig。
+//
+// 复制所有公共字段（Model, MaxTokens, Temperature, TopP, Stop, Tools, Metadata），
+// 并透传 ThinkingConfig 和 ProviderExtra。
 func configToProvider(cfg *RequestConfig) *provider.ChatConfig {
 	if cfg == nil {
 		return nil
@@ -101,6 +108,9 @@ func configToProvider(cfg *RequestConfig) *provider.ChatConfig {
 }
 
 // toolsToProvider 将 bamboo.Tool 列表转换为 provider.Tool 列表。
+//
+// 将每个 bamboo.Tool 转换为 provider.Tool，类型固定为 "function"，
+// 函数定义包含名称、描述和 JSON Schema 参数。
 func toolsToProvider(tools []Tool) []provider.Tool {
 	if len(tools) == 0 {
 		return nil
@@ -145,6 +155,9 @@ func buildParameters(schema InputSchema) map[string]any {
 }
 
 // resultToResponse 将 provider.CompletionResult 转换为 bamboo.Response。
+//
+// 生成唯一的 ID 和 RequestID，填充 Type / Role / StopReason / Usage /
+// ProviderType / CreatedAt 等字段，将工具调用转换为 ToolUse 类型的 ContentBlock。
 func resultToResponse(result *provider.CompletionResult, providerType string) *Response {
 	if result == nil {
 		return nil
@@ -196,6 +209,9 @@ type StreamConverter struct {
 func NewStreamConverter() *StreamConverter { return &StreamConverter{} }
 
 // Convert 将单个 provider.StreamEvent 转换为 bamboo.StreamEvent 列表。
+//
+// 根据事件类型路由到不同的处理方法，自动管理内容块索引
+// 和 BlockStart 状态追踪。
 func (sc *StreamConverter) Convert(event provider.StreamEvent) []StreamEvent {
 	switch event.Type {
 	case provider.StreamTypeStart:

@@ -10,12 +10,18 @@ import (
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
 
-// Complete 非流式对话
+// Complete 非流式对话。
+//
+// 将统一的 provider.Message 转换为 OpenAI Responses 格式，
+// 通过底层 SDK 发起同步请求，返回完整响应结果和错误信息。
 func (p *ResponsesProvider) Complete(ctx context.Context, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
 	return p.CompleteWithSystem(ctx, "", messages, config)
 }
 
-// CompleteWithSystem 带系统提示的非流式对话
+// CompleteWithSystem 带系统提示的非流式对话。
+//
+// 在消息前插入系统提示，然后调用 OpenAI Responses API 发起同步请求，
+// 返回包含文本内容、工具调用、Token 用量等信息的完整结果。
 func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
 	if config == nil {
 		config = &provider.ChatConfig{}

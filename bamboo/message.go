@@ -1,6 +1,8 @@
 package bamboo
 
 // MessageRole 消息角色类型，标识消息发送方的身份。
+//
+// 用于区分用户发送的消息和 AI 助手生成的响应消息。
 type MessageRole string
 
 const (
@@ -16,14 +18,13 @@ const (
 // 一条消息可包含多个不同类型的内容块（文本、图片、工具调用等），
 // 以支持多模态和工具交互场景。
 type BambooMessage struct {
-	// Role 消息发送方角色
-	Role MessageRole `json:"role"`
-
-	// Content 消息内容块列表
-	Content []ContentBlock `json:"content"`
+	Role    MessageRole    `json:"role"`    // 消息发送方角色
+	Content []ContentBlock `json:"content"` // 消息内容块列表
 }
 
 // NewUserMessage 创建包含单个文本内容块的用户消息。
+//
+// 适用于简单的纯文本对话场景。
 func NewUserMessage(text string) BambooMessage {
 	return BambooMessage{
 		Role:    RoleUser,
@@ -42,6 +43,8 @@ func NewUserMessageBlocks(blocks ...ContentBlock) BambooMessage {
 }
 
 // NewAssistantMessage 创建包含单个文本内容块的助手消息。
+//
+// 适用于助手返回简单文本响应的场景。
 func NewAssistantMessage(text string) BambooMessage {
 	return BambooMessage{
 		Role:    RoleAssistant,

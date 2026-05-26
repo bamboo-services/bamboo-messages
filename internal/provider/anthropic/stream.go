@@ -9,7 +9,10 @@ import (
 // 内部方法
 // ==============================
 
-// handleStreamEvent 根据事件类型分发到对应的处理方法
+// handleStreamEvent 根据事件类型分发到对应的处理方法。
+//
+// 将 Anthropic SSE 事件类型映射到内部处理函数：
+// message_start → contentMessageStart, content_block_start → contentBlockStart 等。
 func (p *Provider) handleStreamEvent(event anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
 	switch event.Type {
 	case "message_start":
@@ -29,13 +32,19 @@ func (p *Provider) handleStreamEvent(event anthropic.BetaRawMessageStreamEventUn
 	}
 }
 
-// contentMessageStart 处理消息开始事件
+// contentMessageStart 处理消息开始事件。
+//
+// Anthropic message_start 事件，无需特殊处理，
+// StreamTypeStart 已在 ChatWithSystem 中发送。
 func (p *Provider) contentMessageStart(_ anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
 	// 消息开始，无需特殊处理，已在 ChatWithSystem 中发送 StreamTypeStart
 	return nil
 }
 
-// contentBlockStart 处理内容块开始事件
+// contentBlockStart 处理内容块开始事件。
+//
+// 根据内容块类型发出对应的 BlockStart delta：
+// text → NewBlockStartDelta("text"), thinking → NewThinkingDelta, tool_use → NewToolCallDelta。
 func (p *Provider) contentBlockStart(event anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
 	block := event.AsContentBlockStart()
 	switch block.ContentBlock.Type {
@@ -59,7 +68,10 @@ func (p *Provider) contentBlockStart(event anthropic.BetaRawMessageStreamEventUn
 	}
 }
 
-// contentBlockDelta 处理内容块增量事件
+// contentBlockDelta 处理内容块增量事件。
+//
+// 根据增量类型发出对应的 StreamDelta：
+// text_delta → NewTextDelta, thinking_delta → NewThinkingDelta, input_json_delta → NewToolCallDeltaData。
 func (p *Provider) contentBlockDelta(event anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
 	delta := event.AsContentBlockDelta()
 	switch delta.Delta.Type {
@@ -83,13 +95,18 @@ func (p *Provider) contentBlockDelta(event anthropic.BetaRawMessageStreamEventUn
 	}
 }
 
-// contentBlockStop 处理内容块结束事件
+// contentBlockStop 处理内容块结束事件。
+//
+// Anthropic content_block_stop 事件，无需特殊处理。
 func (p *Provider) contentBlockStop(_ anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
 	// 内容块结束，无需特殊处理
 	return nil
 }
 
-// contentMessageDelta 处理消息增量事件（包含 usage）
+// contentMessageDelta 处理消息增量事件（包含 usage）。
+//
+// Anthropic message_delta 事件携带 Token 用量统计，
+// 发送 NewUsageDelta。
 func (p *Provider) contentMessageDelta(event anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
 	msgDelta := event.AsMessageDelta()
 	if msgDelta.Usage.InputTokens > 0 || msgDelta.Usage.OutputTokens > 0 {
@@ -101,7 +118,9 @@ func (p *Provider) contentMessageDelta(event anthropic.BetaRawMessageStreamEvent
 	return nil
 }
 
-// contentMessageStop 处理消息结束事件
+// contentMessageStop 处理消息结束事件。
+//
+// Anthropic message_stop 事件，发送 StreamTypeStop。
 func (p *Provider) contentMessageStop(_ anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
 	return []provider.StreamEvent{{
 		Type: provider.StreamTypeStop,

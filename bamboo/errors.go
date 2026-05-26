@@ -38,7 +38,11 @@ const (
 	ErrorTypeProvider = "provider_error"
 )
 
-// Error 实现 error 接口，返回格式化的错误信息。
+// Error 实现 error 接口。
+//
+// 根据是否包含 Code 字段返回不同格式的错误信息：
+//   - 有 Code: "type: message (code: xxx)"
+//   - 无 Code: "type: message"
 func (e *BambooError) Error() string {
 	if e.Code != "" {
 		return fmt.Sprintf("%s: %s (code: %s)", e.Type, e.Message, e.Code)
@@ -47,6 +51,10 @@ func (e *BambooError) Error() string {
 }
 
 // NewBambooError 创建 BambooError 实例。
+//
+// 参数:
+//   - errorType - 错误类型标识
+//   - message - 错误描述信息
 func NewBambooError(errorType, message string) *BambooError {
 	return &BambooError{
 		Type:    errorType,
@@ -55,6 +63,11 @@ func NewBambooError(errorType, message string) *BambooError {
 }
 
 // NewBambooErrorWithCode 创建带错误代码的 BambooError 实例。
+//
+// 参数:
+//   - errorType - 错误类型标识
+//   - message - 错误描述信息
+//   - code - 错误代码（可选，由服务商定义）
 func NewBambooErrorWithCode(errorType, message, code string) *BambooError {
 	return &BambooError{
 		Type:    errorType,
