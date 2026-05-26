@@ -13,7 +13,7 @@ import (
 // ==============================
 
 // handleStreamEvent 根据事件类型分发到对应的处理方法
-func (p *ResponsesProvider) handleStreamEvent(ctx context.Context, event responses.ResponseStreamEventUnion, textBlockStarted *bool) []provider.StreamEvent {
+func (p *ResponsesProvider) handleStreamEvent(ctx context.Context, event responses.ResponseStreamEventUnion, textBlockStarted *bool, thinkingBlockStarted *bool) []provider.StreamEvent {
 	switch event.Type {
 	case "response.created":
 		return p.contentResponseCreated(event)
@@ -22,7 +22,7 @@ func (p *ResponsesProvider) handleStreamEvent(ctx context.Context, event respons
 	case "response.output_text.delta":
 		return p.contentOutputTextDelta(event, textBlockStarted)
 	case "response.reasoning_text.delta":
-		return p.contentReasoningTextDelta(event, textBlockStarted)
+		return p.contentReasoningTextDelta(event, thinkingBlockStarted)
 	case "response.function_call_arguments.delta":
 		return p.contentFunctionCallDelta(event)
 	case "response.function_call_arguments.done":
@@ -84,16 +84,16 @@ func (p *ResponsesProvider) contentOutputTextDelta(event responses.ResponseStrea
 }
 
 // contentReasoningTextDelta 处理推理文本增量事件
-func (p *ResponsesProvider) contentReasoningTextDelta(event responses.ResponseStreamEventUnion, textBlockStarted *bool) []provider.StreamEvent {
+func (p *ResponsesProvider) contentReasoningTextDelta(event responses.ResponseStreamEventUnion, thinkingBlockStarted *bool) []provider.StreamEvent {
 	e := event.AsResponseReasoningTextDelta()
 
 	// 推理文本也需要在第一次增量前合成 BlockStart
-	if !*textBlockStarted {
-		*textBlockStarted = true
+	if !*thinkingBlockStarted {
+		*thinkingBlockStarted = true
 		return []provider.StreamEvent{
 			{
 				Type:  provider.StreamTypeDelta,
-				Delta: provider.NewBlockStartDelta("text"),
+				Delta: provider.NewBlockStartDelta("thinking"),
 			},
 			{
 				Type:  provider.StreamTypeDelta,

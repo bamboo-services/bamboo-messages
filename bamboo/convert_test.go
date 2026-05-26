@@ -492,12 +492,19 @@ func TestConvertStreamThinkingDelta(t *testing.T) {
 		Delta: provider.NewThinkingDelta("hmm"),
 	})
 
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(events))
+	// 防御性 BlockStart：无前置 BlockStart 时自动补发 content_block_start
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events (defensive BlockStart + ThinkingDelta), got %d", len(events))
 	}
-	delta, ok := events[0].Delta.(*StreamDelta)
+	if events[0].Type != EventContentBlockStart {
+		t.Errorf("events[0].Type = %q, want content_block_start", events[0].Type)
+	}
+	if events[0].ContentBlock == nil || events[0].ContentBlock.Type != ContentBlockThinking {
+		t.Errorf("events[0].ContentBlock.Type = %q, want thinking", events[0].ContentBlock.Type)
+	}
+	delta, ok := events[1].Delta.(*StreamDelta)
 	if !ok {
-		t.Fatal("Delta is not *StreamDelta")
+		t.Fatal("events[1].Delta is not *StreamDelta")
 	}
 	if delta.Type != DeltaThinkingDelta {
 		t.Errorf("Delta.Type = %q, want thinking_delta", delta.Type)

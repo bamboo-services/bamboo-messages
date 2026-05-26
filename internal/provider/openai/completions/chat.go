@@ -95,10 +95,11 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 
 		// 追踪文本块是否已开始，用于合成 OpenAI Completions 缺失的 content_block_start 事件
 		textBlockStarted := false
+		thinkingBlockStarted := false
 
 		for stream.Next() {
 			chunk := stream.Current()
-			events := p.handleChunk(chunk, &textBlockStarted)
+			events := p.handleChunk(chunk, &textBlockStarted, &thinkingBlockStarted)
 			for _, e := range events {
 				select {
 				case eventCh <- e:

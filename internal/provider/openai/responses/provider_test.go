@@ -251,7 +251,8 @@ func TestResponsesProvider_handleStreamEvent(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			event := unmarshalResponseEvent(t, tt.rawJSON)
 			textBlockStarted := false
-			result := p.handleStreamEvent(context.Background(), event, &textBlockStarted)
+			thinkingBlockStarted := false
+			result := p.handleStreamEvent(context.Background(), event, &textBlockStarted, &thinkingBlockStarted)
 			if len(result) != tt.wantLen {
 				t.Errorf("handleStreamEvent() returned %d events, want %d", len(result), tt.wantLen)
 				return

@@ -1,12 +1,14 @@
 package completions
 
 import (
+	"encoding/json"
+
 	"github.com/openai/openai-go/v3"
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
 
 // handleChunk 处理单个 ChatCompletionChunk，提取 delta 数据转换为统一事件
-func (p *CompletionsProvider) handleChunk(chunk openai.ChatCompletionChunk, textBlockStarted *bool) []provider.StreamEvent {
+func (p *CompletionsProvider) handleChunk(chunk openai.ChatCompletionChunk, textBlockStarted *bool, thinkingBlockStarted *bool) []provider.StreamEvent {
 	var events []provider.StreamEvent
 
 	// 处理 usage（最后一个 chunk 可能没有 choices）
@@ -19,16 +21,34 @@ func (p *CompletionsProvider) handleChunk(chunk openai.ChatCompletionChunk, text
 
 	// 处理 choices
 	for _, choice := range chunk.Choices {
-		events = append(events, p.handleChoice(choice, textBlockStarted)...)
+		events = append(events, p.handleChoice(choice, textBlockStarted, thinkingBlockStarted)...)
 	}
 
 	return events
 }
 
 // handleChoice 处理单个 choice 的 delta 数据
-func (p *CompletionsProvider) handleChoice(choice openai.ChatCompletionChunkChoice, textBlockStarted *bool) []provider.StreamEvent {
+func (p *CompletionsProvider) handleChoice(choice openai.ChatCompletionChunkChoice, textBlockStarted *bool, thinkingBlockStarted *bool) []provider.StreamEvent {
 	delta := choice.Delta
 	var events []provider.StreamEvent
+
+	// 推理内容增量 — 从 ExtraFields 提取 reasoning_content
+	if field, ok := delta.JSON.ExtraFields["reasoning_content"]; ok && field.Raw() != "" {
+		var reasoning string
+		if err := json.Unmarshal([]byte(field.Raw()), &reasoning); err == nil && reasoning != "" {
+			if !*thinkingBlockStarted {
+				events = append(events, provider.StreamEvent{
+					Type:  provider.StreamTypeDelta,
+					Delta: provider.NewBlockStartDelta("thinking"),
+				})
+				*thinkingBlockStarted = true
+			}
+			events = append(events, provider.StreamEvent{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewThinkingDelta(reasoning),
+			})
+		}
+	}
 
 	// 文本内容增量
 	if delta.Content != "" {

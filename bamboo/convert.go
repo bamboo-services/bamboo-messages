@@ -186,10 +186,11 @@ func mapFinishReason(reason provider.FinishReason) FinishReason {
 
 // StreamConverter 维护流事件转换状态，将 provider.StreamEvent 序列映射为 Anthropic 风格事件序列。
 type StreamConverter struct {
-	blockIndex      int
-	usage           *Usage
-	started         bool
+	blockIndex       int
+	usage            *Usage
+	started          bool
 	textBlockStarted bool
+	thinkingBlockStarted bool
 }
 
 func NewStreamConverter() *StreamConverter { return &StreamConverter{} }
@@ -231,6 +232,9 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		if data.BlockType == "text" {
 			sc.textBlockStarted = true
 		}
+		if data.BlockType == "thinking" {
+			sc.thinkingBlockStarted = true
+		}
 		return []StreamEvent{
 			{
 				Type:         EventContentBlockStart,
@@ -256,11 +260,21 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		})
 		return events
 	case provider.StreamDeltaTypeThinking:
-		return []StreamEvent{{
+		var events []StreamEvent
+		if !sc.thinkingBlockStarted {
+			sc.thinkingBlockStarted = true
+			events = append(events, StreamEvent{
+				Type:         EventContentBlockStart,
+				Index:        sc.blockIndex,
+				ContentBlock: &ContentBlock{Type: ContentBlockThinking},
+			})
+		}
+		events = append(events, StreamEvent{
 			Type:  EventContentBlockDelta,
 			Index: sc.blockIndex,
 			Delta: &StreamDelta{Type: DeltaThinkingDelta, Thinking: string(delta.Data.(provider.ThinkingData))},
-		}}
+		})
+		return events
 	case provider.StreamDeltaTypeToolCall:
 		data := delta.Data.(provider.ToolCallData)
 		stopIdx := sc.blockIndex
