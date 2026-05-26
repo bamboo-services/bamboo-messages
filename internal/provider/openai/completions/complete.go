@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/shared"
 	xError "github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
@@ -42,6 +43,34 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 
 	if tools := buildTools(config.Tools); tools != nil {
 		params.Tools = tools
+	}
+
+	if config.ThinkingConfig != nil && config.ThinkingConfig.ReasoningEffort != "" {
+		params.ReasoningEffort = shared.ReasoningEffort(config.ThinkingConfig.ReasoningEffort)
+	}
+
+	if fp, ok := provider.GetExtraFloat64(config.ProviderExtra, provider.ProviderExtraKeyFrequencyPenalty); ok {
+		params.FrequencyPenalty = openai.Float(fp)
+	}
+
+	if pp, ok := provider.GetExtraFloat64(config.ProviderExtra, provider.ProviderExtraKeyPresencePenalty); ok {
+		params.PresencePenalty = openai.Float(pp)
+	}
+
+	if seed, ok := provider.GetExtraInt64(config.ProviderExtra, provider.ProviderExtraKeySeed); ok {
+		params.Seed = openai.Int(seed)
+	}
+
+	if tc, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyToolChoice); ok {
+		if toolChoice, ok := tc.(openai.ChatCompletionToolChoiceOptionUnionParam); ok {
+			params.ToolChoice = toolChoice
+		}
+	}
+
+	if rf, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyResponseFormat); ok {
+		if responseFormat, ok := rf.(openai.ChatCompletionNewParamsResponseFormatUnion); ok {
+			params.ResponseFormat = responseFormat
+		}
 	}
 
 	// 调用非流式 SDK 方法

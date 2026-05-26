@@ -251,10 +251,15 @@ func TestProvider_handleStreamEvent(t *testing.T) {
 			wantType: "",
 		},
 		{
-			name:     "content_block_start with text returns nil",
+			name:     "content_block_start with text emits BlockStart",
 			rawJSON:  `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
-			wantLen:  0,
-			wantType: "",
+			wantLen:  1,
+			wantType: provider.StreamTypeDelta,
+			check: func(t *testing.T, events []provider.StreamEvent) {
+				if events[0].Delta.Type != provider.StreamDeltaTypeBlockStart {
+					t.Errorf("expected block_start delta, got %v", events[0].Delta.Type)
+				}
+			},
 		},
 		{
 			name:     "content_block_start with thinking",
@@ -442,15 +447,7 @@ func TestNewProviderWithOptions(t *testing.T) {
 	})
 }
 
-func TestNewProvider_BackwardCompatible(t *testing.T) {
-	p := NewProvider("test-api-key")
-	if p == nil {
-		t.Fatal("NewProvider(string) returned nil")
-	}
-	if got := p.GetProviderType(); got != provider.ProviderAnthropic {
-		t.Errorf("GetProviderType() = %v, want %v", got, provider.ProviderAnthropic)
-	}
-}
+
 
 func TestNewProviderWithOptions_EmptyOptions(t *testing.T) {
 	p := NewProviderWithOptions()

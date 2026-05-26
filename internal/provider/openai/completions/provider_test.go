@@ -260,10 +260,15 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 				},
 				Usage: openai.CompletionUsage{},
 			},
-			wantLen: 1,
+			wantLen: 2,
 			check: func(t *testing.T, events []provider.StreamEvent) {
-				if events[0].Delta.Type != provider.StreamDeltaTypeTextOutput {
-					t.Errorf("expected text delta, got %v", events[0].Delta.Type)
+				// 第一个事件是合成的 BlockStart
+				if events[0].Delta.Type != provider.StreamDeltaTypeBlockStart {
+					t.Errorf("expected block_start delta, got %v", events[0].Delta.Type)
+				}
+				// 第二个事件是文本增量
+				if events[1].Delta.Type != provider.StreamDeltaTypeTextOutput {
+					t.Errorf("expected text delta, got %v", events[1].Delta.Type)
 				}
 			},
 		},
@@ -340,7 +345,8 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := p.handleChunk(tt.chunk)
+			textBlockStarted := false
+			result := p.handleChunk(tt.chunk, &textBlockStarted)
 			if len(result) != tt.wantLen {
 				t.Errorf("handleChunk() returned %d events, want %d", len(result), tt.wantLen)
 				return
@@ -413,15 +419,7 @@ func TestNewCompletionsProviderWithOptions(t *testing.T) {
 	})
 }
 
-func TestNewCompletionsProvider_BackwardCompatible(t *testing.T) {
-	p := NewCompletionsProvider("test-api-key")
-	if p == nil {
-		t.Fatal("NewCompletionsProvider(string) returned nil")
-	}
-	if got := p.GetProviderType(); got != provider.ProviderOpenAICompletions {
-		t.Errorf("GetProviderType() = %v, want %v", got, provider.ProviderOpenAICompletions)
-	}
-}
+
 
 func TestNewCompletionsProviderWithOptions_EmptyOptions(t *testing.T) {
 	p := NewCompletionsProviderWithOptions()

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	xError "github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
@@ -58,6 +59,34 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 		if tools := buildTools(config.Tools); tools != nil {
 			params.Tools = tools
 		}
+
+		if config.ThinkingConfig != nil && config.ThinkingConfig.Enabled != nil && *config.ThinkingConfig.Enabled {
+			budgetTokens := int64(10000)
+			if config.ThinkingConfig.BudgetTokens != nil {
+				budgetTokens = *config.ThinkingConfig.BudgetTokens
+			}
+			params.Thinking.OfEnabled = &anthropic.BetaThinkingConfigEnabledParam{
+				BudgetTokens: budgetTokens,
+			}
+		}
+
+	if topK, ok := provider.GetExtraFloat64(config.ProviderExtra, provider.ProviderExtraKeyTopK); ok {
+		params.TopK = param.NewOpt(int64(topK))
+	}
+
+	if tc, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyToolChoice); ok {
+		if s, ok := tc.(string); ok {
+			switch s {
+			case "auto":
+				params.ToolChoice.OfAuto = &anthropic.BetaToolChoiceAutoParam{}
+			case "any":
+				params.ToolChoice.OfAny = &anthropic.BetaToolChoiceAnyParam{}
+			case "none":
+				noneParam := anthropic.NewBetaToolChoiceNoneParam()
+				params.ToolChoice.OfNone = &noneParam
+			}
+		}
+	}
 
 		stream := p.Client.Beta.Messages.NewStreaming(ctx, params)
 		defer stream.Close()

@@ -1,5 +1,11 @@
 package bamboo
 
+import "github.com/bamboo-services/bamboo-messages/internal/provider"
+
+// ThinkingConfig 思考/推理配置，控制模型的推理行为。
+// 类型别名，指向 provider 层的 ThinkingConfig。
+type ThinkingConfig = provider.ThinkingConfig
+
 // RequestConfig 请求配置，用于控制 AI 模型的生成行为。
 //
 // Temperature 和 TopP 使用指针类型以区分"未设置"和"零值"两种状态：
@@ -26,11 +32,31 @@ type RequestConfig struct {
 
 	// Metadata 附加元数据，用于传递请求级别的自定义信息
 	Metadata map[string]string `json:"metadata,omitempty"`
+
+	// ThinkingConfig 思考/推理配置
+	ThinkingConfig *ThinkingConfig `json:"thinking_config,omitempty"`
+
+	// ProviderExtra Provider 特有参数，用于传递各 Provider 独有的扩展配置
+	ProviderExtra map[string]any `json:"provider_extra,omitempty"`
 }
 
 // PtrFloat64 返回 float64 指针，用于设置 RequestConfig 的可选字段。
 //
 // 用法: config.Temperature = PtrFloat64(0.7)
 func PtrFloat64(v float64) *float64 {
+	return &v
+}
+
+// PtrBool 返回 bool 指针，用于设置 RequestConfig 的可选字段。
+//
+// 用法: config.ThinkingConfig.Enabled = PtrBool(true)
+func PtrBool(v bool) *bool {
+	return &v
+}
+
+// PtrInt64 返回 int64 指针，用于设置 RequestConfig 的可选字段。
+//
+// 用法: config.ThinkingConfig.BudgetTokens = PtrInt64(10000)
+func PtrInt64(v int64) *int64 {
 	return &v
 }

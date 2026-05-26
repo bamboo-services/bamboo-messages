@@ -434,8 +434,8 @@ func TestConvertStreamStart(t *testing.T) {
 	sc := NewStreamConverter()
 	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
 
-	if len(events) != 2 {
-		t.Fatalf("expected 2 events, got %d", len(events))
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
 	}
 	if events[0].Type != EventMessageStart {
 		t.Errorf("events[0].Type = %q, want message_start", events[0].Type)
@@ -445,19 +445,6 @@ func TestConvertStreamStart(t *testing.T) {
 	}
 	if events[0].Message.Role != RoleAssistant {
 		t.Errorf("Message.Role = %q, want assistant", events[0].Message.Role)
-	}
-
-	if events[1].Type != EventContentBlockStart {
-		t.Errorf("events[1].Type = %q, want content_block_start", events[1].Type)
-	}
-	if events[1].Index != 0 {
-		t.Errorf("events[1].Index = %d, want 0", events[1].Index)
-	}
-	if events[1].ContentBlock == nil {
-		t.Fatal("events[1].ContentBlock is nil")
-	}
-	if events[1].ContentBlock.Type != ContentBlockText {
-		t.Errorf("ContentBlock.Type = %q, want text", events[1].ContentBlock.Type)
 	}
 }
 
@@ -470,17 +457,21 @@ func TestConvertStreamTextDelta(t *testing.T) {
 		Delta: provider.NewTextDelta("Hello"),
 	})
 
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(events))
+	// 防御性: 首次 text_delta 自动补发 content_block_start + content_block_delta
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events (auto block_start + delta), got %d", len(events))
 	}
-	if events[0].Type != EventContentBlockDelta {
-		t.Errorf("Type = %q, want content_block_delta", events[0].Type)
+	if events[0].Type != EventContentBlockStart {
+		t.Errorf("events[0].Type = %q, want content_block_start", events[0].Type)
 	}
-	if events[0].Index != 0 {
-		t.Errorf("Index = %d, want 0", events[0].Index)
+	if events[1].Type != EventContentBlockDelta {
+		t.Errorf("events[1].Type = %q, want content_block_delta", events[1].Type)
+	}
+	if events[1].Index != 0 {
+		t.Errorf("events[1].Index = %d, want 0", events[1].Index)
 	}
 
-	delta, ok := events[0].Delta.(*StreamDelta)
+	delta, ok := events[1].Delta.(*StreamDelta)
 	if !ok {
 		t.Fatal("Delta is not *StreamDelta")
 	}
@@ -1116,7 +1107,306 @@ func TestConvertStreamStopWithoutUsage(t *testing.T) {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Task 12: configToProvider ThinkingConfig / ProviderExtra 测试
+// ──────────────────────────────────────────────────────────────────────
 
+// TestConfigToProvider_ThinkingConfig 验证 ThinkingConfig 正确透传到 provider.ChatConfig。
+func TestConfigToProvider_ThinkingConfig(t *testing.T) {
+	cfg := &RequestConfig{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 4096,
+		ThinkingConfig: &ThinkingConfig{
+			Enabled:         PtrBool(true),
+			BudgetTokens:    PtrInt64(10000),
+			ReasoningEffort: "high",
+			Summary:         "auto",
+		},
+	}
+
+	result := configToProvider(cfg)
+	if result == nil {
+		t.Fatal("期望非 nil 结果")
+	}
+	if result.ThinkingConfig == nil {
+		t.Fatal("ThinkingConfig 不应为 nil")
+	}
+	if result.ThinkingConfig.Enabled == nil || *result.ThinkingConfig.Enabled != true {
+		t.Errorf("Enabled = %v, 期望 true", result.ThinkingConfig.Enabled)
+	}
+	if result.ThinkingConfig.BudgetTokens == nil || *result.ThinkingConfig.BudgetTokens != 10000 {
+		t.Errorf("BudgetTokens = %v, 期望 10000", result.ThinkingConfig.BudgetTokens)
+	}
+	if result.ThinkingConfig.ReasoningEffort != "high" {
+		t.Errorf("ReasoningEffort = %q, 期望 %q", result.ThinkingConfig.ReasoningEffort, "high")
+	}
+	if result.ThinkingConfig.Summary != "auto" {
+		t.Errorf("Summary = %q, 期望 %q", result.ThinkingConfig.Summary, "auto")
+	}
+}
+
+// TestConfigToProvider_ProviderExtra 验证 ProviderExtra 正确透传到 provider.ChatConfig。
+func TestConfigToProvider_ProviderExtra(t *testing.T) {
+	cfg := &RequestConfig{
+		Model:     "test-model",
+		MaxTokens: 2048,
+		ProviderExtra: map[string]any{
+			provider.ProviderExtraKeyTopK:             50.0,
+			provider.ProviderExtraKeyFrequencyPenalty: 0.5,
+			provider.ProviderExtraKeySeed:             int64(42),
+			"custom_key":                              "custom_value",
+		},
+	}
+
+	result := configToProvider(cfg)
+	if result == nil {
+		t.Fatal("期望非 nil 结果")
+	}
+	if result.ProviderExtra == nil {
+		t.Fatal("ProviderExtra 不应为 nil")
+	}
+	if result.ProviderExtra[provider.ProviderExtraKeyTopK] != 50.0 {
+		t.Errorf("TopK = %v, 期望 50.0", result.ProviderExtra[provider.ProviderExtraKeyTopK])
+	}
+	if result.ProviderExtra[provider.ProviderExtraKeyFrequencyPenalty] != 0.5 {
+		t.Errorf("FrequencyPenalty = %v, 期望 0.5", result.ProviderExtra[provider.ProviderExtraKeyFrequencyPenalty])
+	}
+	if result.ProviderExtra[provider.ProviderExtraKeySeed] != int64(42) {
+		t.Errorf("Seed = %v, 期望 42", result.ProviderExtra[provider.ProviderExtraKeySeed])
+	}
+	if result.ProviderExtra["custom_key"] != "custom_value" {
+		t.Errorf("custom_key = %v, 期望 custom_value", result.ProviderExtra["custom_key"])
+	}
+}
+
+
+
+// ──────────────────────────────────────────────────────────────────────
+// Task 12: StreamConverter 场景测试
+// ──────────────────────────────────────────────────────────────────────
+
+// TestStreamConverter_TextOnly 验证纯文本流完整生命周期: start → block_start(text) → text_delta → stop。
+func TestStreamConverter_TextOnly(t *testing.T) {
+	sc := NewStreamConverter()
+	var allEvents []StreamEvent
+
+	// start
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})...)
+
+	// block_start(text) — 使用 NewBlockStartDelta
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStartDelta("text"),
+	})...)
+
+	// text_delta
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewTextDelta("hello"),
+	})...)
+
+	// usage
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewUsageDelta(10, 5),
+	})...)
+
+	// stop
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})...)
+
+	expectedTypes := []StreamEventType{
+		EventMessageStart,       // start → message_start
+		EventContentBlockStart,  // block_start(text)
+		EventContentBlockDelta,  // text_delta
+		EventContentBlockStop,   // stop → content_block_stop
+		EventMessageDelta,       // stop → message_delta
+		EventMessageStop,        // stop → message_stop
+	}
+
+	if len(allEvents) != len(expectedTypes) {
+		t.Fatalf("期望 %d 个事件, 实际 %d", len(expectedTypes), len(allEvents))
+	}
+	for i, et := range expectedTypes {
+		if allEvents[i].Type != et {
+			t.Errorf("events[%d].Type = %q, 期望 %q", i, allEvents[i].Type, et)
+		}
+	}
+
+	// 验证 usage 透传
+	msgDeltaEvent := allEvents[4]
+	if msgDeltaEvent.Usage == nil {
+		t.Fatal("message_delta Usage 不应为 nil")
+	}
+	if msgDeltaEvent.Usage.InputTokens != 10 {
+		t.Errorf("InputTokens = %d, 期望 10", msgDeltaEvent.Usage.InputTokens)
+	}
+	if msgDeltaEvent.Usage.OutputTokens != 5 {
+		t.Errorf("OutputTokens = %d, 期望 5", msgDeltaEvent.Usage.OutputTokens)
+	}
+}
+
+// TestStreamConverter_ThinkingAndText 验证思考+文本流: start → block_start(thinking) → thinking_delta → block_start(text) → text_delta → stop。
+func TestStreamConverter_ThinkingAndText(t *testing.T) {
+	sc := NewStreamConverter()
+	var allEvents []StreamEvent
+
+	// start
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})...)
+
+	// block_start(thinking)
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStartDelta("thinking"),
+	})...)
+
+	// thinking_delta
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewThinkingDelta("let me think..."),
+	})...)
+
+	// block_start(text) — 新的内容块
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStartDelta("text"),
+	})...)
+
+	// text_delta
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewTextDelta("the answer is 42"),
+	})...)
+
+	// stop
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})...)
+
+	expectedTypes := []StreamEventType{
+		EventMessageStart,       // start
+		EventContentBlockStart,  // block_start(thinking)
+		EventContentBlockDelta,  // thinking_delta
+		EventContentBlockStart,  // block_start(text)
+		EventContentBlockDelta,  // text_delta
+		EventContentBlockStop,   // stop
+		EventMessageDelta,       // stop
+		EventMessageStop,        // stop
+	}
+
+	if len(allEvents) != len(expectedTypes) {
+		t.Fatalf("期望 %d 个事件, 实际 %d", len(expectedTypes), len(allEvents))
+	}
+	for i, et := range expectedTypes {
+		if allEvents[i].Type != et {
+			t.Errorf("events[%d].Type = %q, 期望 %q", i, allEvents[i].Type, et)
+		}
+	}
+
+	// 验证 thinking delta 内容
+	thinkingEvent := allEvents[2]
+	delta, ok := thinkingEvent.Delta.(*StreamDelta)
+	if !ok {
+		t.Fatal("thinking event Delta 类型不匹配")
+	}
+	if delta.Type != DeltaThinkingDelta {
+		t.Errorf("Delta.Type = %q, 期望 %q", delta.Type, DeltaThinkingDelta)
+	}
+	if delta.Thinking != "let me think..." {
+		t.Errorf("Delta.Thinking = %q, 期望 %q", delta.Thinking, "let me think...")
+	}
+
+	// 验证 text delta 内容
+	textEvent := allEvents[4]
+	textDelta, ok := textEvent.Delta.(*StreamDelta)
+	if !ok {
+		t.Fatal("text event Delta 类型不匹配")
+	}
+	if textDelta.Text != "the answer is 42" {
+		t.Errorf("Delta.Text = %q, 期望 %q", textDelta.Text, "the answer is 42")
+	}
+}
+
+// TestStreamConverter_ToolCall 验证工具调用流: start → text_delta → tool_call → tool_call_delta → stop。
+func TestStreamConverter_ToolCall(t *testing.T) {
+	sc := NewStreamConverter()
+	var allEvents []StreamEvent
+
+	// start
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})...)
+
+	// text_delta (no block_start, relies on auto-emit)
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewTextDelta("calling tool..."),
+	})...)
+
+	// tool_call → [content_block_stop, content_block_start(tool_use)]
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewToolCallDelta("call_abc", "search"),
+	})...)
+
+	// tool_call_delta
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewToolCallDeltaData(`{"query":"golang"}`),
+	})...)
+
+	// stop
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})...)
+
+	expectedTypes := []StreamEventType{
+		EventMessageStart,       // start
+		EventContentBlockStart,  // 防御性自动补发 block_start (text_delta without prior block_start)
+		EventContentBlockDelta,  // text_delta
+		EventContentBlockStop,   // tool_call → close previous
+		EventContentBlockStart,  // tool_call → open tool_use
+		EventContentBlockDelta,  // tool_call_delta
+		EventContentBlockStop,   // stop
+		EventMessageDelta,       // stop
+		EventMessageStop,        // stop
+	}
+
+	if len(allEvents) != len(expectedTypes) {
+		t.Fatalf("期望 %d 个事件, 实际 %d", len(expectedTypes), len(allEvents))
+	}
+	for i, et := range expectedTypes {
+		if allEvents[i].Type != et {
+			t.Errorf("events[%d].Type = %q, 期望 %q", i, allEvents[i].Type, et)
+		}
+	}
+
+	// 验证 tool_use block 的 ID 和 Name
+	toolStartEvent := allEvents[4]
+	if toolStartEvent.ContentBlock == nil {
+		t.Fatal("tool_use ContentBlock 不应为 nil")
+	}
+	if toolStartEvent.ContentBlock.Type != ContentBlockToolUse {
+		t.Errorf("ContentBlock.Type = %q, 期望 %q", toolStartEvent.ContentBlock.Type, ContentBlockToolUse)
+	}
+	if toolStartEvent.ContentBlock.ID != "call_abc" {
+		t.Errorf("ContentBlock.ID = %q, 期望 %q", toolStartEvent.ContentBlock.ID, "call_abc")
+	}
+	if toolStartEvent.ContentBlock.Name != "search" {
+		t.Errorf("ContentBlock.Name = %q, 期望 %q", toolStartEvent.ContentBlock.Name, "search")
+	}
+
+	// 验证 tool_call_delta 的 PartialJSON
+	toolDeltaEvent := allEvents[5]
+	toolDelta, ok := toolDeltaEvent.Delta.(*StreamDelta)
+	if !ok {
+		t.Fatal("tool_call_delta Delta 类型不匹配")
+	}
+	if toolDelta.Type != DeltaInputJSON {
+		t.Errorf("Delta.Type = %q, 期望 %q", toolDelta.Type, DeltaInputJSON)
+	}
+	if toolDelta.PartialJSON != `{"query":"golang"}` {
+		t.Errorf("Delta.PartialJSON = %q, 期望 %q", toolDelta.PartialJSON, `{"query":"golang"}`)
+	}
+}
+
+
+
+// ──────────────────────────────────────────────────────────────────────
+
+// TestConvertStreamWithUsageInStop 验证 stop 事件携带之前存储的 usage。
 func TestConvertStreamWithUsageInStop(t *testing.T) {
 	sc := NewStreamConverter()
 	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})

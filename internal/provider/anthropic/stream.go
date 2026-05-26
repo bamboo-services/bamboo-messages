@@ -39,6 +39,11 @@ func (p *Provider) contentMessageStart(_ anthropic.BetaRawMessageStreamEventUnio
 func (p *Provider) contentBlockStart(event anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
 	block := event.AsContentBlockStart()
 	switch block.ContentBlock.Type {
+	case "text":
+		return []provider.StreamEvent{{
+			Type:  provider.StreamTypeDelta,
+			Delta: provider.NewBlockStartDelta("text"),
+		}}
 	case "thinking":
 		return []provider.StreamEvent{{
 			Type:  provider.StreamTypeDelta,

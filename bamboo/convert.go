@@ -88,13 +88,15 @@ func configToProvider(cfg *RequestConfig) *provider.ChatConfig {
 		return nil
 	}
 	return &provider.ChatConfig{
-		Model:       cfg.Model,
-		MaxTokens:   cfg.MaxTokens,
-		Temperature: cfg.Temperature,
-		TopP:        cfg.TopP,
-		Stop:        cfg.StopSequences,
-		Tools:       toolsToProvider(cfg.Tools),
-		Metadata:    cfg.Metadata,
+		Model:         cfg.Model,
+		MaxTokens:     cfg.MaxTokens,
+		Temperature:   cfg.Temperature,
+		TopP:          cfg.TopP,
+		Stop:          cfg.StopSequences,
+		Tools:         toolsToProvider(cfg.Tools),
+		Metadata:      cfg.Metadata,
+		ThinkingConfig: cfg.ThinkingConfig,
+		ProviderExtra: cfg.ProviderExtra,
 	}
 }
 
@@ -184,9 +186,10 @@ func mapFinishReason(reason provider.FinishReason) FinishReason {
 
 // StreamConverter 维护流事件转换状态，将 provider.StreamEvent 序列映射为 Anthropic 风格事件序列。
 type StreamConverter struct {
-	blockIndex int
-	usage      *Usage
-	started    bool
+	blockIndex      int
+	usage           *Usage
+	started         bool
+	textBlockStarted bool
 }
 
 func NewStreamConverter() *StreamConverter { return &StreamConverter{} }
@@ -218,22 +221,40 @@ func (sc *StreamConverter) handleStart() []StreamEvent {
 			Message: &BambooMessage{Role: RoleAssistant, Content: []ContentBlock{}},
 			Usage:   &Usage{},
 		},
-		{
-			Type:         EventContentBlockStart,
-			Index:        0,
-			ContentBlock: &ContentBlock{Type: ContentBlockText},
-		},
 	}
 }
 
 func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []StreamEvent {
 	switch delta.Type {
+	case provider.StreamDeltaTypeBlockStart:
+		data := delta.Data.(provider.BlockStartData)
+		if data.BlockType == "text" {
+			sc.textBlockStarted = true
+		}
+		return []StreamEvent{
+			{
+				Type:         EventContentBlockStart,
+				Index:        sc.blockIndex,
+				ContentBlock: &ContentBlock{Type: mapBlockType(data.BlockType), ID: data.ID, Name: data.Name},
+			},
+		}
 	case provider.StreamDeltaTypeTextOutput:
-		return []StreamEvent{{
+		// 防御性：若 provider 未发送 block_start，自动补发
+		var events []StreamEvent
+		if !sc.textBlockStarted {
+			sc.textBlockStarted = true
+			events = append(events, StreamEvent{
+				Type:         EventContentBlockStart,
+				Index:        sc.blockIndex,
+				ContentBlock: &ContentBlock{Type: ContentBlockText},
+			})
+		}
+		events = append(events, StreamEvent{
 			Type:  EventContentBlockDelta,
 			Index: sc.blockIndex,
 			Delta: &StreamDelta{Type: DeltaTextDelta, Text: string(delta.Data.(provider.TextData))},
-		}}
+		})
+		return events
 	case provider.StreamDeltaTypeThinking:
 		return []StreamEvent{{
 			Type:  EventContentBlockDelta,
@@ -276,6 +297,19 @@ func (sc *StreamConverter) handleStop() []StreamEvent {
 		{Type: EventContentBlockStop, Index: sc.blockIndex},
 		{Type: EventMessageDelta, Delta: &MessageDelta{StopReason: FinishReasonEndTurn}, Usage: usage},
 		{Type: EventMessageStop},
+	}
+}
+
+func mapBlockType(blockType string) ContentBlockType {
+	switch blockType {
+	case "text":
+		return ContentBlockText
+	case "thinking":
+		return ContentBlockThinking
+	case "tool_use":
+		return ContentBlockToolUse
+	default:
+		return ContentBlockText
 	}
 }
 

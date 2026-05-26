@@ -41,3 +41,76 @@ func NewClientWithOptions(opts ...ClientOption) BambooClient {
 		defaultModel: cfg.defaultModel,
 	}
 }
+
+// RequestOption 请求配置选项函数，用于灵活配置 RequestConfig。
+type RequestOption func(*RequestConfig)
+
+// WithTopK 设置 Top-K 采样参数（仅部分 Provider 支持）。
+func WithTopK(topK float64) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeyTopK] = topK
+	}
+}
+
+// WithFrequencyPenalty 设置频率惩罚参数（仅部分 Provider 支持）。
+func WithFrequencyPenalty(penalty float64) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeyFrequencyPenalty] = penalty
+	}
+}
+
+// WithPresencePenalty 设置存在惩罚参数（仅部分 Provider 支持）。
+func WithPresencePenalty(penalty float64) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeyPresencePenalty] = penalty
+	}
+}
+
+// WithSeed 设置随机种子，用于控制生成结果的确定性（仅部分 Provider 支持）。
+func WithSeed(seed int64) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeySeed] = seed
+	}
+}
+
+// WithToolChoice 设置工具选择策略（仅部分 Provider 支持）。
+func WithToolChoice(choice any) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeyToolChoice] = choice
+	}
+}
+
+// WithResponseFormat 设置响应格式（仅部分 Provider 支持）。
+func WithResponseFormat(format any) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeyResponseFormat] = format
+	}
+}
+
+// WithExtra 设置 Provider 特有的扩展参数，用于传递任何额外的配置。
+func WithExtra(key string, value any) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[key] = value
+	}
+}

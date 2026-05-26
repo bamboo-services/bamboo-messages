@@ -6,7 +6,7 @@ import (
 )
 
 // handleChunk 处理单个 ChatCompletionChunk，提取 delta 数据转换为统一事件
-func (p *CompletionsProvider) handleChunk(chunk openai.ChatCompletionChunk) []provider.StreamEvent {
+func (p *CompletionsProvider) handleChunk(chunk openai.ChatCompletionChunk, textBlockStarted *bool) []provider.StreamEvent {
 	var events []provider.StreamEvent
 
 	// 处理 usage（最后一个 chunk 可能没有 choices）
@@ -19,19 +19,27 @@ func (p *CompletionsProvider) handleChunk(chunk openai.ChatCompletionChunk) []pr
 
 	// 处理 choices
 	for _, choice := range chunk.Choices {
-		events = append(events, p.handleChoice(choice)...)
+		events = append(events, p.handleChoice(choice, textBlockStarted)...)
 	}
 
 	return events
 }
 
 // handleChoice 处理单个 choice 的 delta 数据
-func (p *CompletionsProvider) handleChoice(choice openai.ChatCompletionChunkChoice) []provider.StreamEvent {
+func (p *CompletionsProvider) handleChoice(choice openai.ChatCompletionChunkChoice, textBlockStarted *bool) []provider.StreamEvent {
 	delta := choice.Delta
 	var events []provider.StreamEvent
 
 	// 文本内容增量
 	if delta.Content != "" {
+		// OpenAI Completions 没有显式的 content_block_start 事件，我们在第一次文本增量前合成它
+		if !*textBlockStarted {
+			events = append(events, provider.StreamEvent{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewBlockStartDelta("text"),
+			})
+			*textBlockStarted = true
+		}
 		events = append(events, provider.StreamEvent{
 			Type:  provider.StreamTypeDelta,
 			Delta: provider.NewTextDelta(delta.Content),

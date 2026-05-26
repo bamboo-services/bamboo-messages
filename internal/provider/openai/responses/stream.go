@@ -13,16 +13,16 @@ import (
 // ==============================
 
 // handleStreamEvent 根据事件类型分发到对应的处理方法
-func (p *ResponsesProvider) handleStreamEvent(ctx context.Context, event responses.ResponseStreamEventUnion) []provider.StreamEvent {
+func (p *ResponsesProvider) handleStreamEvent(ctx context.Context, event responses.ResponseStreamEventUnion, textBlockStarted *bool) []provider.StreamEvent {
 	switch event.Type {
 	case "response.created":
 		return p.contentResponseCreated(event)
 	case "response.output_item.added":
 		return p.contentOutputItemAdded(event)
 	case "response.output_text.delta":
-		return p.contentOutputTextDelta(event)
+		return p.contentOutputTextDelta(event, textBlockStarted)
 	case "response.reasoning_text.delta":
-		return p.contentReasoningTextDelta(event)
+		return p.contentReasoningTextDelta(event, textBlockStarted)
 	case "response.function_call_arguments.delta":
 		return p.contentFunctionCallDelta(event)
 	case "response.function_call_arguments.done":
@@ -59,8 +59,24 @@ func (p *ResponsesProvider) contentOutputItemAdded(event responses.ResponseStrea
 }
 
 // contentOutputTextDelta 处理文本输出增量事件
-func (p *ResponsesProvider) contentOutputTextDelta(event responses.ResponseStreamEventUnion) []provider.StreamEvent {
+func (p *ResponsesProvider) contentOutputTextDelta(event responses.ResponseStreamEventUnion, textBlockStarted *bool) []provider.StreamEvent {
 	e := event.AsResponseOutputTextDelta()
+
+	// OpenAI Responses 没有明确的 content_block_start 事件，在第一次文本增量前合成 BlockStart
+	if !*textBlockStarted {
+		*textBlockStarted = true
+		return []provider.StreamEvent{
+			{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewBlockStartDelta("text"),
+			},
+			{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewTextDelta(e.Delta),
+			},
+		}
+	}
+
 	return []provider.StreamEvent{{
 		Type:  provider.StreamTypeDelta,
 		Delta: provider.NewTextDelta(e.Delta),
@@ -68,8 +84,24 @@ func (p *ResponsesProvider) contentOutputTextDelta(event responses.ResponseStrea
 }
 
 // contentReasoningTextDelta 处理推理文本增量事件
-func (p *ResponsesProvider) contentReasoningTextDelta(event responses.ResponseStreamEventUnion) []provider.StreamEvent {
+func (p *ResponsesProvider) contentReasoningTextDelta(event responses.ResponseStreamEventUnion, textBlockStarted *bool) []provider.StreamEvent {
 	e := event.AsResponseReasoningTextDelta()
+
+	// 推理文本也需要在第一次增量前合成 BlockStart
+	if !*textBlockStarted {
+		*textBlockStarted = true
+		return []provider.StreamEvent{
+			{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewBlockStartDelta("text"),
+			},
+			{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewThinkingDelta(e.Delta),
+			},
+		}
+	}
+
 	return []provider.StreamEvent{{
 		Type:  provider.StreamTypeDelta,
 		Delta: provider.NewThinkingDelta(e.Delta),

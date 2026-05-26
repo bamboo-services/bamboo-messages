@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	xError "github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
@@ -48,7 +49,34 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 		params.Tools = tools
 	}
 
-	// 调用非流式 SDK 方法
+	if config.ThinkingConfig != nil && config.ThinkingConfig.Enabled != nil && *config.ThinkingConfig.Enabled {
+		budgetTokens := int64(10000)
+		if config.ThinkingConfig.BudgetTokens != nil {
+			budgetTokens = *config.ThinkingConfig.BudgetTokens
+		}
+		params.Thinking.OfEnabled = &anthropic.BetaThinkingConfigEnabledParam{
+			BudgetTokens: budgetTokens,
+		}
+	}
+
+	if topK, ok := provider.GetExtraFloat64(config.ProviderExtra, provider.ProviderExtraKeyTopK); ok {
+		params.TopK = param.NewOpt(int64(topK))
+	}
+
+	if tc, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyToolChoice); ok {
+		if s, ok := tc.(string); ok {
+			switch s {
+			case "auto":
+				params.ToolChoice.OfAuto = &anthropic.BetaToolChoiceAutoParam{}
+			case "any":
+				params.ToolChoice.OfAny = &anthropic.BetaToolChoiceAnyParam{}
+			case "none":
+				noneParam := anthropic.NewBetaToolChoiceNoneParam()
+				params.ToolChoice.OfNone = &noneParam
+			}
+		}
+	}
+
 	response, err := p.Client.Beta.Messages.New(ctx, params)
 	if err != nil {
 		return nil, xError.NewError(ctx, xError.OperationFailed, "Anthropic 非流式对话失败", false, err)

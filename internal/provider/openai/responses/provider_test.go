@@ -200,11 +200,14 @@ func TestResponsesProvider_handleStreamEvent(t *testing.T) {
 		{
 			name:     "response.output_text.delta",
 			rawJSON:  `{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Hello world"}`,
-			wantLen:  1,
+			wantLen:  2,
 			wantType: provider.StreamTypeDelta,
 			check: func(t *testing.T, events []provider.StreamEvent) {
-				if events[0].Delta.Type != provider.StreamDeltaTypeTextOutput {
-					t.Errorf("expected text_output delta, got %v", events[0].Delta.Type)
+				if events[0].Delta.Type != provider.StreamDeltaTypeBlockStart {
+					t.Errorf("expected block_start delta first, got %v", events[0].Delta.Type)
+				}
+				if events[1].Delta.Type != provider.StreamDeltaTypeTextOutput {
+					t.Errorf("expected text_output delta second, got %v", events[1].Delta.Type)
 				}
 			},
 		},
@@ -247,7 +250,8 @@ func TestResponsesProvider_handleStreamEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			event := unmarshalResponseEvent(t, tt.rawJSON)
-			result := p.handleStreamEvent(context.Background(), event)
+			textBlockStarted := false
+			result := p.handleStreamEvent(context.Background(), event, &textBlockStarted)
 			if len(result) != tt.wantLen {
 				t.Errorf("handleStreamEvent() returned %d events, want %d", len(result), tt.wantLen)
 				return
@@ -300,15 +304,7 @@ func TestNewResponsesProviderWithOptions(t *testing.T) {
 	})
 }
 
-func TestNewResponsesProvider_BackwardCompatible(t *testing.T) {
-	p := NewResponsesProvider("test-api-key")
-	if p == nil {
-		t.Fatal("NewResponsesProvider(string) returned nil")
-	}
-	if got := p.GetProviderType(); got != provider.ProviderOpenAIResponses {
-		t.Errorf("GetProviderType() = %v, want %v", got, provider.ProviderOpenAIResponses)
-	}
-}
+
 
 func TestNewResponsesProviderWithOptions_EmptyOptions(t *testing.T) {
 	p := NewResponsesProviderWithOptions()

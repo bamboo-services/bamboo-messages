@@ -6,6 +6,7 @@ import (
 	xError "github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared"
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
 
@@ -39,6 +40,48 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 
 	if tools := buildTools(config.Tools); tools != nil {
 		params.Tools = tools
+	}
+
+	// 透传 Reasoning 参数 (Effort + Summary)
+	if config.ThinkingConfig != nil && (config.ThinkingConfig.ReasoningEffort != "" || config.ThinkingConfig.Summary != "") {
+		reasoning := shared.ReasoningParam{}
+		if config.ThinkingConfig.ReasoningEffort != "" {
+			reasoning.Effort = shared.ReasoningEffort(config.ThinkingConfig.ReasoningEffort)
+		}
+		if config.ThinkingConfig.Summary != "" {
+			reasoning.Summary = shared.ReasoningSummary(config.ThinkingConfig.Summary)
+		}
+		params.Reasoning = reasoning
+	}
+
+	// 透传 ToolChoice 参数
+	if tc, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyToolChoice); ok {
+		if tcStr, ok := tc.(string); ok {
+			// 简单字符串模式,如 "auto", "none", "required"
+			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
+				OfToolChoiceMode: openai.Opt(responses.ToolChoiceOptions(tcStr)),
+			}
+		}
+	}
+
+	// 透传 ResponseFormat 参数 (通过 Text.Format)
+	if rf, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyResponseFormat); ok {
+		if rfStr, ok := rf.(string); ok {
+			// 支持简单字符串格式,如 "text", "json_object"
+			if rfStr == "text" {
+				params.Text = responses.ResponseTextConfigParam{
+					Format: responses.ResponseFormatTextConfigUnionParam{
+						OfText: openai.Ptr(shared.NewResponseFormatTextParam()),
+					},
+				}
+			} else if rfStr == "json_object" {
+				params.Text = responses.ResponseTextConfigParam{
+					Format: responses.ResponseFormatTextConfigUnionParam{
+						OfJSONObject: openai.Ptr(shared.NewResponseFormatJSONObjectParam()),
+					},
+				}
+			}
+		}
 	}
 
 	response, err := p.Client.Responses.New(ctx, params)

@@ -36,3 +36,6 @@ develop/
 
 ### AI ###
 .omo/
+
+### 含密钥的测试文件 ###
+bamboo/live_test.go

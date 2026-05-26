@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/shared"
 	xError "github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
@@ -56,6 +57,34 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			params.Tools = tools
 		}
 
+		if config.ThinkingConfig != nil && config.ThinkingConfig.ReasoningEffort != "" {
+			params.ReasoningEffort = shared.ReasoningEffort(config.ThinkingConfig.ReasoningEffort)
+		}
+
+		if fp, ok := provider.GetExtraFloat64(config.ProviderExtra, provider.ProviderExtraKeyFrequencyPenalty); ok {
+			params.FrequencyPenalty = openai.Float(fp)
+		}
+
+		if pp, ok := provider.GetExtraFloat64(config.ProviderExtra, provider.ProviderExtraKeyPresencePenalty); ok {
+			params.PresencePenalty = openai.Float(pp)
+		}
+
+		if seed, ok := provider.GetExtraInt64(config.ProviderExtra, provider.ProviderExtraKeySeed); ok {
+			params.Seed = openai.Int(seed)
+		}
+
+		if tc, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyToolChoice); ok {
+			if toolChoice, ok := tc.(openai.ChatCompletionToolChoiceOptionUnionParam); ok {
+				params.ToolChoice = toolChoice
+			}
+		}
+
+		if rf, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyResponseFormat); ok {
+			if responseFormat, ok := rf.(openai.ChatCompletionNewParamsResponseFormatUnion); ok {
+				params.ResponseFormat = responseFormat
+			}
+		}
+
 		// 启用 usage 流式返回
 		params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
 			IncludeUsage: openai.Bool(true),
@@ -64,9 +93,12 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 		stream := p.Client.Chat.Completions.NewStreaming(ctx, params)
 		defer stream.Close()
 
+		// 追踪文本块是否已开始，用于合成 OpenAI Completions 缺失的 content_block_start 事件
+		textBlockStarted := false
+
 		for stream.Next() {
 			chunk := stream.Current()
-			events := p.handleChunk(chunk)
+			events := p.handleChunk(chunk, &textBlockStarted)
 			for _, e := range events {
 				select {
 				case eventCh <- e:
