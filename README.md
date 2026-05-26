@@ -21,55 +21,56 @@ Bamboo Messages 是一个**纯 Go SDK 库**，为上层业务提供标准化的 
 ```go
 import (
     "context"
-    "github.com/bamboo-services/bamboo-messages/provider"
-    "github.com/bamboo-services/bamboo-messages/provider/anthropic"
+    "fmt"
+
+    "github.com/bamboo-services/bamboo-messages/bamboo"
+    "github.com/bamboo-services/bamboo-messages/internal/provider/anthropic"
 )
 
 func main() {
     ctx := context.Background()
 
-    // ── 方式一：最简创建（默认连接 SDK 默认端点）──
+    // ── 创建底层 Provider ──
     p := anthropic.NewProvider("sk-ant-xxx")
 
-    // ── 方式二：自定义端点（自建网关 / 代理 / 第三方兼容服务）──
+    // ── 自定义端点（自建网关 / 代理 / 第三方兼容服务）──
     // p := anthropic.NewProviderWithOptions(
     //     anthropic.WithAPIKey("your-api-key"),
     //     anthropic.WithBaseURL("https://your-gateway.example.com/v1"),
     //     anthropic.WithHeader("X-Custom-Header", "value"),
     // )
 
-    // 构建消息
-    messages := []provider.Message{
-        {Role: provider.RoleUser, Content: "你好！"},
+    // ── 创建 Bamboo Messages SDK 客户端 ──
+    client := bamboo.NewClient(p)
+
+    // 构建消息（ContentBlock 数组风格）
+    messages := []bamboo.BambooMessage{
+        bamboo.NewUserMessage("你好！"),
     }
 
-    config := &provider.ChatConfig{
-        Model:       "claude-sonnet-4-20250514",
-        MaxTokens:   1024,
-        Temperature: provider.Ptr(0.7),
+    config := &bamboo.RequestConfig{
+        Model:     "claude-sonnet-4-20250514",
+        MaxTokens: 1024,
     }
 
-    // 流式对话
-    eventCh := p.Chat(ctx, messages, config)
+    // ── 流式对话 ──
+    eventCh, _ := client.Chat(ctx, messages, "你是一个有帮助的助手。", config)
     for event := range eventCh {
         switch event.Type {
-        case provider.StreamTypeDelta:
-            if event.Delta.Type == provider.StreamDeltaTypeTextOutput {
-                fmt.Print(string(event.Delta.Data.(provider.TextData)))
+        case bamboo.EventContentBlockDelta:
+            if delta, ok := event.Delta.(*bamboo.StreamDelta); ok && delta.Type == bamboo.DeltaTextDelta {
+                fmt.Print(delta.Text)
             }
-        case provider.StreamTypeDone:
+        case bamboo.EventMessageStop:
             fmt.Println("\n--- 完成 ---")
-        case provider.StreamTypeError:
-            log.Printf("错误: %v", event.Err)
         }
     }
 
-    // 非流式对话
-    result, err := p.Complete(ctx, messages, config)
-    if err != nil {
-        log.Fatalf("对话失败: %v", err)
-    }
-    fmt.Println(result.Content)
+    // ── 非流式对话 ──
+    resp, _ := client.Complete(ctx, messages, "", config)
+    fmt.Printf("响应: %s\n", resp.Content[0].Text)
+    fmt.Printf("服务商: %s\n", resp.ProviderType)
+    fmt.Printf("Token: input=%d, output=%d\n", resp.Usage.InputTokens, resp.Usage.OutputTokens)
 }
 ```
 
@@ -78,18 +79,23 @@ func main() {
 通过 `<-chan StreamEvent` 实时接收 AI 模型的增量输出：
 
 ```
-Start → Delta(text/thinking/tool_call) → Stop → Done
+message_start → content_block_start → content_block_delta(text/thinking/tool) → content_block_stop → message_delta → message_stop
 ```
 
 ```go
-eventCh := p.ChatWithSystem(ctx, "你是一个有帮助的助手。", messages, config)
+eventCh, _ := client.Chat(ctx, messages, "你是一个有帮助的助手。", config)
 for event := range eventCh {
-    switch event.Delta.Type {
-    case provider.StreamDeltaTypeTextOutput:     // 文本增量
-    case provider.StreamDeltaTypeThinking:       // 思考过程
-    case provider.StreamDeltaTypeToolCall:       // 工具调用开始
-    case provider.StreamDeltaTypeToolCallDelta:  // 工具参数增量
-    case provider.StreamDeltaTypeUsage:           // Token 用量统计
+    switch event.Type {
+    case bamboo.EventContentBlockDelta:
+        // event.Delta 为 *bamboo.StreamDelta，通过 Type 区分增量类型
+        //   - bamboo.DeltaTextDelta      文本增量
+        //   - bamboo.DeltaThinkingDelta  思考过程增量
+        //   - bamboo.DeltaInputJSON      工具调用参数增量
+        //   - bamboo.DeltaSignature      思考签名增量
+    case bamboo.EventMessageDelta:
+        // event.Delta 为 *bamboo.MessageDelta，携带停止原因
+    case bamboo.EventMessageStop:
+        // 消息传输完成
     }
 }
 ```
@@ -99,29 +105,32 @@ for event := range eventCh {
 同步获取完整响应，适用于不需要实时输出的场景：
 
 ```go
-result, err := p.CompleteWithSystem(ctx, "你是一个有帮助的助手。", messages, config)
-// result.Content      — 文本内容
-// result.ToolCalls    — 工具调用列表
-// result.FinishReason — 结束原因 (stop / length / tool_calls)
-// result.Usage         — Token 用量统计
+resp, err := client.Complete(ctx, messages, "你是一个有帮助的助手。", config)
+// resp.Content      — 响应内容块列表 ([]ContentBlock)
+// resp.StopReason   — 结束原因 (end_turn / max_tokens / tool_use / stop_sequence)
+// resp.Usage         — Token 用量统计 (InputTokens / OutputTokens)
+// resp.ProviderType  — 底层协议类型 (如 "anthropic")
+// resp.RequestID     — 请求追踪 ID
 ```
 
 ## 支持的协议适配器
 
 | 协议适配器 | 包路径 | 目标协议 | 默认端点 | 状态 |
 |------------|--------|---------|---------|------|
-| **Anthropic Messages** | `provider/anthropic` | Anthropic Messages Protocol | api.anthropic.com | ✅ |
-| **OpenAI Completions** | `provider/openai/completions` | Chat Completions Protocol | api.openai.com | ✅ |
-| **OpenAI Responses** | `provider/openai/responses` | Responses Protocol | api.openai.com | ✅ |
-| DeepSeek (兼容) | `provider/deepseek` | OpenAI Completions 兼容 | api.deepseek.com | 📋 规划中 |
-| Google Gemini | `provider/gemini` | Gemini Protocol | generativelanguage.googleapis.com | 📋 规划中 |
-| 自定义端点 | `provider/custom` | 任意兼容协议 | 用户自定义 | 📋 规划中 |
+| **Anthropic Messages** | `internal/provider/anthropic` | Anthropic Messages Protocol | api.anthropic.com | ✅ |
+| **OpenAI Completions** | `internal/provider/openai/completions` | Chat Completions Protocol | api.openai.com | ✅ |
+| **OpenAI Responses** | `internal/provider/openai/responses` | Responses Protocol | api.openai.com | ✅ |
+| DeepSeek (兼容) | `internal/provider/deepseek` | OpenAI Completions 兼容 | api.deepseek.com | 📋 规划中 |
+| Google Gemini | `internal/provider/gemini` | Gemini Protocol | generativelanguage.googleapis.com | 📋 规划中 |
+| 自定义端点 | `internal/provider/custom` | 任意兼容协议 | 用户自定义 | 📋 规划中 |
 
 ## Options 配置参考
 
 所有 Provider 构造函数均支持 Functional Options 模式：
 
 ```go
+import "github.com/bamboo-services/bamboo-messages/internal/provider/anthropic"
+
 // 完整选项（以 Anthropic 为例）
 p := anthropic.NewProviderWithOptions(
     anthropic.WithAPIKey("sk-ant-xxx"),                          // API 密钥
@@ -131,6 +140,9 @@ p := anthropic.NewProviderWithOptions(
 
 // 最简形式（向后兼容）
 p := anthropic.NewProvider("sk-ant-xxx")
+
+// 然后创建 BambooClient
+client := bamboo.NewClient(p)
 ```
 
 | Option | 类型 | 说明 | 默认值 |
@@ -144,28 +156,38 @@ p := anthropic.NewProvider("sk-ant-xxx")
 
 ## 核心类型
 
-### Message — 对话消息
+> 以下类型均定义在 `bamboo` 包中，是面向上层业务的公共 API。
+
+### BambooMessage — 对话消息
 
 ```go
-type Message struct {
-    Role       MessageRole `json:"role"`                   // user / assistant / tool
-    Content    string      `json:"content,omitempty"`      // 消息内容
-    ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`   // 助手发起的工具调用
-    ToolCallID string      `json:"tool_call_id,omitempty"` // 工具响应的调用 ID
-}
+// 创建消息的便捷构造函数
+msg := bamboo.NewUserMessage("你好！")
+msg := bamboo.NewAssistantMessage("回复内容")
+
+// 工具结果消息：使用 ContentBlock 构建
+msg := bamboo.NewUserMessageBlocks(
+    bamboo.NewToolResultBlock("call-id", "工具返回内容", false),
+)
+
+// 也可使用 ContentBlock 数组构建富文本消息
+msg := bamboo.NewUserMessageBlocks(
+    bamboo.NewTextBlock("描述这张图片"),
+    bamboo.NewImageBlock(bamboo.ContentSource{
+        Type: "url",
+        URL:  "https://example.com/img.png",
+    }),
+)
 ```
 
-### ChatConfig — 请求配置
+### RequestConfig — 请求配置
 
 ```go
-type ChatConfig struct {
-    Model       string            `json:"model"`
-    Temperature *float64          `json:"temperature,omitempty"`
-    TopP        *float64          `json:"top_p,omitempty"`
-    MaxTokens   int64             `json:"max_tokens,omitempty"`
-    Stop        []string          `json:"stop,omitempty"`
-    Tools       []Tool            `json:"tools,omitempty"`
-    Metadata    map[string]string `json:"metadata,omitempty"`
+config := &bamboo.RequestConfig{
+    Model:       "claude-sonnet-4-20250514",
+    MaxTokens:   1024,
+    Temperature: bamboo.PtrFloat64(0.7), // *float64，区分未设置和零值
+    Tools:       []bamboo.Tool{...}, // 工具定义（可选）
 }
 ```
 
@@ -173,38 +195,59 @@ type ChatConfig struct {
 
 ```go
 type StreamEvent struct {
-    Type  StreamType       `json:"type"`   // start / stop / done / error / delta
-    Delta StreamDelta[any] `json:"delta"` // 增量数据（仅 Delta 类型有值）
-    Err   *xError.Error    `json:"err"`     // 错误信息（仅 Error 类型有值）
+    Type        StreamEventType  // message_start / content_block_delta / message_stop / ...
+    Message     *BambooMessage   // message_start 事件
+    Index       int              // 内容块索引
+    ContentBlock *ContentBlock   // content_block_start 事件
+    Delta       any              // *StreamDelta 或 *MessageDelta
+    Usage       *Usage           // Token 用量
+    Error       *BambooError     // 错误详情
 }
 ```
 
-### CompletionResult — 非流式结果
+### Response — 非流式结果
 
 ```go
-type CompletionResult struct {
-    Content      string        `json:"content"`
-    ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
-    FinishReason FinishReason  `json:"finish_reason"` // stop / length / tool_calls
-    Usage        UsageData     `json:"usage"`
+type Response struct {
+    ID           string          // 消息 ID
+    Type         string          // "message"
+    Role         MessageRole     // "assistant"
+    Content      []ContentBlock  // 响应内容块
+    Model        string          // 使用的模型
+    StopReason   FinishReason    // end_turn / max_tokens / tool_use
+    Usage        Usage           // Token 用量
+    ProviderType string          // 底层协议类型（Bamboo 扩展）
+    RequestID    string          // 请求追踪 ID（Bamboo 扩展）
+    CreatedAt    int64           // 创建时间戳（Bamboo 扩展）
 }
-```
 
 ## 项目结构
 
 ```
 bamboo-messages/
-├── provider/                        # 核心抽象层
-│   ├── provider.go                 # Provider 接口定义 (8 个方法)
+├── bamboo/                          # 公共 SDK 层 — 面向上层业务的统一 API
+│   ├── bamboo.go                   # BambooClient 接口 + Chat/Complete 实现
+│   ├── message.go                  # BambooMessage + ContentBlock 消息模型
+│   ├── response.go                 # Response / Usage 非流式响应类型
+│   ├── stream.go                   # StreamEvent / StreamDelta 流事件模型
+│   ├── tool.go                     # Tool / ToolInputSchema 工具定义
+│   ├── config.go                   # RequestConfig 请求配置
+│   ├── option.go                   # Functional Options (WithProvider / WithDefaultModel)
+│   ├── convert.go · content.go     # 类型转换 + 内容处理
+│   ├── errors.go                   # BambooError 错误类型
+│   └── *_test.go                   # 单元测试 + 集成测试
+│
+├── internal/provider/              # 核心抽象层（内部包）
+│   ├── provider.go                 # Provider 接口定义 (6 个方法)
 │   ├── type.go                     # 通用类型定义
 │   └── stream.go                   # 流式事件模型
 │
-├── provider/anthropic/              # Anthropic Messages 协议适配器
+├── internal/provider/anthropic/    # Anthropic Messages 协议适配器
 │   ├── provider.go · chat.go · complete.go
 │   ├── stream.go · message.go · models.go
 │   └── provider_test.go
 │
-├── provider/openai/
+├── internal/provider/openai/
 │   ├── completions/                # OpenAI Chat Completions 协议适配器
 │   │   └── provider.go · chat.go · complete.go
 │   │       stream.go · message.go · models.go · provider_test.go
@@ -212,12 +255,7 @@ bamboo-messages/
 │       └── provider.go · chat.go · complete.go
 │           stream.go · message.go · models.go · provider_test.go
 │
-├── develop/docs/                   # 设计文档
-│   ├── overview.md                 # 项目概览
-│   ├── provider-interface.md       # 接口详细设计
-│   ├── message-format.md           # 消息模型设计
-│   ├── stream-design.md            # 流式处理设计
-│   └── roadmap.md                  # 开发路线图
+├── develop/docs/                   # 设计文档（本地，不提交）
 │
 ├── go.mod · go.sum · LICENSE
 └── README.md
