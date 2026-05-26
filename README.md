@@ -15,6 +15,7 @@ Bamboo Messages 是一个**纯 Go SDK 库**，为上层业务提供标准化的 
 | **Provider 可插拔** | 每种协议实现独立包，按需引入，互不依赖 |
 | **端点可配置** | 支持自定义 BaseURL，对接任意兼容端点（官方 API / 自建网关 / 第三方代理） |
 | **Options 模式** | Functional Options 灵活配置 API Key、BaseURL、Headers 等 |
+| **参数透传** | 统一 ThinkingConfig + ProviderExtra 机制，支持 Thinking/Reasoning/TopK/FrequencyPenalty 等全部参数 |
 
 ## 快速开始
 
@@ -49,8 +50,13 @@ func main() {
     }
 
     config := &bamboo.RequestConfig{
-        Model:     "claude-sonnet-4-20250514",
-        MaxTokens: 1024,
+        Model:       "claude-sonnet-4-20250514",
+        MaxTokens:   1024,
+        Temperature: bamboo.PtrFloat64(0.7),
+        ThinkingConfig: &bamboo.ThinkingConfig{
+            Enabled:      bamboo.PtrBool(true),
+            BudgetTokens: bamboo.PtrInt64(10000),
+        },
     }
 
     // ── 流式对话 ──
@@ -92,6 +98,7 @@ for event := range eventCh {
         //   - bamboo.DeltaThinkingDelta  思考过程增量
         //   - bamboo.DeltaInputJSON      工具调用参数增量
         //   - bamboo.DeltaSignature      思考签名增量
+        //   - bamboo.DeltaBlockStart     内容块开始
     case bamboo.EventMessageDelta:
         // event.Delta 为 *bamboo.MessageDelta，携带停止原因
     case bamboo.EventMessageStop:
@@ -154,6 +161,69 @@ client := bamboo.NewClient(p)
 > OpenAI Completions / Responses 的 Options 用法完全一致，只需替换包名前缀即可：
 > `completions.NewCompletionsProviderWithOptions(...)` / `responses.NewResponsesProviderWithOptions(...)`
 
+> **注意**: Provider Options（WithAPIKey/WithBaseURL/WithHeader）用于创建 Provider 实例；RequestOption（WithTopK/WithFrequencyPenalty 等）用于配置每次请求参数。两者是独立的体系。
+
+## 请求参数配置
+
+### ThinkingConfig — 思考/推理配置
+
+```go
+// Anthropic Thinking
+config := &bamboo.RequestConfig{
+    Model: "claude-sonnet-4-20250514",
+    ThinkingConfig: &bamboo.ThinkingConfig{
+        Enabled:      bamboo.PtrBool(true),
+        BudgetTokens: bamboo.PtrInt64(10000),
+    },
+}
+
+// OpenAI Reasoning
+config := &bamboo.RequestConfig{
+    Model: "o3",
+    ThinkingConfig: &bamboo.ThinkingConfig{
+        ReasoningEffort: "high",
+    },
+}
+
+// OpenAI Responses Reasoning with Summary
+config := &bamboo.RequestConfig{
+    Model: "o4-mini",
+    ThinkingConfig: &bamboo.ThinkingConfig{
+        ReasoningEffort: "medium",
+        Summary:         "auto",
+    },
+}
+```
+
+### WithXxx() 请求配置函数
+
+```go
+// 使用 RequestOption 配置 Provider 特有参数
+opts := []bamboo.RequestOption{
+    bamboo.WithTopK(40),
+    bamboo.WithFrequencyPenalty(0.5),
+    bamboo.WithPresencePenalty(0.3),
+    bamboo.WithSeed(42),
+    bamboo.WithToolChoice("auto"),
+    bamboo.WithResponseFormat(map[string]any{"type": "json_object"}),
+    bamboo.WithExtra("custom_key", "custom_value"),
+}
+// 应用选项
+for _, opt := range opts {
+    opt(config)
+}
+```
+
+| Option | 类型 | 说明 | 支持 Provider |
+|--------|------|------|--------------|
+| `WithTopK(v)` | `float64` | Top-K 采样参数 | Anthropic |
+| `WithFrequencyPenalty(v)` | `float64` | 频率惩罚 | OpenAI Completions/Responses |
+| `WithPresencePenalty(v)` | `float64` | 存在惩罚 | OpenAI Completions/Responses |
+| `WithSeed(v)` | `int64` | 随机种子 | OpenAI Completions |
+| `WithToolChoice(v)` | `any` | 工具选择策略 | Anthropic/OpenAI |
+| `WithResponseFormat(v)` | `any` | 响应格式 | OpenAI Completions/Responses |
+| `WithExtra(k, v)` | `string, any` | 自定义扩展参数 | 所有 |
+
 ## 核心类型
 
 > 以下类型均定义在 `bamboo` 包中，是面向上层业务的公共 API。
@@ -184,10 +254,12 @@ msg := bamboo.NewUserMessageBlocks(
 
 ```go
 config := &bamboo.RequestConfig{
-    Model:       "claude-sonnet-4-20250514",
-    MaxTokens:   1024,
-    Temperature: bamboo.PtrFloat64(0.7), // *float64，区分未设置和零值
-    Tools:       []bamboo.Tool{...}, // 工具定义（可选）
+    Model:          "claude-sonnet-4-20250514",
+    MaxTokens:      1024,
+    Temperature:    bamboo.PtrFloat64(0.7), // *float64，区分未设置和零值
+    Tools:          []bamboo.Tool{...}, // 工具定义（可选）
+    ThinkingConfig: &bamboo.ThinkingConfig{...},
+    ProviderExtra:  map[string]any{"top_k": 40},
 }
 ```
 
@@ -231,8 +303,8 @@ bamboo-messages/
 │   ├── response.go                 # Response / Usage 非流式响应类型
 │   ├── stream.go                   # StreamEvent / StreamDelta 流事件模型
 │   ├── tool.go                     # Tool / ToolInputSchema 工具定义
-│   ├── config.go                   # RequestConfig 请求配置
-│   ├── option.go                   # Functional Options (WithProvider / WithDefaultModel)
+│   ├── config.go                   # RequestConfig + ThinkingConfig + PtrFloat64/PtrBool/PtrInt64
+│   ├── option.go                   # Functional Options + RequestOption + WithXxx() 请求配置函数
 │   ├── convert.go · content.go     # 类型转换 + 内容处理
 │   ├── errors.go                   # BambooError 错误类型
 │   └── *_test.go                   # 单元测试 + 集成测试
