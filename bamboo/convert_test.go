@@ -846,6 +846,277 @@ func TestConvertToolWithEnumAndItems(t *testing.T) {
 	}
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// 补充覆盖率测试
+// ──────────────────────────────────────────────────────────────────────
+
+// TestProviderRoleUnknown 验证未知 role 返回默认值。
+func TestProviderRoleUnknown(t *testing.T) {
+	tests := []struct {
+		name     string
+		role     MessageRole
+		expected provider.MessageRole
+	}{
+		{"user", RoleUser, provider.RoleUser},
+		{"assistant", RoleAssistant, provider.RoleAssistant},
+		{"unknown_system", "system", provider.RoleUser},
+		{"empty", "", provider.RoleUser},
+		{"random", "custom_role", provider.RoleUser},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := providerRole(tt.role)
+			if got != tt.expected {
+				t.Errorf("providerRole(%q) = %q, 期望 %q", tt.role, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestResultToResponseWithProviderType 验证不同 providerType 正确设置。
+func TestResultToResponseWithProviderType(t *testing.T) {
+	result := &provider.CompletionResult{
+		Content:      "test",
+		FinishReason: provider.FinishReasonStop,
+		Usage:        provider.UsageData{InputTokens: 5, OutputTokens: 3},
+	}
+
+	tests := []struct {
+		name         string
+		providerType string
+	}{
+		{"anthropic", "anthropic"},
+		{"openai-completions", "openai-completions"},
+		{"openai-responses", "openai-responses"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := resultToResponse(result, tt.providerType)
+			if resp.ProviderType != tt.providerType {
+				t.Errorf("ProviderType = %q, 期望 %q", resp.ProviderType, tt.providerType)
+			}
+		})
+	}
+}
+
+// TestResultToResponseEmptyContent 验证空 Content + 空 ToolCalls 返回空切片。
+func TestResultToResponseEmptyContent(t *testing.T) {
+	result := &provider.CompletionResult{
+		Content:      "",
+		FinishReason: provider.FinishReasonStop,
+		Usage:        provider.UsageData{},
+	}
+
+	resp := resultToResponse(result, "anthropic")
+	if resp == nil {
+		t.Fatal("期望非 nil 响应")
+	}
+	if len(resp.Content) != 0 {
+		t.Errorf("Content len = %d, 期望 0", len(resp.Content))
+	}
+}
+
+// TestConvertStreamDefaultDeltaType 验证未知 delta 类型返回空。
+func TestConvertStreamDefaultDeltaType(t *testing.T) {
+	sc := NewStreamConverter()
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+
+	events := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.StreamDelta[any]{Type: "unknown_type", Data: "something"},
+	})
+
+	if len(events) != 0 {
+		t.Errorf("期望 0 个事件, 实际 %d", len(events))
+	}
+}
+
+// TestConvertDefaultEventType 验证未知 StreamType 返回空。
+func TestConvertDefaultEventType(t *testing.T) {
+	sc := NewStreamConverter()
+	events := sc.Convert(provider.StreamEvent{Type: "custom_event"})
+	if len(events) != 0 {
+		t.Errorf("期望 0 个事件, 实际 %d", len(events))
+	}
+}
+
+// TestMessagesToProvider_ThinkingBlock 验证 thinking block 被跳过。
+func TestMessagesToProvider_ThinkingBlock(t *testing.T) {
+	msgs := []BambooMessage{
+		NewUserMessageBlocks(
+			NewThinkingBlock("deep thoughts", "sig_abc"),
+			NewTextBlock("real message"),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	}
+	// thinking 被跳过，只保留 text
+	if result[0].Content != "real message" {
+		t.Errorf("Content = %q, 期望 %q", result[0].Content, "real message")
+	}
+}
+
+// TestMessagesToProvider_MixedBlocks 验证混合 text + tool_use blocks 的转换。
+func TestMessagesToProvider_MixedBlocks(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewTextBlock("let me search"),
+			NewToolUseBlock("call_1", "search", map[string]any{"q": "golang"}),
+			NewTextBlock(" and also "),
+			NewToolUseBlock("call_2", "calculator", map[string]any{"expr": "1+1"}),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	}
+	// 两个 text 拼接
+	if result[0].Content != "let me search and also " {
+		t.Errorf("Content = %q, 期望 %q", result[0].Content, "let me search and also ")
+	}
+	// 两个 tool calls
+	if len(result[0].ToolCalls) != 2 {
+		t.Fatalf("期望 2 个 tool calls, 实际 %d", len(result[0].ToolCalls))
+	}
+	if result[0].ToolCalls[0].Function.Name != "search" {
+		t.Errorf("ToolCalls[0].Name = %q, 期望 search", result[0].ToolCalls[0].Function.Name)
+	}
+	if result[0].ToolCalls[1].Function.Name != "calculator" {
+		t.Errorf("ToolCalls[1].Name = %q, 期望 calculator", result[0].ToolCalls[1].Function.Name)
+	}
+}
+
+// TestMessagesToProvider_NilToolUseInput 验证 tool_use block 的 Input 为 nil 时使用空 JSON。
+func TestMessagesToProvider_NilToolUseInput(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewToolUseBlock("call_nil", "no_args_tool", nil),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	}
+	if len(result[0].ToolCalls) != 1 {
+		t.Fatalf("期望 1 个 tool call, 实际 %d", len(result[0].ToolCalls))
+	}
+	// nil input 应被序列化为 `{}`
+	if result[0].ToolCalls[0].Function.Arguments != `{}` {
+		t.Errorf("Arguments = %q, 期望 %q", result[0].ToolCalls[0].Function.Arguments, `{}`)
+	}
+}
+
+// TestMessagesToProvider_OnlyToolUseBlocks 验证仅有 tool_use blocks（无 text）时的转换。
+func TestMessagesToProvider_OnlyToolUseBlocks(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewToolUseBlock("call_1", "tool_a", nil),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	}
+	// 没有文本，但 tool_calls 存在，消息应被保留
+	if result[0].Content != "" {
+		t.Errorf("Content = %q, 期望空字符串", result[0].Content)
+	}
+	if len(result[0].ToolCalls) != 1 {
+		t.Errorf("期望 1 个 tool call, 实际 %d", len(result[0].ToolCalls))
+	}
+}
+
+// TestMessagesToProvider_OnlyThinkingBlocks 验证仅有 thinking blocks（无 text、无 tool_calls）时不生成消息。
+func TestMessagesToProvider_OnlyThinkingBlocks(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewThinkingBlock("hmm", "sig"),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// thinking 被跳过，没有 text 也没有 tool_calls，不生成消息
+	if len(result) != 0 {
+		t.Errorf("期望 0 条消息, 实际 %d", len(result))
+	}
+}
+
+// TestNewToolUseBlock_MarshalError 验证 NewToolUseBlock 序列化失败时回退为空 JSON。
+func TestNewToolUseBlock_MarshalError(t *testing.T) {
+	// 传入无法序列化的值（如 channel）
+	block := NewToolUseBlock("id", "name", make(chan int))
+	if string(block.Input) != `{}` {
+		t.Errorf("Input = %q, 期望 %q", string(block.Input), `{}`)
+	}
+}
+
+// TestBuildParameters_EmptySchema 验证空 schema 构建参数。
+func TestBuildParameters_EmptySchema(t *testing.T) {
+	params := buildParameters(InputSchema{Type: "object"})
+	if params["type"] != "object" {
+		t.Errorf("type = %v, 期望 object", params["type"])
+	}
+	if _, ok := params["properties"]; ok {
+		t.Error("不应包含 properties")
+	}
+	if _, ok := params["required"]; ok {
+		t.Error("不应包含 required")
+	}
+}
+
+// TestConvertStreamErrorWithNilErr 验证 StreamTypeDone 返回空事件。
+func TestConvertStreamTypeDone(t *testing.T) {
+	sc := NewStreamConverter()
+	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})
+	if len(events) != 0 {
+		t.Errorf("期望 0 个事件, 实际 %d", len(events))
+	}
+}
+
+// TestConvertStreamStopWithoutUsage 验证 stop 事件无 usage 时使用默认值。
+func TestConvertStreamStopWithoutUsage(t *testing.T) {
+	sc := NewStreamConverter()
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+	// 不发送 usage delta，直接 stop
+
+	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})
+	if len(events) != 3 {
+		t.Fatalf("期望 3 个事件, 实际 %d", len(events))
+	}
+
+	msgDeltaEvent := events[1]
+	if msgDeltaEvent.Usage == nil {
+		t.Fatal("Usage 不应为 nil")
+	}
+	// 应使用默认零值
+	if msgDeltaEvent.Usage.InputTokens != 0 {
+		t.Errorf("InputTokens = %d, 期望 0", msgDeltaEvent.Usage.InputTokens)
+	}
+	if msgDeltaEvent.Usage.OutputTokens != 0 {
+		t.Errorf("OutputTokens = %d, 期望 0", msgDeltaEvent.Usage.OutputTokens)
+	}
+}
+
+// ──────────────────────────────────────────────────────────────────────
+
 func TestConvertStreamWithUsageInStop(t *testing.T) {
 	sc := NewStreamConverter()
 	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})

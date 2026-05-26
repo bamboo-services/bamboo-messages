@@ -2,6 +2,7 @@ package bamboo
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -175,6 +176,289 @@ func TestNewClientWithOptionsNoProvider(t *testing.T) {
 		}
 	}()
 	NewClientWithOptions(WithDefaultModel("test"))
+}
+
+// mockErrorProvider 用于测试错误场景的 Provider 模拟实现。
+type mockErrorProvider struct{}
+
+func (m *mockErrorProvider) Chat(_ context.Context, _ []provider.Message, _ *provider.ChatConfig) <-chan provider.StreamEvent {
+	ch := make(chan provider.StreamEvent, 1)
+	ch <- provider.StreamEvent{Type: provider.StreamTypeError}
+	close(ch)
+	return ch
+}
+
+func (m *mockErrorProvider) ChatWithSystem(_ context.Context, _ string, _ []provider.Message, _ *provider.ChatConfig) <-chan provider.StreamEvent {
+	ch := make(chan provider.StreamEvent, 1)
+	ch <- provider.StreamEvent{Type: provider.StreamTypeError}
+	close(ch)
+	return ch
+}
+
+func (m *mockErrorProvider) Complete(_ context.Context, _ []provider.Message, _ *provider.ChatConfig) (*provider.CompletionResult, error) {
+	return nil, errors.New("provider error")
+}
+
+func (m *mockErrorProvider) CompleteWithSystem(_ context.Context, _ string, _ []provider.Message, _ *provider.ChatConfig) (*provider.CompletionResult, error) {
+	return nil, errors.New("provider error with system")
+}
+
+func (m *mockErrorProvider) GetProviderType() provider.ProviderType {
+	return provider.ProviderAnthropic
+}
+
+func (m *mockErrorProvider) GetAvailableModels() []string {
+	return []string{"test-model"}
+}
+
+// mockRichProvider 用于测试丰富事件流的 Provider 模拟实现。
+type mockRichProvider struct{}
+
+func (m *mockRichProvider) Chat(_ context.Context, _ []provider.Message, _ *provider.ChatConfig) <-chan provider.StreamEvent {
+	ch := make(chan provider.StreamEvent, 4)
+	ch <- provider.StreamEvent{Type: provider.StreamTypeStart}
+	ch <- provider.StreamEvent{Type: provider.StreamTypeDelta, Delta: provider.NewTextDelta("hello")}
+	ch <- provider.StreamEvent{Type: provider.StreamTypeDelta, Delta: provider.NewUsageDelta(10, 5)}
+	ch <- provider.StreamEvent{Type: provider.StreamTypeStop}
+	close(ch)
+	return ch
+}
+
+func (m *mockRichProvider) ChatWithSystem(_ context.Context, _ string, _ []provider.Message, _ *provider.ChatConfig) <-chan provider.StreamEvent {
+	return m.Chat(nil, nil, nil)
+}
+
+func (m *mockRichProvider) Complete(_ context.Context, _ []provider.Message, _ *provider.ChatConfig) (*provider.CompletionResult, error) {
+	return &provider.CompletionResult{
+		Content:      "response with tools",
+		FinishReason: provider.FinishReasonStop,
+		Usage:        provider.UsageData{InputTokens: 20, OutputTokens: 10},
+	}, nil
+}
+
+func (m *mockRichProvider) CompleteWithSystem(_ context.Context, _ string, _ []provider.Message, _ *provider.ChatConfig) (*provider.CompletionResult, error) {
+	return m.Complete(nil, nil, nil)
+}
+
+func (m *mockRichProvider) GetProviderType() provider.ProviderType {
+	return provider.ProviderAnthropic
+}
+
+func (m *mockRichProvider) GetAvailableModels() []string {
+	return []string{"test-model"}
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 补充单元测试
+// ──────────────────────────────────────────────────────────────────────
+
+// TestChatContextCancellation 验证上下文取消时 Chat 正确关闭 channel。
+func TestChatContextCancellation(t *testing.T) {
+	p := &mockProvider{}
+	c := NewClient(p)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// 立即取消上下文
+	cancel()
+
+	messages := []BambooMessage{NewUserMessage("hi")}
+	ch, err := c.Chat(ctx, messages, "", nil)
+	if err != nil {
+		t.Fatalf("Chat 返回错误: %v", err)
+	}
+
+	// channel 应该被关闭
+	var events []StreamEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+	// 可能收到 0 个事件（ctx 已取消，goroutine 快速退出）或收到部分事件
+	// 关键是 channel 必须被关闭（for range 能正常结束）
+	_ = events
+}
+
+// TestCompleteEmptyMessages 验证 Complete 传入空 messages 时的行为。
+func TestCompleteEmptyMessages(t *testing.T) {
+	c := NewClient(&mockProvider{})
+	ctx := context.Background()
+
+	// 空 content 的消息，messagesToProvider 应返回错误
+	_, err := c.Complete(ctx, []BambooMessage{{Role: RoleUser, Content: []ContentBlock{}}}, "", nil)
+	if err == nil {
+		t.Fatal("期望空 Content 返回错误")
+	}
+}
+
+// TestCompleteProviderError 验证 Complete 在 provider 返回错误时正确传播。
+func TestCompleteProviderError(t *testing.T) {
+	c := NewClient(&mockErrorProvider{})
+	ctx := context.Background()
+
+	messages := []BambooMessage{NewUserMessage("hi")}
+	_, err := c.Complete(ctx, messages, "", nil)
+	if err == nil {
+		t.Fatal("期望 provider 错误被传播")
+	}
+	if err.Error() != "bamboo: complete failed: provider error" {
+		t.Errorf("错误信息 = %q, 不匹配", err.Error())
+	}
+}
+
+// TestCompleteProviderErrorWithSystem 验证带 system 的 Complete 错误传播。
+func TestCompleteProviderErrorWithSystem(t *testing.T) {
+	c := NewClient(&mockErrorProvider{})
+	ctx := context.Background()
+
+	messages := []BambooMessage{NewUserMessage("hi")}
+	_, err := c.Complete(ctx, messages, "system prompt", nil)
+	if err == nil {
+		t.Fatal("期望 provider 错误被传播")
+	}
+	if err.Error() != "bamboo: complete failed: provider error with system" {
+		t.Errorf("错误信息 = %q, 不匹配", err.Error())
+	}
+}
+
+// TestChatProviderError 验证 Chat 在 provider 返回 error event 时正确传播。
+func TestChatProviderError(t *testing.T) {
+	c := NewClient(&mockErrorProvider{})
+	ctx := context.Background()
+
+	messages := []BambooMessage{NewUserMessage("hi")}
+	ch, err := c.Chat(ctx, messages, "", nil)
+	if err != nil {
+		t.Fatalf("Chat 返回错误: %v", err)
+	}
+
+	var events []StreamEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+	if len(events) == 0 {
+		t.Fatal("期望至少收到一个错误事件")
+	}
+
+	// 最后一个事件应为 error 类型
+	last := events[len(events)-1]
+	if last.Type != EventError {
+		t.Errorf("最后事件类型 = %q, 期望 error", last.Type)
+	}
+}
+
+// TestChatWithSystemBasic 验证带 system 的 Chat 基本流程。
+func TestChatWithSystemBasic(t *testing.T) {
+	c := NewClient(&mockProvider{})
+	ctx := context.Background()
+
+	messages := []BambooMessage{NewUserMessage("hi")}
+	ch, err := c.Chat(ctx, messages, "你是一个助手", nil)
+	if err != nil {
+		t.Fatalf("Chat 返回错误: %v", err)
+	}
+
+	var events []StreamEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+	if len(events) == 0 {
+		t.Fatal("期望至少收到一个事件")
+	}
+}
+
+// TestCompleteWithConfig 验证 Complete 使用 RequestConfig 的完整流程。
+func TestCompleteWithConfig(t *testing.T) {
+	c := NewClient(&mockRichProvider{})
+	ctx := context.Background()
+
+	messages := []BambooMessage{NewUserMessage("hi")}
+	config := &RequestConfig{
+		Model:       "test-model",
+		MaxTokens:   1024,
+		Temperature: PtrFloat64(0.7),
+		TopP:        PtrFloat64(0.9),
+		Tools: []Tool{
+			{
+				Name:        "get_weather",
+				Description: "Get weather info",
+				InputSchema: InputSchema{
+					Type: "object",
+					Properties: map[string]PropertyDef{
+						"city": {Type: "string", Description: "City name"},
+					},
+					Required: []string{"city"},
+				},
+			},
+		},
+		StopSequences: []string{"STOP"},
+		Metadata:      map[string]string{"key": "value"},
+	}
+
+	resp, err := c.Complete(ctx, messages, "", config)
+	if err != nil {
+		t.Fatalf("Complete 返回错误: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("Response 不应为 nil")
+	}
+	if resp.ProviderType != "anthropic" {
+		t.Errorf("ProviderType = %q, 期望 anthropic", resp.ProviderType)
+	}
+}
+
+// TestCompleteWithSystemAndConfig 验证带 system 和 config 的 Complete。
+func TestCompleteWithSystemAndConfig(t *testing.T) {
+	c := NewClient(&mockRichProvider{})
+	ctx := context.Background()
+
+	messages := []BambooMessage{NewUserMessage("hi")}
+	config := &RequestConfig{
+		Model:     "test-model",
+		MaxTokens: 512,
+	}
+
+	resp, err := c.Complete(ctx, messages, "system prompt", config)
+	if err != nil {
+		t.Fatalf("Complete 返回错误: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("Response 不应为 nil")
+	}
+	if len(resp.Content) == 0 || resp.Content[0].Text != "response with tools" {
+		t.Errorf("Content 不匹配: %+v", resp.Content)
+	}
+}
+
+// TestChatRichStream 验证完整流式事件序列的转换。
+func TestChatRichStream(t *testing.T) {
+	c := NewClient(&mockRichProvider{})
+	ctx := context.Background()
+
+	messages := []BambooMessage{NewUserMessage("hi")}
+	ch, err := c.Chat(ctx, messages, "", nil)
+	if err != nil {
+		t.Fatalf("Chat 返回错误: %v", err)
+	}
+
+	var events []StreamEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+
+	// 期望事件: message_start, content_block_start, content_block_delta, content_block_stop, message_delta, message_stop
+	if len(events) < 3 {
+		t.Fatalf("期望至少 3 个事件, 实际 %d", len(events))
+	}
+
+	// 首个事件应为 message_start
+	if events[0].Type != EventMessageStart {
+		t.Errorf("首个事件类型 = %q, 期望 message_start", events[0].Type)
+	}
+
+	// 最后一个事件应为 message_stop
+	last := events[len(events)-1]
+	if last.Type != EventMessageStop {
+		t.Errorf("最后事件类型 = %q, 期望 message_stop", last.Type)
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────
