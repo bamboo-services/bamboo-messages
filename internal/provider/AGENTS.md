@@ -28,6 +28,7 @@
 | 修改请求构建 | `*/chat.go` + `*/complete.go` — 构建底层 SDK 请求参数 |
 | 添加新 Delta 类型 | `provider/stream.go` — 新增 StreamDeltaType 常量 + DeltaData 类型 + 构造函数 |
 | 添加 ProviderExtra 参数透传 | `*/chat.go` + `*/complete.go` — 使用 GetExtra* 从 config.ProviderExtra 提取参数设置到 SDK params |
+| 理解 UserAgent/版本 | `provider/version.go` | SDKName 常量 + GetUserAgent() + GetSDKVersion() |
 | 添加 ThinkingConfig 支持 | `*/chat.go` + `*/complete.go` — 从 config.ThinkingConfig 映射到 Anthropic/OpenAI 各自的推理参数 |
 
 ## CONVENTIONS
@@ -40,6 +41,7 @@
 - **handleChunk/handleStreamEvent 签名** — OpenAI 适配器的流处理函数新增 `textBlockStarted *bool` 参数用于追踪 BlockStart 状态
 - **参数透传** — 适配器 chat.go/complete.go 从 `config.ThinkingConfig` 和 `config.ProviderExtra` 提取参数，使用 `GetExtraFloat64`/`GetExtraInt64`/`GetExtraAny` 等类型安全 helper，不使用裸类型断言
 - **ThinkingConfig 映射** — Anthropic: Enabled + BudgetTokens → BetaThinkingParam；OpenAI Completions: ReasoningEffort → Reasoning 参数；OpenAI Responses: ReasoningEffort + Summary → Reasoning 参数
+- **统一 UserAgent** — 所有适配器在构造函数中通过 `option.WithHeader("User-Agent", provider.GetUserAgent())` 设置统一 UserAgent，格式为 `BM-SDK/{version}`，版本号通过 `runtime/debug.ReadBuildInfo()` 动态读取
 
 ## ANTI-PATTERNS
 
@@ -56,3 +58,4 @@
 - Anthropic `stream.go` 的 `contentBlockStart` 方法在 text block 时发出 `NewBlockStartDelta("text")`（之前返回 nil）
 - OpenAI Completions `handleChunk` 和 OpenAI Responses `handleStreamEvent` 签名新增 `textBlockStarted *bool` 参数，调用方需传入
 - 新增 `StreamDeltaTypeBlockStart` delta 类型和 `BlockStartData` 数据类型，以及 `NewBlockStartDelta`/`NewBlockStartDeltaWithID` 构造函数
+- `version.go` 使用 `sync.Once` 保证 `GetUserAgent()` 并发安全，版本读取失败时回退到 `"dev"`

@@ -78,7 +78,9 @@ func NewResponsesProvider(apiKey string) *ResponsesProvider {
 func NewResponsesProviderWithOptions(opts ...Option) *ResponsesProvider {
 	cfg := applyOptions(opts...)
 
-	sdkOpts := []option.RequestOption{}
+	sdkOpts := []option.RequestOption{
+		option.WithHeader("User-Agent", provider.GetUserAgent()),
+	}
 	if cfg.apiKey != "" {
 		sdkOpts = append(sdkOpts, option.WithAPIKey(cfg.apiKey))
 	}

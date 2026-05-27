@@ -78,7 +78,7 @@ func NewProviderWithOptions(opts ...Option) *Provider {
 	cfg := applyOptions(opts...)
 
 	sdkOpts := []option.RequestOption{
-		option.WithHeader("User-Agent", "vesper-ling/agent 0.0.1"),
+		option.WithHeader("User-Agent", provider.GetUserAgent()),
 	}
 	if cfg.apiKey != "" {
 		sdkOpts = append(sdkOpts, option.WithAPIKey(cfg.apiKey))

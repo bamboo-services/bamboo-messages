@@ -75,7 +75,9 @@ func NewCompletionsProvider(apiKey string) *CompletionsProvider {
 func NewCompletionsProviderWithOptions(opts ...Option) *CompletionsProvider {
 	cfg := applyOptions(opts...)
 
-	sdkOpts := []option.RequestOption{}
+	sdkOpts := []option.RequestOption{
+		option.WithHeader("User-Agent", provider.GetUserAgent()),
+	}
 	if cfg.apiKey != "" {
 		sdkOpts = append(sdkOpts, option.WithAPIKey(cfg.apiKey))
 	}
