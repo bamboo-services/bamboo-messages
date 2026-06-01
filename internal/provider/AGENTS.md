@@ -1,61 +1,78 @@
-# Provider Layer — 核心抽象 + 协议适配
+# provider 知识库
 
-## OVERVIEW
+## 概述
 
-`provider/` 定义统一的 AI 对话接口和类型系统，`provider/anthropic/`、`provider/openai/completions/`、`provider/openai/responses/` 分别实现具体协议适配。
+`internal/provider/` 是 Bamboo Messages 的核心抽象层，定义统一的 AI 对话接口、通用类型系统和流式事件模型。所有协议适配器（Anthropic、OpenAI Completions、OpenAI Responses）都基于该层构建，确保上层业务零改动切换 AI 后端。
 
-## ADAPTER TEMPLATE (7 文件结构)
+## 目录结构
 
-每个适配器 **必须** 严格遵循以下文件分工：
+```text
+internal/provider/
+├── provider.go      # Provider 接口 (6 方法) + BaseProvider[T] 泛型基座
+├── type.go          # Message / ChatConfig / ThinkingConfig / Tool / CompletionResult / ProviderExtra helpers
+├── stream.go        # StreamEvent / StreamDelta[E] + 7 种 Delta 构造函数
+├── version.go       # SDKName + GetUserAgent() + GetSDKVersion() (sync.Once 并发安全)
+├── stream_test.go   # 流模型单元测试
+└── type_test.go     # 类型单元测试
+```
 
-| 文件 | 职责 | 必须实现 |
-|------|------|---------|
-| `provider.go` | 构造函数 + Options 模式 + config + GetProviderType | `New*Provider(apiKey)`, `New*WithOptions(opts...)`, `Option`, `config`, `applyOptions` |
-| `chat.go` | 流式对话实现 | `Chat(ctx, messages, config)`, `ChatWithSystem(ctx, systemPrompt, messages, config)` — 返回 `<-chan StreamEvent` |
-| `complete.go` | 非流式对话实现 | `Complete(ctx, messages, config)`, `CompleteWithSystem(ctx, systemPrompt, messages, config)` — 返回 `(*CompletionResult, error)` |
-| `stream.go` | SSE → StreamEvent 转换 | 解析底层 SDK 的流式迭代器，映射为统一的 StreamEvent 发送到 channel；OpenAI 适配器需在首个文本增量前合成 BlockStart 事件 |
-| `message.go` | 消息类型双向转换 | 协议特定消息格式 ↔ `provider.Message` |
-| `models.go` | 模型常量 + GetAvailableModels | 定义该协议支持的模型名称列表 |
-| `provider_test.go` | 集成测试 | 测试流式/非流式/带 System 的 4 个核心方法 |
+## 导航指南
 
-## WHERE TO LOOK
+| 任务 | 位置 | 说明 |
+|------|------|------|
+| 理解核心接口 | `provider.go` | 6 个方法：Chat, ChatWithSystem, Complete, CompleteWithSystem, GetProviderType, GetAvailableModels |
+| 理解通用类型 | `type.go` | Message, ChatConfig, Tool, CompletionResult, ThinkingConfig, ProviderExtra |
+| 理解流式模型 | `stream.go` | StreamEvent channel + 6 种 DeltaData 类型 + 构造函数 |
+| 理解版本/UserAgent | `version.go` | `GetUserAgent()` 返回 `"BM-SDK/{version}"`，基于 `runtime/debug.ReadBuildInfo()` |
+| 添加新 Delta 类型 | `stream.go` | 新增 StreamDeltaType 常量 + DeltaData 类型 + 构造函数 |
+| 添加 ProviderExtra 键 | `type.go` | 添加常量 + 在适配器中使用 GetExtra* 提取 |
+| 理解 BlockStart 事件 | `stream.go` | BlockStartData + NewBlockStartDelta/NewBlockStartDeltaWithID |
 
-| 任务 | 文件 |
-|------|------|
-| 新增适配器 | 完整复制任意现有适配器的 7 文件结构，修改包名和 SDK 调用 |
-| 修改流式解析 | `*/stream.go` — SSE 事件循环 + StreamEvent 发送 |
-| 修改消息转换 | `*/message.go` — toSDK / fromSDK 映射函数 |
-| 修改请求构建 | `*/chat.go` + `*/complete.go` — 构建底层 SDK 请求参数 |
-| 添加新 Delta 类型 | `provider/stream.go` — 新增 StreamDeltaType 常量 + DeltaData 类型 + 构造函数 |
-| 添加 ProviderExtra 参数透传 | `*/chat.go` + `*/complete.go` — 使用 GetExtra* 从 config.ProviderExtra 提取参数设置到 SDK params |
-| 理解 UserAgent/版本 | `provider/version.go` | SDKName 常量 + GetUserAgent() + GetSDKVersion() |
-| 添加 ThinkingConfig 支持 | `*/chat.go` + `*/complete.go` — 从 config.ThinkingConfig 映射到 Anthropic/OpenAI 各自的推理参数 |
+## 代码地图
 
-## CONVENTIONS
+| 符号 | 类型 | 位置 | 作用 |
+|------|------|------|------|
+| `BaseProvider[T]` | 泛型结构体 | provider.go:14 | 适配器基座，嵌入底层 SDK Client |
+| `Provider` | 接口 | provider.go:23 | 6 方法统一接口 |
+| `Message` | 结构体 | type.go:73 | 统一消息模型 (Role + Content + ToolCalls + ToolCallID) |
+| `ChatConfig` | 结构体 | type.go:141 | 请求配置 (Model, Temperature, MaxTokens, Tools, ThinkingConfig, ProviderExtra) |
+| `ThinkingConfig` | 结构体 | type.go:130 | 思考/推理配置 (Enabled + BudgetTokens + ReasoningEffort + Summary) |
+| `ProviderExtra` | map[string]any | type.go:151 | Provider 特有参数透传 |
+| `GetExtraFloat64/Int64/String/Any` | 函数 | type.go:160-205 | ProviderExtra 安全取值 helpers |
+| `StreamEvent` | 结构体 | stream.go:10 | 流事件 (Type + Delta + Err)，值类型 |
+| `StreamDelta[E]` | 泛型结构体 | stream.go:17 | 流增量 (Type + Data) |
+| `BlockStartData` | 结构体 | stream.go:90 | 内容块开始数据 |
+| `GetUserAgent` | 函数 | version.go:32 | 生成统一 User-Agent 字符串 |
+| `GetSDKVersion` | 函数 | version.go:48 | 读取 SDK 版本号 |
 
+## 约定
+
+- **值类型传递** — `Message`, `StreamEvent` 为值类型，通过 channel 安全传递，传递后视为只读
+- **泛型基座** — `BaseProvider[T any]` 通过泛型参数嵌入不同 SDK Client，适配器通过类型别名使用
 - **Channel 模式** — 流式通过 `make(chan StreamEvent)` 返回，在 goroutine 中发送，发送完 close
-- **WithSystem 实现** — 在 messages 前插入 `{Role: RoleSystem, Content: systemPrompt}`，然后调用对应的 Chat/Complete
-- **Options 三件套** — 每个适配器的 `WithAPIKey` / `WithBaseURL` / `WithHeader` 签名完全一致
-- **Provider 类型别名** — `type Provider = BaseProvider[SDK.Client]`，嵌入后通过 `.Client` 访问底层 SDK
-- **BlockStart 合成** — Anthropic 适配器直接从原生 `content_block_start` 事件提取；OpenAI 适配器（Completions/Responses）没有原生事件，通过 `textBlockStarted *bool` 参数在首个文本/推理增量前自动合成 `NewBlockStartDelta("text")`
-- **handleChunk/handleStreamEvent 签名** — OpenAI 适配器的流处理函数新增 `textBlockStarted *bool` 参数用于追踪 BlockStart 状态
-- **参数透传** — 适配器 chat.go/complete.go 从 `config.ThinkingConfig` 和 `config.ProviderExtra` 提取参数，使用 `GetExtraFloat64`/`GetExtraInt64`/`GetExtraAny` 等类型安全 helper，不使用裸类型断言
-- **ThinkingConfig 映射** — Anthropic: Enabled + BudgetTokens → BetaThinkingParam；OpenAI Completions: ReasoningEffort → Reasoning 参数；OpenAI Responses: ReasoningEffort + Summary → Reasoning 参数
-- **统一 UserAgent** — 所有适配器在构造函数中通过 `option.WithHeader("User-Agent", provider.GetUserAgent())` 设置统一 UserAgent，格式为 `BM-SDK/{version}`，版本号通过 `runtime/debug.ReadBuildInfo()` 动态读取
+- **参数透传双层方案** — Layer 1: 类型化 WithXxx() 函数写入 ProviderExtra；Layer 2: WithExtra() 兜底
+- **ProviderExtra 安全取值** — 适配器中使用 GetExtra* 类型安全 helper，不做裸类型断言
+- **统一 UserAgent** — 所有适配器通过 `provider.GetUserAgent()` 获取 `"BM-SDK/{version}"` 格式 UserAgent
+- **版本读取策略** — `GetSDKVersion()` 优先 `info.Main.Version`，回退到依赖列表查找，最终 `"dev"`
+- **sync.Once 并发安全** — `GetUserAgent()` 和 `GetSDKVersion()` 使用 sync.Once 保证只初始化一次
 
-## ANTI-PATTERNS
+## 反模式
 
-- **禁止** 在 `stream.go` 中不关闭 channel — 必须在 goroutine 结束时 `close(ch)`
-- **禁止** 跳过 `StreamTypeStart` 事件 — 流开始必须先发送 Start 事件
-- **禁止** 在 message.go 中遗漏 ToolCalls / ToolCallID 映射 — 完整的双向转换
-- **禁止** 在适配器中使用裸类型断言访问 ProviderExtra（如 `extra["key"].(float64)`） — 必须使用 `provider.GetExtraFloat64()` 等 helper
+- **禁止** 在 `provider/` 核心包中引入任何具体 SDK 依赖 — 核心包零外部依赖
+- **禁止** 修改 `StreamEvent` 传递后的字段 — 值类型传递后应视为只读
+- **禁止** 裸类型断言访问 ProviderExtra — 必须使用 GetExtra* helpers
+- **禁止** 在 stream.go 中不关闭 channel — 必须在 goroutine 结束时 close
 
-## NOTES
+## 调试路径
 
-- `anthropic` 使用独立的 `anthropic-sdk-go`，`openai/completions` 和 `openai/responses` 共享 `openai-go/v3` 同一 SDK
-- 流式实现中，Anthropic 和 OpenAI 的 SSE 迭代方式不同 — Anthropic 用 `client.Messages.NewStreaming()`，OpenAI 用 `client.Chat.Completions.NewStreaming()` / `client.Responses.NewStreaming()`
-- 测试均为集成测试（需要 API Key + 网络），无 mock
-- Anthropic `stream.go` 的 `contentBlockStart` 方法在 text block 时发出 `NewBlockStartDelta("text")`（之前返回 nil）
-- OpenAI Completions `handleChunk` 和 OpenAI Responses `handleStreamEvent` 签名新增 `textBlockStarted *bool` 参数，调用方需传入
-- 新增 `StreamDeltaTypeBlockStart` delta 类型和 `BlockStartData` 数据类型，以及 `NewBlockStartDelta`/`NewBlockStartDeltaWithID` 构造函数
-- `version.go` 使用 `sync.Once` 保证 `GetUserAgent()` 并发安全，版本读取失败时回退到 `"dev"`
+1. 接口不匹配 → 检查 `provider.go` 的 Provider 接口定义是否被适配器完整实现
+2. 类型转换错误 → 检查 `type.go` 的类型定义是否与适配器使用一致
+3. 流事件丢失 → 检查 `stream.go` 的 StreamEvent 是否正确构造和发送
+4. UserAgent 异常 → 检查 `version.go` 的 `ReadBuildInfo()` 是否返回正确信息
+5. ProviderExtra 取值失败 → 检查 key 常量是否正确，类型断言是否匹配
+
+## 引用
+
+- [anthropic](./anthropic/AGENTS.md) — Anthropic Messages 协议适配器
+- [completions](./openai/completions/AGENTS.md) — OpenAI Chat Completions 协议适配器
+- [responses](./openai/responses/AGENTS.md) — OpenAI Responses 协议适配器
