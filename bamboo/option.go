@@ -145,3 +145,94 @@ func WithExtra(key string, value any) RequestOption {
 		cfg.ProviderExtra[key] = value
 	}
 }
+
+// WithUser 设置用户标识。
+//
+// 仅部分 Provider 支持（如 OpenAI Responses），
+// 参数值通过 ProviderExtra 透传到底层适配器。
+func WithUser(value string) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeyUser] = value
+	}
+}
+
+// WithStore 设置响应存储策略。
+//
+// 仅部分 Provider 支持（如 OpenAI Responses），
+// 参数值通过 ProviderExtra 透传到底层适配器。
+func WithStore(value any) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeyStore] = value
+	}
+}
+
+// WithModalities 设置输出模态。
+//
+// 仅部分 Provider 支持（如 OpenAI Responses），
+// 参数值通过 ProviderExtra 透传到底层适配器。
+func WithModalities(value any) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeyModalities] = value
+	}
+}
+
+// WithPrediction 设置预测内容。
+//
+// 仅部分 Provider 支持（如 OpenAI Completions），
+// 参数值通过 ProviderExtra 透传到底层适配器。
+func WithPrediction(value any) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeyPrediction] = value
+	}
+}
+
+// WithParallelToolCalls 设置是否允许并行工具调用。
+//
+// 仅部分 Provider 支持（如 OpenAI Completions/Responses），
+// 参数值通过 ProviderExtra 透传到底层适配器。
+func WithParallelToolCalls(value bool) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeyParallelToolCalls] = value
+	}
+}
+
+// WithTruncation 设置消息截断策略。
+//
+// 仅部分 Provider 支持（如 Anthropic），
+// 参数值通过 ProviderExtra 透传到底层适配器。
+func WithTruncation(value string) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeyTruncation] = value
+	}
+}
+
+// WithPreviousResponseID 设置前置响应 ID，用于多轮对话关联。
+//
+// 仅部分 Provider 支持（如 OpenAI Responses），
+// 参数值通过 ProviderExtra 透传到底层适配器。
+func WithPreviousResponseID(value string) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ProviderExtra == nil {
+			cfg.ProviderExtra = make(map[string]any)
+		}
+		cfg.ProviderExtra[provider.ProviderExtraKeyPreviousResponseID] = value
+	}
+}

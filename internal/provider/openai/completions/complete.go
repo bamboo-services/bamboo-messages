@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/shared"
 	xError "github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
@@ -62,20 +63,42 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 		params.PresencePenalty = openai.Float(pp)
 	}
 
-	if seed, ok := provider.GetExtraInt64(config.ProviderExtra, provider.ProviderExtraKeySeed); ok {
-		params.Seed = openai.Int(seed)
-	}
+		if seed, ok := provider.GetExtraInt64(config.ProviderExtra, provider.ProviderExtraKeySeed); ok {
+			params.Seed = openai.Int(seed)
+		}
 
-	if tc, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyToolChoice); ok {
-		if toolChoice, ok := tc.(openai.ChatCompletionToolChoiceOptionUnionParam); ok {
+		// 用户标识
+		if u, ok := provider.GetExtraString(config.ProviderExtra, provider.ProviderExtraKeyUser); ok {
+			params.User = openai.String(u)
+		}
+
+		// 预测内容（用于加速已知内容的生成）
+		if pred, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyPrediction); ok {
+			if prediction, ok := pred.(openai.ChatCompletionPredictionContentParam); ok {
+				params.Prediction = prediction
+			}
+		}
+
+		// 是否启用并行工具调用
+		if ptc, ok := provider.GetExtraBool(config.ProviderExtra, provider.ProviderExtraKeyParallelToolCalls); ok {
+			params.ParallelToolCalls = openai.Bool(ptc)
+		}
+
+		// 附加元数据
+		if len(config.Metadata) > 0 {
+			params.Metadata = shared.Metadata(config.Metadata)
+		}
+
+		if tc, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyToolChoice); ok {
+		if s, ok := tc.(string); ok {
+			params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(s)}
+		} else if toolChoice, ok := tc.(openai.ChatCompletionToolChoiceOptionUnionParam); ok {
 			params.ToolChoice = toolChoice
 		}
 	}
 
 	if rf, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyResponseFormat); ok {
-		if responseFormat, ok := rf.(openai.ChatCompletionNewParamsResponseFormatUnion); ok {
-			params.ResponseFormat = responseFormat
-		}
+		params.ResponseFormat = buildResponseFormat(rf)
 	}
 
 	// 调用非流式 SDK 方法

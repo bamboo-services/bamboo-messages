@@ -24,6 +24,13 @@ const (
 	ProviderExtraKeySeed             = "seed"
 	ProviderExtraKeyToolChoice       = "tool_choice"
 	ProviderExtraKeyResponseFormat   = "response_format"
+	ProviderExtraKeyUser             = "user"
+	ProviderExtraKeyStore            = "store"
+	ProviderExtraKeyModalities       = "modalities"
+	ProviderExtraKeyPrediction        = "prediction"
+	ProviderExtraKeyParallelToolCalls = "parallel_tool_calls"
+	ProviderExtraKeyTruncation       = "truncation"
+	ProviderExtraKeyPreviousResponseID = "previous_response_id"
 )
 
 // MessageRole 消息角色。
@@ -202,4 +209,23 @@ func GetExtraAny(extra map[string]any, key string) (any, bool) {
 	}
 	v, ok := extra[key]
 	return v, ok
+}
+
+// GetExtraBool 从 ProviderExtra 中安全获取 bool 值。
+//
+// 参数:
+//   - extra - ProviderExtra 映射表，为 nil 时返回 (false, false)
+//   - key - 要查找的键名
+//
+// 返回值中的 bool 表示是否成功找到并完成类型断言。
+func GetExtraBool(extra map[string]any, key string) (bool, bool) {
+	if extra == nil {
+		return false, false
+	}
+	v, ok := extra[key]
+	if !ok {
+		return false, false
+	}
+	b, ok := v.(bool)
+	return b, ok
 }

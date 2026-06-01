@@ -206,6 +206,8 @@ opts := []bamboo.RequestOption{
     bamboo.WithSeed(42),
     bamboo.WithToolChoice("auto"),
     bamboo.WithResponseFormat(map[string]any{"type": "json_object"}),
+    bamboo.WithUser("user-123"),
+    bamboo.WithParallelToolCalls(true),
     bamboo.WithExtra("custom_key", "custom_value"),
 }
 // 应用选项
@@ -217,11 +219,18 @@ for _, opt := range opts {
 | Option | 类型 | 说明 | 支持 Provider |
 |--------|------|------|--------------|
 | `WithTopK(v)` | `float64` | Top-K 采样参数 | Anthropic |
-| `WithFrequencyPenalty(v)` | `float64` | 频率惩罚 | OpenAI Completions/Responses |
-| `WithPresencePenalty(v)` | `float64` | 存在惩罚 | OpenAI Completions/Responses |
-| `WithSeed(v)` | `int64` | 随机种子 | OpenAI Completions |
-| `WithToolChoice(v)` | `any` | 工具选择策略 | Anthropic/OpenAI |
-| `WithResponseFormat(v)` | `any` | 响应格式 | OpenAI Completions/Responses |
+| `WithFrequencyPenalty(v)` | `float64` | 频率惩罚 | OpenAI Completions/Responses（Responses 通过 ExtraFields 传递） |
+| `WithPresencePenalty(v)` | `float64` | 存在惩罚 | OpenAI Completions/Responses（Responses 通过 ExtraFields 传递） |
+| `WithSeed(v)` | `int64` | 随机种子 | OpenAI Completions（Responses 不支持） |
+| `WithToolChoice(v)` | `any` | 工具选择策略 | Anthropic/OpenAI（Completions 支持字符串 "auto"/"none"/"required"） |
+| `WithResponseFormat(v)` | `any` | 响应格式 | OpenAI Completions/Responses（Completions 支持 `{"type": "json_object"}` 和 `{"type": "text"}`） |
+| `WithUser(v)` | `string` | 用户标识 | OpenAI Completions/Responses |
+| `WithStore(v)` | `any` | 响应存储策略 | OpenAI Responses |
+| `WithModalities(v)` | `any` | 输出模态 | OpenAI Responses |
+| `WithPrediction(v)` | `any` | 预测内容 | OpenAI Completions |
+| `WithParallelToolCalls(v)` | `bool` | 并行工具调用 | OpenAI Completions/Responses |
+| `WithTruncation(v)` | `string` | 消息截断策略 | Anthropic |
+| `WithPreviousResponseID(v)` | `string` | 前置响应 ID | OpenAI Responses |
 | `WithExtra(k, v)` | `string, any` | 自定义扩展参数 | 所有 |
 
 ## 核心类型

@@ -474,3 +474,187 @@ func TestResponsesProvider_buildAssistantItem(t *testing.T) {
 		})
 	}
 }
+
+// ==============================
+// buildResponseNewParams 参数映射测试
+// ==============================
+
+// testBuildParams 辅助函数，用空输入构建 ResponseNewParams。
+func testBuildParams(p *ResponsesProvider, config *provider.ChatConfig) responses.ResponseNewParams {
+	return p.buildResponseNewParams("gpt-4o", responses.ResponseNewParamsInputUnion{}, config)
+}
+
+// TestBuildParams_StopMapping 验证 Stop 参数正确映射到 ProviderExtra。
+//
+// Responses SDK 无原生 Stop 字段，通过 ProviderExtra["stop"] 透传。
+// 当 ChatConfig.Stop 非空时，应自动写入 ProviderExtra。
+func TestBuildParams_StopMapping(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	config := &provider.ChatConfig{
+		Stop: []string{"STOP", "END"},
+	}
+
+	_ = testBuildParams(p, config)
+
+	// 验证 Stop 被写入 ProviderExtra
+	if config.ProviderExtra == nil {
+		t.Fatal("ProviderExtra 应该不为 nil")
+	}
+	stopVal, ok := config.ProviderExtra["stop"]
+	if !ok {
+		t.Fatal("ProviderExtra 中应包含 'stop' 键")
+	}
+	stopSlice, ok := stopVal.([]string)
+	if !ok {
+		t.Fatalf("ProviderExtra['stop'] 应为 []string 类型, 实际为 %T", stopVal)
+	}
+	if len(stopSlice) != 2 || stopSlice[0] != "STOP" || stopSlice[1] != "END" {
+		t.Errorf("ProviderExtra['stop'] = %v, want [STOP END]", stopSlice)
+	}
+}
+
+// TestBuildParams_User 验证 User 参数从 ProviderExtra 正确映射到 params.User。
+//
+// User 参数用于标识终端用户，支持缓存优化和安全审计。
+func TestBuildParams_User(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	config := &provider.ChatConfig{
+		ProviderExtra: map[string]any{
+			provider.ProviderExtraKeyUser: "test-user",
+		},
+	}
+
+	params := testBuildParams(p, config)
+
+	if !params.User.Valid() {
+		t.Fatal("params.User 应该有效")
+	}
+	if params.User.Value != "test-user" {
+		t.Errorf("params.User.Value = %q, want %q", params.User.Value, "test-user")
+	}
+}
+
+// TestBuildParams_Store 验证 Store 参数从 ProviderExtra 正确映射到 params.Store。
+//
+// Store 参数控制是否持久化存储响应。
+func TestBuildParams_Store(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	config := &provider.ChatConfig{
+		ProviderExtra: map[string]any{
+			provider.ProviderExtraKeyStore: true,
+		},
+	}
+
+	params := testBuildParams(p, config)
+
+	if !params.Store.Valid() {
+		t.Fatal("params.Store 应该有效")
+	}
+	if params.Store.Value != true {
+		t.Errorf("params.Store.Value = %v, want true", params.Store.Value)
+	}
+}
+
+// TestBuildParams_Modalities 验证 Modalities 参数通过 SetExtraFields 正确传递。
+//
+// ResponseNewParams 无原生 Modalities 字段，通过 SetExtraFields 透传。
+// 通过 JSON 序列化验证 modalities 字段存在。
+func TestBuildParams_Modalities(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	modalities := []string{"text", "audio"}
+	config := &provider.ChatConfig{
+		ProviderExtra: map[string]any{
+			provider.ProviderExtraKeyModalities: modalities,
+		},
+	}
+
+	params := testBuildParams(p, config)
+
+	// 通过 JSON 序列化验证 modalities 字段存在
+	data, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("序列化 params 失败: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("反序列化 params 失败: %v", err)
+	}
+	m, ok := raw["modalities"]
+	if !ok {
+		t.Fatal("序列化后的 JSON 中应包含 'modalities' 字段")
+	}
+	arr, ok := m.([]any)
+	if !ok {
+		t.Fatalf("'modalities' 应为数组类型, 实际为 %T", m)
+	}
+	if len(arr) != 2 {
+		t.Errorf("modalities 长度 = %d, want 2", len(arr))
+	}
+}
+
+// TestBuildParams_Truncation 验证 Truncation 参数从 ProviderExtra 正确映射到 params.Truncation。
+//
+// Truncation 参数控制上下文截断策略 ("auto" / "disabled")。
+func TestBuildParams_Truncation(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	config := &provider.ChatConfig{
+		ProviderExtra: map[string]any{
+			provider.ProviderExtraKeyTruncation: "auto",
+		},
+	}
+
+	params := testBuildParams(p, config)
+
+	if string(params.Truncation) != "auto" {
+		t.Errorf("params.Truncation = %q, want %q", string(params.Truncation), "auto")
+	}
+}
+
+// TestBuildParams_PreviousResponseID 验证 PreviousResponseID 参数从 ProviderExtra 正确映射。
+//
+// PreviousResponseID 用于关联上一轮响应实现多轮对话。
+func TestBuildParams_PreviousResponseID(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	config := &provider.ChatConfig{
+		ProviderExtra: map[string]any{
+			provider.ProviderExtraKeyPreviousResponseID: "resp-123",
+		},
+	}
+
+	params := testBuildParams(p, config)
+
+	if !params.PreviousResponseID.Valid() {
+		t.Fatal("params.PreviousResponseID 应该有效")
+	}
+	if params.PreviousResponseID.Value != "resp-123" {
+		t.Errorf("params.PreviousResponseID.Value = %q, want %q", params.PreviousResponseID.Value, "resp-123")
+	}
+}
+
+// TestBuildParams_Metadata 验证 Metadata 参数从 ChatConfig.Metadata 正确映射到 params.Metadata。
+//
+// Metadata 附加键值对元数据到响应中。
+func TestBuildParams_Metadata(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	config := &provider.ChatConfig{
+		Metadata: map[string]string{
+			"key": "val",
+		},
+	}
+
+	params := testBuildParams(p, config)
+
+	if params.Metadata == nil {
+		t.Fatal("params.Metadata 不应为 nil")
+	}
+	if params.Metadata["key"] != "val" {
+		t.Errorf("params.Metadata['key'] = %q, want %q", params.Metadata["key"], "val")
+	}
+}

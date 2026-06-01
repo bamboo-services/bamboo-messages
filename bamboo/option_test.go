@@ -156,6 +156,115 @@ func TestMultipleOptions(t *testing.T) {
 	}
 }
 
+// TestWithUser 验证 WithUser 正确将用户标识写入 ProviderExtra。
+func TestWithUser(t *testing.T) {
+	cfg := &RequestConfig{}
+	WithUser("user-001")(cfg)
+
+	if cfg.ProviderExtra == nil {
+		t.Fatal("ProviderExtra 不应为 nil")
+	}
+	if cfg.ProviderExtra[provider.ProviderExtraKeyUser] != "user-001" {
+		t.Errorf("User = %v, 期望 user-001", cfg.ProviderExtra[provider.ProviderExtraKeyUser])
+	}
+}
+
+// TestWithStore 验证 WithStore 正确将存储策略写入 ProviderExtra。
+func TestWithStore(t *testing.T) {
+	cfg := &RequestConfig{}
+	WithStore(true)(cfg)
+
+	if cfg.ProviderExtra == nil {
+		t.Fatal("ProviderExtra 不应为 nil")
+	}
+	if cfg.ProviderExtra[provider.ProviderExtraKeyStore] != true {
+		t.Errorf("Store = %v, 期望 true", cfg.ProviderExtra[provider.ProviderExtraKeyStore])
+	}
+}
+
+// TestWithModalities 验证 WithModalities 正确将输出模态写入 ProviderExtra。
+func TestWithModalities(t *testing.T) {
+	cfg := &RequestConfig{}
+	modalities := []string{"text", "image"}
+	WithModalities(modalities)(cfg)
+
+	if cfg.ProviderExtra == nil {
+		t.Fatal("ProviderExtra 不应为 nil")
+	}
+	got, ok := cfg.ProviderExtra[provider.ProviderExtraKeyModalities]
+	if !ok {
+		t.Fatal("modalities 键不存在")
+	}
+	slice, ok := got.([]string)
+	if !ok {
+		t.Fatal("modalities 类型不是 []string")
+	}
+	if len(slice) != 2 || slice[0] != "text" || slice[1] != "image" {
+		t.Errorf("Modalities = %v, 期望 [text image]", slice)
+	}
+}
+
+// TestWithPrediction 验证 WithPrediction 正确将预测内容写入 ProviderExtra。
+func TestWithPrediction(t *testing.T) {
+	cfg := &RequestConfig{}
+	prediction := map[string]any{"type": "content", "content": "expected"}
+	WithPrediction(prediction)(cfg)
+
+	if cfg.ProviderExtra == nil {
+		t.Fatal("ProviderExtra 不应为 nil")
+	}
+	got, ok := cfg.ProviderExtra[provider.ProviderExtraKeyPrediction]
+	if !ok {
+		t.Fatal("prediction 键不存在")
+	}
+	predMap, ok := got.(map[string]any)
+	if !ok {
+		t.Fatal("prediction 类型不是 map[string]any")
+	}
+	if predMap["type"] != "content" {
+		t.Errorf("prediction.type = %v, 期望 content", predMap["type"])
+	}
+}
+
+// TestWithParallelToolCalls 验证 WithParallelToolCalls 正确将并行工具调用标志写入 ProviderExtra。
+func TestWithParallelToolCalls(t *testing.T) {
+	cfg := &RequestConfig{}
+	WithParallelToolCalls(true)(cfg)
+
+	if cfg.ProviderExtra == nil {
+		t.Fatal("ProviderExtra 不应为 nil")
+	}
+	if cfg.ProviderExtra[provider.ProviderExtraKeyParallelToolCalls] != true {
+		t.Errorf("ParallelToolCalls = %v, 期望 true", cfg.ProviderExtra[provider.ProviderExtraKeyParallelToolCalls])
+	}
+}
+
+// TestWithTruncation 验证 WithTruncation 正确将消息截断策略写入 ProviderExtra。
+func TestWithTruncation(t *testing.T) {
+	cfg := &RequestConfig{}
+	WithTruncation("auto")(cfg)
+
+	if cfg.ProviderExtra == nil {
+		t.Fatal("ProviderExtra 不应为 nil")
+	}
+	if cfg.ProviderExtra[provider.ProviderExtraKeyTruncation] != "auto" {
+		t.Errorf("Truncation = %v, 期望 auto", cfg.ProviderExtra[provider.ProviderExtraKeyTruncation])
+	}
+}
+
+// TestWithPreviousResponseID 验证 WithPreviousResponseID 正确将前置响应 ID 写入 ProviderExtra。
+func TestWithPreviousResponseID(t *testing.T) {
+	cfg := &RequestConfig{}
+	WithPreviousResponseID("resp_abc123")(cfg)
+
+	if cfg.ProviderExtra == nil {
+		t.Fatal("ProviderExtra 不应为 nil")
+	}
+	if cfg.ProviderExtra[provider.ProviderExtraKeyPreviousResponseID] != "resp_abc123" {
+		t.Errorf("PreviousResponseID = %v, 期望 resp_abc123", cfg.ProviderExtra[provider.ProviderExtraKeyPreviousResponseID])
+	}
+}
+
 // TestMultipleOptions_ThroughConfigToProvider 验证多个 option 经过 configToProvider 后仍正确透传。
 func TestMultipleOptions_ThroughConfigToProvider(t *testing.T) {
 	cfg := &RequestConfig{
