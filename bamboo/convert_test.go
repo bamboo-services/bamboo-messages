@@ -123,12 +123,15 @@ func TestConvertUnsupportedImage(t *testing.T) {
 			NewImageBlock(ContentSource{Type: "base64", MediaType: "image/png", Data: "abc123"}),
 		),
 	}
-	_, err := messagesToProvider(msgs)
-	if err == nil {
-		t.Fatal("expected error for image content, got nil")
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "image content not supported") {
-		t.Errorf("error = %q, want image content not supported", err.Error())
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].Content != "look at this" {
+		t.Errorf("Content = %q, want %q", result[0].Content, "look at this")
 	}
 }
 
@@ -138,12 +141,12 @@ func TestConvertUnsupportedDocument(t *testing.T) {
 			NewDocumentBlock(ContentSource{Type: "text", Content: "doc content"}),
 		),
 	}
-	_, err := messagesToProvider(msgs)
-	if err == nil {
-		t.Fatal("expected error for document content, got nil")
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "document content not supported") {
-		t.Errorf("error = %q, want document content not supported", err.Error())
+	if len(result) != 0 {
+		t.Errorf("expected 0 messages after document dropped, got %d", len(result))
 	}
 }
 
@@ -275,7 +278,7 @@ func TestConvertTools(t *testing.T) {
 		t.Errorf("Function.Name = %q, want search", tool.Function.Name)
 	}
 	if tool.Function.Description != "Search the web" {
-		t.Errorf("Function.Description = %q", tool.Function.Description)
+		t.Errorf("Function.Description = %q, want Search the web", tool.Function.Description)
 	}
 
 	params := tool.Function.Parameters
@@ -335,11 +338,15 @@ func TestConvertResult(t *testing.T) {
 	if len(resp.Content) != 1 {
 		t.Fatalf("Content len = %d, want 1", len(resp.Content))
 	}
-	if resp.Content[0].Type != ContentBlockText {
-		t.Errorf("Content[0].Type = %q, want text", resp.Content[0].Type)
+	if resp.Content[0].BlockType() != ContentBlockText {
+		t.Errorf("Content[0].BlockType() = %q, want text", resp.Content[0].BlockType())
 	}
-	if resp.Content[0].Text != "Hello!" {
-		t.Errorf("Content[0].Text = %q, want Hello!", resp.Content[0].Text)
+	tb, ok := resp.Content[0].(*TextBlock)
+	if !ok {
+		t.Fatal("Content[0] 类型断言为 *TextBlock 失败")
+	}
+	if tb.Text != "Hello!" {
+		t.Errorf("Content[0].Text = %q, want Hello!", tb.Text)
 	}
 	if resp.StopReason != FinishReasonEndTurn {
 		t.Errorf("StopReason = %q, want end_turn", resp.StopReason)
@@ -389,14 +396,18 @@ func TestConvertResultWithToolCalls(t *testing.T) {
 	if len(resp.Content) != 1 {
 		t.Fatalf("Content len = %d, want 1", len(resp.Content))
 	}
-	if resp.Content[0].Type != ContentBlockToolUse {
-		t.Errorf("Content[0].Type = %q, want tool_use", resp.Content[0].Type)
+	if resp.Content[0].BlockType() != ContentBlockToolUse {
+		t.Errorf("Content[0].BlockType() = %q, want tool_use", resp.Content[0].BlockType())
 	}
-	if resp.Content[0].ID != "call_456" {
-		t.Errorf("Content[0].ID = %q, want call_456", resp.Content[0].ID)
+	tb, ok := resp.Content[0].(*ToolUseBlock)
+	if !ok {
+		t.Fatal("Content[0] 类型断言为 *ToolUseBlock 失败")
 	}
-	if resp.Content[0].Name != "calc" {
-		t.Errorf("Content[0].Name = %q, want calc", resp.Content[0].Name)
+	if tb.ID != "call_456" {
+		t.Errorf("Content[0].ID = %q, want call_456", tb.ID)
+	}
+	if tb.Name != "calc" {
+		t.Errorf("Content[0].Name = %q, want calc", tb.Name)
 	}
 }
 
@@ -499,8 +510,8 @@ func TestConvertStreamThinkingDelta(t *testing.T) {
 	if events[0].Type != EventContentBlockStart {
 		t.Errorf("events[0].Type = %q, want content_block_start", events[0].Type)
 	}
-	if events[0].ContentBlock == nil || events[0].ContentBlock.Type != ContentBlockThinking {
-		t.Errorf("events[0].ContentBlock.Type = %q, want thinking", events[0].ContentBlock.Type)
+	if events[0].ContentBlock == nil || events[0].ContentBlock.BlockType() != ContentBlockThinking {
+		t.Errorf("events[0].ContentBlock.BlockType() 不匹配，期望 thinking")
 	}
 	delta, ok := events[1].Delta.(*StreamDelta)
 	if !ok {
@@ -539,11 +550,15 @@ func TestConvertStreamToolCall(t *testing.T) {
 	if events[1].Index != 1 {
 		t.Errorf("events[1].Index = %d, want 1", events[1].Index)
 	}
-	if events[1].ContentBlock.Type != ContentBlockToolUse {
-		t.Errorf("ContentBlock.Type = %q, want tool_use", events[1].ContentBlock.Type)
+	if events[1].ContentBlock.BlockType() != ContentBlockToolUse {
+		t.Errorf("ContentBlock.BlockType() = %q, want tool_use", events[1].ContentBlock.BlockType())
 	}
-	if events[1].ContentBlock.ID != "call_1" {
-		t.Errorf("ContentBlock.ID = %q, want call_1", events[1].ContentBlock.ID)
+	tb, ok := events[1].ContentBlock.(*ToolUseBlock)
+	if !ok {
+		t.Fatal("ContentBlock 类型断言为 *ToolUseBlock 失败")
+	}
+	if tb.ID != "call_1" {
+		t.Errorf("ContentBlock.ID = %q, want call_1", tb.ID)
 	}
 }
 
@@ -1061,8 +1076,12 @@ func TestMessagesToProvider_OnlyThinkingBlocks(t *testing.T) {
 func TestNewToolUseBlock_MarshalError(t *testing.T) {
 	// 传入无法序列化的值（如 channel）
 	block := NewToolUseBlock("id", "name", make(chan int))
-	if string(block.Input) != `{}` {
-		t.Errorf("Input = %q, 期望 %q", string(block.Input), `{}`)
+	tb, ok := block.(*ToolUseBlock)
+	if !ok {
+		t.Fatal("类型断言为 *ToolUseBlock 失败")
+	}
+	if string(tb.Input) != `{}` {
+		t.Errorf("Input = %q, 期望 %q", string(tb.Input), `{}`)
 	}
 }
 
@@ -1184,8 +1203,6 @@ func TestConfigToProvider_ProviderExtra(t *testing.T) {
 		t.Errorf("custom_key = %v, 期望 custom_value", result.ProviderExtra["custom_key"])
 	}
 }
-
-
 
 // ──────────────────────────────────────────────────────────────────────
 // Task 12: StreamConverter 场景测试
@@ -1385,14 +1402,18 @@ func TestStreamConverter_ToolCall(t *testing.T) {
 	if toolStartEvent.ContentBlock == nil {
 		t.Fatal("tool_use ContentBlock 不应为 nil")
 	}
-	if toolStartEvent.ContentBlock.Type != ContentBlockToolUse {
-		t.Errorf("ContentBlock.Type = %q, 期望 %q", toolStartEvent.ContentBlock.Type, ContentBlockToolUse)
+	if toolStartEvent.ContentBlock.BlockType() != ContentBlockToolUse {
+		t.Errorf("ContentBlock.BlockType() = %q, 期望 %q", toolStartEvent.ContentBlock.BlockType(), ContentBlockToolUse)
 	}
-	if toolStartEvent.ContentBlock.ID != "call_abc" {
-		t.Errorf("ContentBlock.ID = %q, 期望 %q", toolStartEvent.ContentBlock.ID, "call_abc")
+	tb, ok := toolStartEvent.ContentBlock.(*ToolUseBlock)
+	if !ok {
+		t.Fatal("ContentBlock 类型断言为 *ToolUseBlock 失败")
 	}
-	if toolStartEvent.ContentBlock.Name != "search" {
-		t.Errorf("ContentBlock.Name = %q, 期望 %q", toolStartEvent.ContentBlock.Name, "search")
+	if tb.ID != "call_abc" {
+		t.Errorf("ContentBlock.ID = %q, 期望 %q", tb.ID, "call_abc")
+	}
+	if tb.Name != "search" {
+		t.Errorf("ContentBlock.Name = %q, 期望 %q", tb.Name, "search")
 	}
 
 	// 验证 tool_call_delta 的 PartialJSON
@@ -1408,8 +1429,6 @@ func TestStreamConverter_ToolCall(t *testing.T) {
 		t.Errorf("Delta.PartialJSON = %q, 期望 %q", toolDelta.PartialJSON, `{"query":"golang"}`)
 	}
 }
-
-
 
 // ──────────────────────────────────────────────────────────────────────
 

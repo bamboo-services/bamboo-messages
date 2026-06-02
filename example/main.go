@@ -197,13 +197,13 @@ func demoNonStreaming(ctx context.Context, client bamboo.BambooClient, model str
 
 	fmt.Println("📦 内容块:")
 	for i, block := range resp.Content {
-		switch block.Type {
-		case bamboo.ContentBlockText:
-			fmt.Printf("  [%d] 📝 text: %s\n", i, block.Text)
-		case bamboo.ContentBlockThinking:
-			fmt.Printf("  [%d] 💭 thinking: %s\n", i, block.Thinking)
-		case bamboo.ContentBlockToolUse:
-			fmt.Printf("  [%d] 🔧 tool_use: name=%s, id=%s\n", i, block.Name, block.ID)
+		switch b := block.(type) {
+		case *bamboo.TextBlock:
+			fmt.Printf("  [%d] 📝 text: %s\n", i, b.Text)
+		case *bamboo.ThinkingBlock:
+			fmt.Printf("  [%d] 💭 thinking: %s\n", i, b.Thinking)
+		case *bamboo.ToolUseBlock:
+			fmt.Printf("  [%d] 🔧 tool_use: name=%s, id=%s\n", i, b.Name, b.ID)
 		}
 	}
 	return nil
@@ -260,11 +260,11 @@ func demoThinking(ctx context.Context, client bamboo.BambooClient, model string)
 	fmt.Println()
 
 	for i, block := range resp.Content {
-		switch block.Type {
-		case bamboo.ContentBlockThinking:
-			fmt.Printf("  [%d] 💭 思考过程:\n%s\n\n", i, block.Thinking)
-		case bamboo.ContentBlockText:
-			fmt.Printf("  [%d] 📝 回复:\n%s\n", i, block.Text)
+		switch b := block.(type) {
+		case *bamboo.ThinkingBlock:
+			fmt.Printf("  [%d] 💭 思考过程:\n%s\n\n", i, b.Thinking)
+		case *bamboo.TextBlock:
+			fmt.Printf("  [%d] 📝 回复:\n%s\n", i, b.Text)
 		}
 	}
 	return nil
@@ -320,8 +320,8 @@ func demoToolCalling(ctx context.Context, client bamboo.BambooClient, model stri
 	if resp.StopReason != bamboo.FinishReasonToolUse {
 		fmt.Println("  ⚠️ AI 未请求工具调用，直接回复:")
 		for _, block := range resp.Content {
-			if block.Type == bamboo.ContentBlockText {
-				fmt.Printf("  📝 %s\n", block.Text)
+			if b, ok := block.(*bamboo.TextBlock); ok {
+				fmt.Printf("  📝 %s\n", b.Text)
 			}
 		}
 		return nil
@@ -330,7 +330,7 @@ func demoToolCalling(ctx context.Context, client bamboo.BambooClient, model stri
 	// 提取 tool_use 内容块
 	var toolUseBlocks []bamboo.ContentBlock
 	for _, block := range resp.Content {
-		if block.Type == bamboo.ContentBlockToolUse {
+		if _, ok := block.(*bamboo.ToolUseBlock); ok {
 			toolUseBlocks = append(toolUseBlocks, block)
 		}
 	}
@@ -342,18 +342,22 @@ func demoToolCalling(ctx context.Context, client bamboo.BambooClient, model stri
 	fmt.Println("⚙️  Step 2: 模拟工具执行")
 	var toolResults []bamboo.ContentBlock
 	for _, block := range toolUseBlocks {
+		toolUseBlock, ok := block.(*bamboo.ToolUseBlock)
+		if !ok {
+			continue
+		}
 		var input struct {
 			City string `json:"city"`
 		}
-		if err := json.Unmarshal(block.Input, &input); err != nil {
+		if err := json.Unmarshal(toolUseBlock.Input, &input); err != nil {
 			return fmt.Errorf("解析工具参数失败: %w", err)
 		}
-		fmt.Printf("  🔧 调用 %s(%s)\n", block.Name, input.City)
+		fmt.Printf("  🔧 调用 %s(%s)\n", toolUseBlock.Name, input.City)
 
 		// 硬编码模拟结果
 		result := "北京: 晴, 25°C"
 		fmt.Printf("  📊 返回: %s\n", result)
-		toolResults = append(toolResults, bamboo.NewToolResultBlock(block.ID, result, false))
+		toolResults = append(toolResults, bamboo.NewToolResultBlock(toolUseBlock.ID, result, false))
 	}
 
 	// ── Step 4: 发送工具结果，获取 AI 最终回复 ──
@@ -371,8 +375,8 @@ func demoToolCalling(ctx context.Context, client bamboo.BambooClient, model stri
 
 	fmt.Println("✅ 工具调用闭环完成!")
 	for _, block := range resp.Content {
-		if block.Type == bamboo.ContentBlockText {
-			fmt.Printf("  📝 AI: %s\n", block.Text)
+		if b, ok := block.(*bamboo.TextBlock); ok {
+			fmt.Printf("  📝 AI: %s\n", b.Text)
 		}
 	}
 	fmt.Printf("  📊 Token: input=%d, output=%d\n", resp.Usage.InputTokens, resp.Usage.OutputTokens)

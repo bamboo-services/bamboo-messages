@@ -1,8 +1,8 @@
 package bamboo
 
 import (
-	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -22,7 +22,7 @@ var finishReasonMap = map[provider.FinishReason]FinishReason{
 // messagesToProvider 将 bamboo.BambooMessage 列表转换为 provider.Message 列表。
 //
 // tool_result 消息会被拆分为独立的 Role=tool 消息；
-// image/document 类型当前不支持，遇到时会返回错误。
+// image/document 类型会被静默丢弃并记录日志。
 func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 	var result []provider.Message
 	for _, msg := range msgs {
@@ -35,30 +35,32 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		var toolResults []provider.Message
 
 		for _, block := range msg.Content {
-			switch block.Type {
-			case ContentBlockText:
-				textBuilder.WriteString(block.Text)
-			case ContentBlockThinking:
+			switch b := block.(type) {
+			case *TextBlock:
+				textBuilder.WriteString(b.Text)
+			case *ThinkingBlock:
 				// 思考过程不发送给 provider
-			case ContentBlockToolUse:
+			case *ToolUseBlock:
 				toolCalls = append(toolCalls, provider.ToolCall{
-					ID:   block.ID,
+					ID:   b.ID,
 					Type: "function",
 					Function: provider.FunctionCall{
-						Name:      block.Name,
-						Arguments: string(block.Input),
+						Name:      b.Name,
+						Arguments: string(b.Input),
 					},
 				})
-			case ContentBlockToolResult:
+			case *ToolResultBlock:
 				toolResults = append(toolResults, provider.Message{
 					Role:       provider.RoleTool,
-					Content:    block.ResultContent,
-					ToolCallID: block.ToolUseID,
+					Content:    b.Content,
+					ToolCallID: b.ToolUseID,
 				})
-			case ContentBlockImage:
-				return nil, NewBambooError(ErrorTypeProvider, "image content not supported by this provider")
-			case ContentBlockDocument:
-				return nil, NewBambooError(ErrorTypeProvider, "document content not supported by this provider")
+			case *ImageBlock, *DocumentBlock:
+				// 静默丢弃不支持的图片/文档类型
+				log.Printf("[bamboo] dropped unsupported content block type: %s", b.BlockType())
+			default:
+				// 未来未知类型
+				log.Printf("[bamboo] dropped unknown content block type: %s", b.BlockType())
 			}
 		}
 
@@ -167,12 +169,7 @@ func resultToResponse(result *provider.CompletionResult, providerType string) *R
 		content = append(content, NewTextBlock(result.Content))
 	}
 	for _, tc := range result.ToolCalls {
-		content = append(content, ContentBlock{
-			Type:  ContentBlockToolUse,
-			ID:    tc.ID,
-			Name:  tc.Function.Name,
-			Input: json.RawMessage(tc.Function.Arguments),
-		})
+		content = append(content, NewToolUseBlock(tc.ID, tc.Function.Name, tc.Function.Arguments))
 	}
 	if len(content) == 0 {
 		content = []ContentBlock{}
@@ -251,11 +248,23 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		if data.BlockType == "thinking" {
 			sc.thinkingBlockStarted = true
 		}
+		var cb ContentBlock
+		ct := mapBlockType(data.BlockType)
+		switch ct {
+		case ContentBlockText:
+			cb = NewTextBlock("")
+		case ContentBlockThinking:
+			cb = NewThinkingBlock("", "")
+		case ContentBlockToolUse:
+			cb = NewToolUseBlock(data.ID, data.Name, nil)
+		default:
+			cb = NewTextBlock("")
+		}
 		return []StreamEvent{
 			{
 				Type:         EventContentBlockStart,
 				Index:        sc.blockIndex,
-				ContentBlock: &ContentBlock{Type: mapBlockType(data.BlockType), ID: data.ID, Name: data.Name},
+				ContentBlock: cb,
 			},
 		}
 	case provider.StreamDeltaTypeTextOutput:
@@ -263,10 +272,11 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		var events []StreamEvent
 		if !sc.textBlockStarted {
 			sc.textBlockStarted = true
+			tb := NewTextBlock("")
 			events = append(events, StreamEvent{
 				Type:         EventContentBlockStart,
 				Index:        sc.blockIndex,
-				ContentBlock: &ContentBlock{Type: ContentBlockText},
+				ContentBlock: tb,
 			})
 		}
 		events = append(events, StreamEvent{
@@ -279,10 +289,11 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		var events []StreamEvent
 		if !sc.thinkingBlockStarted {
 			sc.thinkingBlockStarted = true
+			thb := NewThinkingBlock("", "")
 			events = append(events, StreamEvent{
 				Type:         EventContentBlockStart,
 				Index:        sc.blockIndex,
-				ContentBlock: &ContentBlock{Type: ContentBlockThinking},
+				ContentBlock: thb,
 			})
 		}
 		events = append(events, StreamEvent{
@@ -295,12 +306,13 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		data := delta.Data.(provider.ToolCallData)
 		stopIdx := sc.blockIndex
 		sc.blockIndex++
+		tub := NewToolUseBlock(data.ID, data.Name, nil)
 		return []StreamEvent{
 			{Type: EventContentBlockStop, Index: stopIdx},
 			{
 				Type:         EventContentBlockStart,
 				Index:        sc.blockIndex,
-				ContentBlock: &ContentBlock{Type: ContentBlockToolUse, ID: data.ID, Name: data.Name},
+				ContentBlock: tub,
 			},
 		}
 	case provider.StreamDeltaTypeToolCallDelta:

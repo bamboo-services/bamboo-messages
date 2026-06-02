@@ -1,5 +1,7 @@
 package bamboo
 
+import "encoding/json"
+
 // MessageRole 消息角色类型，标识消息发送方的身份。
 //
 // 用于区分用户发送的消息和 AI 助手生成的响应消息。
@@ -20,6 +22,23 @@ const (
 type BambooMessage struct {
 	Role    MessageRole    `json:"role"`    // 消息发送方角色
 	Content []ContentBlock `json:"content"` // 消息内容块列表
+}
+
+// UnmarshalJSON 自定义 JSON 反序列化，使用 ContentBlocks 包装类型
+// 根据 type 字段分派到具体的 ContentBlock 实现。
+func (m *BambooMessage) UnmarshalJSON(data []byte) error {
+	type alias BambooMessage
+	tmp := struct {
+		*alias
+		Content ContentBlocks `json:"content"`
+	}{
+		alias: (*alias)(m),
+	}
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	m.Content = []ContentBlock(tmp.Content)
+	return nil
 }
 
 // NewUserMessage 创建包含单个文本内容块的用户消息。

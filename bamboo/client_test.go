@@ -93,7 +93,11 @@ func TestCompleteBasic(t *testing.T) {
 	if resp.ProviderType != "anthropic" {
 		t.Fatalf("ProviderType 期望 anthropic，实际 %s", resp.ProviderType)
 	}
-	if len(resp.Content) == 0 || resp.Content[0].Text != "hello" {
+	if len(resp.Content) == 0 {
+		t.Fatal("Content 不应为空")
+	}
+	tb, ok := resp.Content[0].(*TextBlock)
+	if !ok || tb.Text != "hello" {
 		t.Fatalf("Content 不匹配: %+v", resp.Content)
 	}
 }
@@ -111,7 +115,11 @@ func TestCompleteWithSystem(t *testing.T) {
 	if resp == nil {
 		t.Fatal("Response 不应为 nil")
 	}
-	if len(resp.Content) == 0 || resp.Content[0].Text != "hello with system" {
+	if len(resp.Content) == 0 {
+		t.Fatal("Content 不应为空")
+	}
+	tb, ok := resp.Content[0].(*TextBlock)
+	if !ok || tb.Text != "hello with system" {
 		t.Fatalf("Content 不匹配: %+v", resp.Content)
 	}
 }
@@ -423,7 +431,11 @@ func TestCompleteWithSystemAndConfig(t *testing.T) {
 	if resp == nil {
 		t.Fatal("Response 不应为 nil")
 	}
-	if len(resp.Content) == 0 || resp.Content[0].Text != "response with tools" {
+	if len(resp.Content) == 0 {
+		t.Fatal("Content 不应为空")
+	}
+	tb, ok := resp.Content[0].(*TextBlock)
+	if !ok || tb.Text != "response with tools" {
 		t.Errorf("Content 不匹配: %+v", resp.Content)
 	}
 }

@@ -14,8 +14,12 @@ func TestNewUserMessage(t *testing.T) {
 	if len(msg.Content) != 1 {
 		t.Fatalf("期望 1 个 ContentBlock，实际 %d 个", len(msg.Content))
 	}
-	if msg.Content[0].Text != "你好" {
-		t.Errorf("期望 Content[0].Text=你好，实际 %s", msg.Content[0].Text)
+	tb, ok := msg.Content[0].(*TextBlock)
+	if !ok {
+		t.Fatal("Content[0] 类型断言为 *TextBlock 失败")
+	}
+	if tb.Text != "你好" {
+		t.Errorf("期望 Content[0].Text=你好，实际 %s", tb.Text)
 	}
 }
 
@@ -24,7 +28,11 @@ func TestNewAssistantMessage(t *testing.T) {
 	if msg.Role != RoleAssistant {
 		t.Errorf("期望 Role=%s", RoleAssistant)
 	}
-	if msg.Content[0].Text != "你好！有什么可以帮助你的吗？" {
+	tb, ok := msg.Content[0].(*TextBlock)
+	if !ok {
+		t.Fatal("Content[0] 类型断言为 *TextBlock 失败")
+	}
+	if tb.Text != "你好！有什么可以帮助你的吗？" {
 		t.Errorf("Content[0].Text 不匹配")
 	}
 }

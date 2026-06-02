@@ -89,7 +89,7 @@ type StreamEvent struct {
 	Type         StreamEventType `json:"type"`                    // 事件类型
 	Message      *BambooMessage  `json:"message,omitempty"`       // 完整消息（仅 message_start 事件使用）
 	Index        int             `json:"index,omitempty"`         // 内容块索引（content_block_start/delta/stop 事件使用）
-	ContentBlock *ContentBlock   `json:"content_block,omitempty"` // 内容块（仅 content_block_start 事件使用）
+	ContentBlock ContentBlock    `json:"content_block,omitempty"` // 内容块（仅 content_block_start 事件使用）
 	Delta        any             `json:"delta,omitempty"`         // 增量数据，可为 *StreamDelta 或 *MessageDelta（通过 any 兼容两种类型）
 	Usage        *Usage          `json:"usage,omitempty"`         // Token 用量统计（message_start 和 message_delta 事件使用）
 	Error        *BambooError    `json:"error,omitempty"`         // 错误详情（仅 error 事件使用）

@@ -74,7 +74,9 @@ func main() {
 
     // ── 非流式对话 ──
     resp, _ := client.Complete(ctx, messages, "", config)
-    fmt.Printf("响应: %s\n", resp.Content[0].Text)
+    if textBlock, ok := resp.Content[0].(*bamboo.TextBlock); ok {
+        fmt.Printf("响应: %s\n", textBlock.Text)
+    }
     fmt.Printf("服务商: %s\n", resp.ProviderType)
     fmt.Printf("Token: input=%d, output=%d\n", resp.Usage.InputTokens, resp.Usage.OutputTokens)
 }
@@ -118,6 +120,32 @@ resp, err := client.Complete(ctx, messages, "你是一个有帮助的助手。",
 // resp.Usage         — Token 用量统计 (InputTokens / OutputTokens)
 // resp.ProviderType  — 底层协议类型 (如 "anthropic")
 // resp.RequestID     — 请求追踪 ID
+```
+
+### ⚠️ Breaking Change (v2)
+
+`ContentBlock` 从 struct 改为 interface。迁移方式：
+
+| 旧写法 | 新写法 |
+|--------|--------|
+| `block.Type` | `block.BlockType()` |
+| `block.Text` | `block.(*bamboo.TextBlock).Text` |
+| `block.Thinking` | `block.(*bamboo.ThinkingBlock).Thinking` |
+| `block.Name` | `block.(*bamboo.ToolUseBlock).Name` |
+| `block.ID` | `block.(*bamboo.ToolUseBlock).ID` |
+| `block.Input` | `block.(*bamboo.ToolUseBlock).Input` |
+
+使用 type switch 处理不同内容块类型：
+
+```go
+switch b := block.(type) {
+case *bamboo.TextBlock:
+    fmt.Print(b.Text)
+case *bamboo.ThinkingBlock:
+    fmt.Printf("[Thinking: %s]\n", b.Thinking)
+case *bamboo.ToolUseBlock:
+    fmt.Printf("[Tool: %s(%s)]\n", b.Name, b.ID)
+}
 ```
 
 ## 支持的协议适配器
@@ -258,6 +286,49 @@ msg := bamboo.NewUserMessageBlocks(
     }),
 )
 ```
+
+### ContentBlock — 内容块接口
+
+`ContentBlock` 是 Go interface，定义内容块的统一访问方法：
+
+```go
+type ContentBlock interface {
+    BlockType() ContentBlockType
+}
+```
+
+具体类型通过 type assertion 访问字段：
+
+```go
+switch b := block.(type) {
+case *bamboo.TextBlock:
+    text := b.Text
+case *bamboo.ThinkingBlock:
+    thinking := b.Thinking
+case *bamboo.ToolUseBlock:
+    name := b.Name
+    id := b.ID
+    input := b.Input
+case *bamboo.ToolResultBlock:
+    toolUseID := b.ToolUseID
+    content := b.Content
+case *bamboo.ImageBlock:
+    source := b.Source
+case *bamboo.DocumentBlock:
+    source := b.Source
+}
+```
+
+支持的构造函数：
+
+| 构造函数 | 返回类型 | 说明 |
+|----------|----------|------|
+| `NewTextBlock(text)` | `ContentBlock` | 纯文本内容块 |
+| `NewThinkingBlock(thinking, signature)` | `ContentBlock` | 思考过程内容块 |
+| `NewToolUseBlock(id, name, input)` | `ContentBlock` | 工具调用内容块 |
+| `NewToolResultBlock(toolUseID, content, isError)` | `ContentBlock` | 工具结果内容块 |
+| `NewImageBlock(source)` | `ContentBlock` | 图片内容块 |
+| `NewDocumentBlock(source)` | `ContentBlock` | 文档内容块 |
 
 ### RequestConfig — 请求配置
 

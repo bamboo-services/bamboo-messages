@@ -48,7 +48,11 @@ func TestResponse_JSONRoundtrip(t *testing.T) {
 	if len(parsed.Content) != 1 {
 		t.Fatalf("Content 长度不匹配: 期望 1，实际 %d", len(parsed.Content))
 	}
-	if parsed.Content[0].Text != "你好！" {
+	tb, ok := parsed.Content[0].(*TextBlock)
+	if !ok {
+		t.Fatal("Content[0] 类型断言为 *TextBlock 失败")
+	}
+	if tb.Text != "你好！" {
 		t.Errorf("Content[0].Text 不匹配")
 	}
 
@@ -129,7 +133,7 @@ func TestResponse_WithToolUse(t *testing.T) {
 	if parsed.StopReason != FinishReasonToolUse {
 		t.Errorf("StopReason 不匹配: 期望 %s，实际 %s", FinishReasonToolUse, parsed.StopReason)
 	}
-	if len(parsed.Content) != 1 || parsed.Content[0].Type != ContentBlockToolUse {
+	if len(parsed.Content) != 1 || parsed.Content[0].BlockType() != ContentBlockToolUse {
 		t.Error("Content[0] 应为 tool_use 类型")
 	}
 }
