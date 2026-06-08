@@ -31,7 +31,7 @@ bamboo-messages/
 │   ├── stream.go                 # StreamEvent / StreamDelta 流事件模型
 │   ├── tool.go                   # Tool / ToolInputSchema 工具定义
 │   ├── config.go                 # RequestConfig + ThinkingConfig + PtrFloat64/PtrBool/PtrInt64
-│   ├── option.go                 # ClientOption + RequestOption + WithTopK/WithFrequencyPenalty/WithPresencePenalty/WithSeed/WithToolChoice/WithResponseFormat/WithExtra
+│   ├── option.go                 # ClientOption + RequestOption + WithToolChoice/WithResponseFormat/WithUserID/WithParallelToolCalls/WithExtra
 │   ├── convert.go                # 类型转换 (provider ↔ bamboo) + StreamConverter
 │   ├── content.go                # ContentBlock 构造函数
 │   ├── errors.go                 # BambooError 错误类型
@@ -70,10 +70,12 @@ bamboo-messages/
 | `BaseProvider[T]` | 泛型结构体 | provider.go:14 | 适配器基座，嵌入底层 SDK Client |
 | `Provider` | 接口 | provider.go:23 | 6 方法：Chat, ChatWithSystem, Complete, CompleteWithSystem, GetProviderType, GetAvailableModels |
 | `Message` | 结构体 | type.go:73 | 统一消息模型 (Role + Content + ToolCalls + ToolCallID) |
-| `ChatConfig` | 结构体 | type.go:141 | 请求配置 (Model, Temperature, MaxTokens, Tools, ThinkingConfig, ProviderExtra 等) |
-| `ThinkingConfig` | 结构体 | type.go:130 | 思考/推理配置 (Enabled + BudgetTokens + ReasoningEffort + Summary) |
+| `ChatConfig` | 结构体 | type.go:187 | 请求配置 (Model, Temperature, MaxTokens, Tools, UserID, ToolChoice, ResponseFormat, ParallelToolCalls, ThinkingConfig, ProviderExtra 等) |
+| `ThinkingConfig` | 结构体 | type.go:178 | 思考/推理配置 (Effort: none/low/medium/high) |
 | `ProviderExtra` | map[string]any | type.go:151 | Provider 特有参数透传 |
-| `GetExtraFloat64/Int64/String/Any` | 函数 | type.go:160-205 | ProviderExtra 安全取值 helpers |
+| `GetExtraFloat64/Int64/String/Bool/Any` | 函数 | type.go:203-274 | ProviderExtra 安全取值 helpers |
+| `ImageContentBlock` | 结构体 | type.go:128 | 图片内容块 (Source: ImageSource) |
+| `DocumentContentBlock` | 结构体 | type.go:146 | 文档内容块 (Source: DocumentSource) |
 | `StreamEvent` | 结构体 | stream.go:10 | 流事件 (Type + Delta + Err)，值类型，跨 goroutine 传递 |
 | `StreamDelta[E]` | 泛型结构体 | stream.go:17 | 流增量 (Type + Data)，泛型确保类型安全 |
 | `CompletionResult` | 结构体 | type.go:58 | 非流式完整响应 |
@@ -102,7 +104,7 @@ bamboo-messages/
 | `PtrFloat64/PtrBool/PtrInt64` | 函数 | config.go:38-54 | 指针辅助函数 |
 | `ClientOption` | 函数类型 | option.go:9 | 客户端配置选项 func(*clientConfig) |
 | `RequestOption` | 函数类型 | option.go:56 | 请求配置选项 func(*RequestConfig) |
-| `WithTopK/WithFrequencyPenalty/...` | 函数 | option.go:62-147 | 7 个 ProviderExtra 配置函数 + WithExtra |
+| `WithToolChoice/WithResponseFormat/WithUserID/WithParallelToolCalls` | 函数 | option.go:68-86 | 类型化请求配置函数 + WithExtra |
 | `StreamConverter` | 结构体 | convert.go:201 | 将 provider.StreamEvent 序列转换为 Anthropic 风格事件序列 |
 | `NewStreamConverter` | 构造函数 | convert.go:209 | StreamConverter 实例化 |
 
@@ -115,7 +117,7 @@ bamboo-messages/
 5. **中文注释** — 所有文档注释使用中文，遵循 Go doc 规范
 6. **错误透传** — 使用 `bamboo-base-go/common/error` 包的 `xError.Error` 类型，保留完整上下文
 7. **泛型基座** — `BaseProvider[T any]` 通过泛型参数嵌入不同 SDK Client
-8. **参数透传双层方案** — Layer 1: 类型化 WithXxx() 函数写入 ProviderExtra；Layer 2: WithExtra() 兜底传递任意 key-value
+8. **参数透传三层方案** — Layer 1: `ChatConfig` 类型化字段 (UserID/ToolChoice/ResponseFormat/ParallelToolCalls)；Layer 2: Provider 包独立的 Options 体系 (AnthropicMessagesOption/OpenaiCompletionsOption/OpenaiResponsesOption)；Layer 3: `WithExtra()` 兜底传递任意 key-value
 9. **BlockStart 事件** — 所有适配器在首个文本增量前必须发出 BlockStart delta；Anthropic 原生支持，OpenAI 适配器通过 textBlockStarted/thinkingBlockStarted 参数合成
 10. **ProviderExtra 取值** — 适配器中使用 GetExtra* 类型安全 helper，不做裸类型断言
 11. **统一 UserAgent** — 所有适配器在构造函数中通过 `option.WithHeader("User-Agent", provider.GetUserAgent())` 设置统一 UserAgent，格式为 `BM-SDK/{version}`
@@ -136,7 +138,7 @@ bamboo-messages/
 - `BaseProvider[T]` 泛型基座 + 类型别名 (`type Provider = BaseProvider[anthropic.Client]`) 模式，既统一又保留 SDK 特有能力
 - `StreamDelta[E any]` 泛型增量，统一使用时通过 `StreamDelta[any]` + 具体 DeltaData 类型 (TextData / ThinkingData / ToolCallData / ToolCallDeltaData / UsageData) 做类型区分
 - 配置可选字段用指针 (`*float64`) 区分"未设置"和"零值"
-- `ThinkingConfig` 统一结构体，通过 `Enabled` + `BudgetTokens` 适配 Anthropic Thinking，通过 `ReasoningEffort` + `Summary` 适配 OpenAI Reasoning
+- `ThinkingConfig` 统一结构体，通过 `Effort` (none/low/medium/high) 适配所有 Provider 的思考/推理模式，各适配器自动映射为 Provider 特有参数
 - `ProviderExtra map[string]any` + string key 常量模式，扩展新参数只需添加常量和 WithXxx 函数
 - `GetUserAgent()` 动态读取版本号 — 通过 `runtime/debug.ReadBuildInfo()` 在运行时读取，避免硬编码版本
 - `StreamConverter` 防御性自动补发 — 若 Provider 未发送 BlockStart，自动合成，兼容不完整的 Provider 实现

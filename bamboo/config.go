@@ -27,6 +27,14 @@ type RequestConfig struct {
 
 	Metadata map[string]string `json:"metadata,omitempty"` // 附加元数据，用于传递请求级别的自定义信息
 
+	UserID string `json:"user_id,omitempty"` // 用户标识，用于追踪和关联请求来源
+
+	ToolChoice string `json:"tool_choice,omitempty"` // 工具选择策略，如 "auto"、"none"、"required"
+
+	ResponseFormat string `json:"response_format,omitempty"` // 响应格式，如 "json_object"、"text"
+
+	ParallelToolCalls bool `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用
+
 	ThinkingConfig *ThinkingConfig `json:"thinking_config,omitempty"` // 思考/推理配置
 
 	ProviderExtra map[string]any `json:"provider_extra,omitempty"` // Provider 特有参数，用于传递各 Provider 独有的扩展配置

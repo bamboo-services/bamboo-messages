@@ -135,18 +135,28 @@ func TestConvertUnsupportedImage(t *testing.T) {
 	}
 }
 
-func TestConvertUnsupportedDocument(t *testing.T) {
+func TestConvertDocument(t *testing.T) {
 	msgs := []BambooMessage{
 		NewUserMessageBlocks(
-			NewDocumentBlock(ContentSource{Type: "text", Content: "doc content"}),
+			NewDocumentBlock(ContentSource{Type: "base64", MediaType: "application/pdf", Data: "abc123"}),
 		),
 	}
 	result, err := messagesToProvider(msgs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result) != 0 {
-		t.Errorf("expected 0 messages after document dropped, got %d", len(result))
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message with document, got %d", len(result))
+	}
+	if len(result[0].ContentBlocks) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(result[0].ContentBlocks))
+	}
+	doc, ok := result[0].ContentBlocks[0].(provider.DocumentContentBlock)
+	if !ok {
+		t.Fatal("expected DocumentContentBlock")
+	}
+	if doc.Source.Type != "base64" {
+		t.Errorf("Source.Type = %q, want base64", doc.Source.Type)
 	}
 }
 
@@ -1142,10 +1152,7 @@ func TestConfigToProvider_ThinkingConfig(t *testing.T) {
 		Model:     "claude-sonnet-4-20250514",
 		MaxTokens: 4096,
 		ThinkingConfig: &ThinkingConfig{
-			Enabled:         PtrBool(true),
-			BudgetTokens:    PtrInt64(10000),
-			ReasoningEffort: "high",
-			Summary:         "auto",
+			Effort: "high",
 		},
 	}
 
@@ -1156,17 +1163,8 @@ func TestConfigToProvider_ThinkingConfig(t *testing.T) {
 	if result.ThinkingConfig == nil {
 		t.Fatal("ThinkingConfig 不应为 nil")
 	}
-	if result.ThinkingConfig.Enabled == nil || *result.ThinkingConfig.Enabled != true {
-		t.Errorf("Enabled = %v, 期望 true", result.ThinkingConfig.Enabled)
-	}
-	if result.ThinkingConfig.BudgetTokens == nil || *result.ThinkingConfig.BudgetTokens != 10000 {
-		t.Errorf("BudgetTokens = %v, 期望 10000", result.ThinkingConfig.BudgetTokens)
-	}
-	if result.ThinkingConfig.ReasoningEffort != "high" {
-		t.Errorf("ReasoningEffort = %q, 期望 %q", result.ThinkingConfig.ReasoningEffort, "high")
-	}
-	if result.ThinkingConfig.Summary != "auto" {
-		t.Errorf("Summary = %q, 期望 %q", result.ThinkingConfig.Summary, "auto")
+	if result.ThinkingConfig.Effort != "high" {
+		t.Errorf("Effort = %q, 期望 %q", result.ThinkingConfig.Effort, "high")
 	}
 }
 
@@ -1176,10 +1174,8 @@ func TestConfigToProvider_ProviderExtra(t *testing.T) {
 		Model:     "test-model",
 		MaxTokens: 2048,
 		ProviderExtra: map[string]any{
-			provider.ProviderExtraKeyTopK:             50.0,
-			provider.ProviderExtraKeyFrequencyPenalty: 0.5,
-			provider.ProviderExtraKeySeed:             int64(42),
-			"custom_key":                              "custom_value",
+			"custom_key": "custom_value",
+			"top_k":      50.0,
 		},
 	}
 
@@ -1190,17 +1186,11 @@ func TestConfigToProvider_ProviderExtra(t *testing.T) {
 	if result.ProviderExtra == nil {
 		t.Fatal("ProviderExtra 不应为 nil")
 	}
-	if result.ProviderExtra[provider.ProviderExtraKeyTopK] != 50.0 {
-		t.Errorf("TopK = %v, 期望 50.0", result.ProviderExtra[provider.ProviderExtraKeyTopK])
-	}
-	if result.ProviderExtra[provider.ProviderExtraKeyFrequencyPenalty] != 0.5 {
-		t.Errorf("FrequencyPenalty = %v, 期望 0.5", result.ProviderExtra[provider.ProviderExtraKeyFrequencyPenalty])
-	}
-	if result.ProviderExtra[provider.ProviderExtraKeySeed] != int64(42) {
-		t.Errorf("Seed = %v, 期望 42", result.ProviderExtra[provider.ProviderExtraKeySeed])
-	}
 	if result.ProviderExtra["custom_key"] != "custom_value" {
 		t.Errorf("custom_key = %v, 期望 custom_value", result.ProviderExtra["custom_key"])
+	}
+	if result.ProviderExtra["top_k"] != 50.0 {
+		t.Errorf("top_k = %v, 期望 50.0", result.ProviderExtra["top_k"])
 	}
 }
 

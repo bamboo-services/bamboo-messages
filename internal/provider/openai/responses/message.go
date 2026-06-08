@@ -2,6 +2,7 @@ package responses
 
 import (
 	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/bamboo-services/bamboo-messages/internal/provider"
 )
@@ -31,14 +32,62 @@ func (p *ResponsesProvider) buildInput(systemPrompt string, messages []provider.
 	for _, msg := range messages {
 		switch msg.Role {
 		case provider.RoleUser:
-			items = append(items, responses.ResponseInputItemUnionParam{
-				OfMessage: &responses.EasyInputMessageParam{
-					Role: responses.EasyInputMessageRoleUser,
-					Content: responses.EasyInputMessageContentUnionParam{
-						OfString: openai.String(msg.Content),
+			if len(msg.ContentBlocks) > 0 {
+				parts := make(responses.ResponseInputMessageContentListParam, 0, len(msg.ContentBlocks)+1)
+
+				if msg.Content != "" {
+					parts = append(parts, responses.ResponseInputContentUnionParam{
+						OfInputText: &responses.ResponseInputTextParam{
+							Text: msg.Content,
+						},
+					})
+				}
+
+				for _, cb := range msg.ContentBlocks {
+					switch cb.BlockType() {
+					case "image":
+						if img, ok := cb.(provider.ImageContentBlock); ok {
+							if img.Source.Type == "base64" {
+								// base64 编码图片 → data URI 格式
+								dataURI := "data:" + img.Source.MediaType + ";base64," + img.Source.Data
+								parts = append(parts, responses.ResponseInputContentUnionParam{
+									OfInputImage: &responses.ResponseInputImageParam{
+										ImageURL: param.Opt[string]{Value: dataURI},
+									},
+								})
+							} else if img.Source.Type == "url" {
+								// URL 图片直接传递
+								parts = append(parts, responses.ResponseInputContentUnionParam{
+									OfInputImage: &responses.ResponseInputImageParam{
+										ImageURL: param.Opt[string]{Value: img.Source.URL},
+									},
+								})
+							}
+						}
+					case "document":
+						// 文档内容块：静默忽略（Responses SDK 暂不支持）
+					}
+				}
+
+				items = append(items, responses.ResponseInputItemUnionParam{
+					OfMessage: &responses.EasyInputMessageParam{
+						Role: responses.EasyInputMessageRoleUser,
+						Content: responses.EasyInputMessageContentUnionParam{
+							OfInputItemContentList: parts,
+						},
 					},
-				},
-			})
+				})
+			} else {
+				// 纯文本消息：向后兼容
+				items = append(items, responses.ResponseInputItemUnionParam{
+					OfMessage: &responses.EasyInputMessageParam{
+						Role: responses.EasyInputMessageRoleUser,
+						Content: responses.EasyInputMessageContentUnionParam{
+							OfString: openai.String(msg.Content),
+						},
+					},
+				})
+			}
 		case provider.RoleAssistant:
 			items = append(items, p.buildAssistantItem(msg)...)
 		case provider.RoleTool:

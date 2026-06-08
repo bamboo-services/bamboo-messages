@@ -484,10 +484,9 @@ func testBuildParams(p *ResponsesProvider, config *provider.ChatConfig) response
 	return p.buildResponseNewParams("gpt-4o", responses.ResponseNewParamsInputUnion{}, config)
 }
 
-// TestBuildParams_StopMapping 验证 Stop 参数正确映射到 ProviderExtra。
+// TestBuildParams_StopMapping 验证 Stop 参数通过 SetExtraFields 透传。
 //
-// Responses SDK 无原生 Stop 字段，通过 ProviderExtra["stop"] 透传。
-// 当 ChatConfig.Stop 非空时，应自动写入 ProviderExtra。
+// Responses SDK 无原生 Stop 字段，通过 SetExtraFields 透传。
 func TestBuildParams_StopMapping(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
@@ -495,35 +494,35 @@ func TestBuildParams_StopMapping(t *testing.T) {
 		Stop: []string{"STOP", "END"},
 	}
 
-	_ = testBuildParams(p, config)
+	params := testBuildParams(p, config)
 
-	// 验证 Stop 被写入 ProviderExtra
-	if config.ProviderExtra == nil {
-		t.Fatal("ProviderExtra 应该不为 nil")
+	data, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("序列化 params 失败: %v", err)
 	}
-	stopVal, ok := config.ProviderExtra["stop"]
-	if !ok {
-		t.Fatal("ProviderExtra 中应包含 'stop' 键")
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("反序列化 params 失败: %v", err)
 	}
-	stopSlice, ok := stopVal.([]string)
+	stopVal, ok := raw["stop"]
 	if !ok {
-		t.Fatalf("ProviderExtra['stop'] 应为 []string 类型, 实际为 %T", stopVal)
+		t.Fatal("序列化后的 JSON 中应包含 'stop' 字段")
+	}
+	stopSlice, ok := stopVal.([]any)
+	if !ok {
+		t.Fatalf("'stop' 应为数组类型, 实际为 %T", stopVal)
 	}
 	if len(stopSlice) != 2 || stopSlice[0] != "STOP" || stopSlice[1] != "END" {
-		t.Errorf("ProviderExtra['stop'] = %v, want [STOP END]", stopSlice)
+		t.Errorf("stop = %v, want [STOP END]", stopSlice)
 	}
 }
 
-// TestBuildParams_User 验证 User 参数从 ProviderExtra 正确映射到 params.User。
-//
-// User 参数用于标识终端用户，支持缓存优化和安全审计。
+// TestBuildParams_User 验证 UserID 参数从 ChatConfig.UserID 正确映射到 params.User。
 func TestBuildParams_User(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
 	config := &provider.ChatConfig{
-		ProviderExtra: map[string]any{
-			provider.ProviderExtraKeyUser: "test-user",
-		},
+		UserID: "test-user",
 	}
 
 	params := testBuildParams(p, config)
@@ -544,7 +543,7 @@ func TestBuildParams_Store(t *testing.T) {
 
 	config := &provider.ChatConfig{
 		ProviderExtra: map[string]any{
-			provider.ProviderExtraKeyStore: true,
+			"store": true,
 		},
 	}
 
@@ -568,7 +567,7 @@ func TestBuildParams_Modalities(t *testing.T) {
 	modalities := []string{"text", "audio"}
 	config := &provider.ChatConfig{
 		ProviderExtra: map[string]any{
-			provider.ProviderExtraKeyModalities: modalities,
+			"modalities": modalities,
 		},
 	}
 
@@ -604,7 +603,7 @@ func TestBuildParams_Truncation(t *testing.T) {
 
 	config := &provider.ChatConfig{
 		ProviderExtra: map[string]any{
-			provider.ProviderExtraKeyTruncation: "auto",
+			"truncation": "auto",
 		},
 	}
 
@@ -623,7 +622,7 @@ func TestBuildParams_PreviousResponseID(t *testing.T) {
 
 	config := &provider.ChatConfig{
 		ProviderExtra: map[string]any{
-			provider.ProviderExtraKeyPreviousResponseID: "resp-123",
+			"previous_response_id": "resp-123",
 		},
 	}
 

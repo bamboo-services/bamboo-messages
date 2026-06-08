@@ -63,56 +63,63 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			params.Tools = tools
 		}
 
-		if config.ThinkingConfig != nil && config.ThinkingConfig.ReasoningEffort != "" {
-			params.ReasoningEffort = shared.ReasoningEffort(config.ThinkingConfig.ReasoningEffort)
-		}
+	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
+		params.ReasoningEffort = shared.ReasoningEffort(config.ThinkingConfig.Effort)
+	}
 
-		if fp, ok := provider.GetExtraFloat64(config.ProviderExtra, provider.ProviderExtraKeyFrequencyPenalty); ok {
-			params.FrequencyPenalty = openai.Float(fp)
-		}
+	if fp, ok := provider.GetExtraFloat64(config.ProviderExtra, "frequency_penalty"); ok {
+		params.FrequencyPenalty = openai.Float(fp)
+	}
 
-		if pp, ok := provider.GetExtraFloat64(config.ProviderExtra, provider.ProviderExtraKeyPresencePenalty); ok {
-			params.PresencePenalty = openai.Float(pp)
-		}
+	if pp, ok := provider.GetExtraFloat64(config.ProviderExtra, "presence_penalty"); ok {
+		params.PresencePenalty = openai.Float(pp)
+	}
 
-		if seed, ok := provider.GetExtraInt64(config.ProviderExtra, provider.ProviderExtraKeySeed); ok {
-			params.Seed = openai.Int(seed)
-		}
+	if seed, ok := provider.GetExtraInt64(config.ProviderExtra, "seed"); ok {
+		params.Seed = openai.Int(seed)
+	}
 
-		// 用户标识
-		if u, ok := provider.GetExtraString(config.ProviderExtra, provider.ProviderExtraKeyUser); ok {
-			params.User = openai.String(u)
-		}
+	// 用户标识
+	if config.UserID != "" {
+		params.User = openai.String(config.UserID)
+	}
 
-		// 预测内容（用于加速已知内容的生成）
-		if pred, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyPrediction); ok {
-			if prediction, ok := pred.(openai.ChatCompletionPredictionContentParam); ok {
-				params.Prediction = prediction
+	// 预测内容（用于加速已知内容的生成）
+	if pred, ok := provider.GetExtraAny(config.ProviderExtra, "prediction"); ok {
+		if prediction, ok := pred.(openai.ChatCompletionPredictionContentParam); ok {
+			params.Prediction = prediction
+		}
+	}
+
+	// 是否启用并行工具调用
+	params.ParallelToolCalls = openai.Bool(config.ParallelToolCalls)
+
+	// 附加元数据
+	if len(config.Metadata) > 0 {
+		params.Metadata = shared.Metadata(config.Metadata)
+	}
+
+	// 工具选择策略
+	if config.ToolChoice != "" {
+		tc := config.ToolChoice
+		if tc == "forced" {
+			tc = "required" // map forced→required for OpenAI
+		}
+		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(tc)}
+	}
+
+	// 响应格式
+	if config.ResponseFormat != "" {
+		if config.ResponseFormat == "json_object" {
+			params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
+				OfJSONObject: openai.Ptr(shared.NewResponseFormatJSONObjectParam()),
+			}
+		} else if config.ResponseFormat == "text" {
+			params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
+				OfText: openai.Ptr(shared.NewResponseFormatTextParam()),
 			}
 		}
-
-		// 是否启用并行工具调用
-		if ptc, ok := provider.GetExtraBool(config.ProviderExtra, provider.ProviderExtraKeyParallelToolCalls); ok {
-			params.ParallelToolCalls = openai.Bool(ptc)
-		}
-
-		// 附加元数据
-		if len(config.Metadata) > 0 {
-			params.Metadata = shared.Metadata(config.Metadata)
-		}
-
-		if tc, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyToolChoice); ok {
-			// 优先处理字符串形式的 ToolChoice（"auto" / "none" / "required"）
-			if s, ok := tc.(string); ok {
-				params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(s)}
-			} else if toolChoice, ok := tc.(openai.ChatCompletionToolChoiceOptionUnionParam); ok {
-				params.ToolChoice = toolChoice
-			}
-		}
-
-		if rf, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyResponseFormat); ok {
-			params.ResponseFormat = buildResponseFormat(rf)
-		}
+	}
 
 		// 启用 usage 流式返回
 		params.StreamOptions = openai.ChatCompletionStreamOptionsParam{

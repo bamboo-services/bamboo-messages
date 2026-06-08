@@ -35,10 +35,12 @@ internal/provider/
 | `BaseProvider[T]` | 泛型结构体 | provider.go:14 | 适配器基座，嵌入底层 SDK Client |
 | `Provider` | 接口 | provider.go:23 | 6 方法统一接口 |
 | `Message` | 结构体 | type.go:73 | 统一消息模型 (Role + Content + ToolCalls + ToolCallID) |
-| `ChatConfig` | 结构体 | type.go:141 | 请求配置 (Model, Temperature, MaxTokens, Tools, ThinkingConfig, ProviderExtra) |
-| `ThinkingConfig` | 结构体 | type.go:130 | 思考/推理配置 (Enabled + BudgetTokens + ReasoningEffort + Summary) |
+| `ChatConfig` | 结构体 | type.go:187 | 请求配置 (Model, Temperature, MaxTokens, Tools, UserID, ToolChoice, ResponseFormat, ParallelToolCalls, ThinkingConfig, ProviderExtra) |
+| `ThinkingConfig` | 结构体 | type.go:178 | 思考/推理配置 (Effort: none/low/medium/high) |
 | `ProviderExtra` | map[string]any | type.go:151 | Provider 特有参数透传 |
-| `GetExtraFloat64/Int64/String/Any` | 函数 | type.go:160-205 | ProviderExtra 安全取值 helpers |
+| `GetExtraFloat64/Int64/String/Bool/Any` | 函数 | type.go:203-274 | ProviderExtra 安全取值 helpers |
+| `ImageContentBlock` | 结构体 | type.go:128 | 图片内容块 (Source: ImageSource) |
+| `DocumentContentBlock` | 结构体 | type.go:146 | 文档内容块 (Source: DocumentSource) |
 | `StreamEvent` | 结构体 | stream.go:10 | 流事件 (Type + Delta + Err)，值类型 |
 | `StreamDelta[E]` | 泛型结构体 | stream.go:17 | 流增量 (Type + Data) |
 | `BlockStartData` | 结构体 | stream.go:90 | 内容块开始数据 |
@@ -50,7 +52,7 @@ internal/provider/
 - **值类型传递** — `Message`, `StreamEvent` 为值类型，通过 channel 安全传递，传递后视为只读
 - **泛型基座** — `BaseProvider[T any]` 通过泛型参数嵌入不同 SDK Client，适配器通过类型别名使用
 - **Channel 模式** — 流式通过 `make(chan StreamEvent)` 返回，在 goroutine 中发送，发送完 close
-- **参数透传双层方案** — Layer 1: 类型化 WithXxx() 函数写入 ProviderExtra；Layer 2: WithExtra() 兜底
+- **参数透传三层方案** — Layer 1: `ChatConfig` 类型化字段 (UserID/ToolChoice/ResponseFormat/ParallelToolCalls)；Layer 2: Provider 包独立的 Options 体系；Layer 3: `WithExtra()` 兜底
 - **ProviderExtra 安全取值** — 适配器中使用 GetExtra* 类型安全 helper，不做裸类型断言
 - **统一 UserAgent** — 所有适配器通过 `provider.GetUserAgent()` 获取 `"BM-SDK/{version}"` 格式 UserAgent
 - **版本读取策略** — `GetSDKVersion()` 优先 `info.Main.Version`，回退到依赖列表查找，最终 `"dev"`

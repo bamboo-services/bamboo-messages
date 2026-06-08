@@ -1,6 +1,6 @@
 package bamboo
 
-import "github.com/bamboo-services/bamboo-messages/internal/provider"
+import "github.com/bamboo-services/bamboo-messages/internal/provider" // 保留：ClientOption 系统依赖 provider.Provider
 
 // ClientOption 客户端配置选项函数。
 //
@@ -50,88 +50,7 @@ func NewClientWithOptions(opts ...ClientOption) BambooClient {
 }
 
 // RequestOption 请求配置选项函数，用于灵活配置 RequestConfig。
-//
-// 通过 Functional Options 模式设置请求参数，
-// 如 WithTopK、WithFrequencyPenalty 等。
 type RequestOption func(*RequestConfig)
-
-// WithTopK 设置 Top-K 采样参数。
-//
-// 仅部分 Provider 支持（如 Anthropic），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithTopK(topK float64) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeyTopK] = topK
-	}
-}
-
-// WithFrequencyPenalty 设置频率惩罚参数。
-//
-// 仅部分 Provider 支持（如 OpenAI），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithFrequencyPenalty(penalty float64) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeyFrequencyPenalty] = penalty
-	}
-}
-
-// WithPresencePenalty 设置存在惩罚参数。
-//
-// 仅部分 Provider 支持（如 OpenAI），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithPresencePenalty(penalty float64) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeyPresencePenalty] = penalty
-	}
-}
-
-// WithSeed 设置随机种子，用于控制生成结果的确定性。
-//
-// 仅部分 Provider 支持（如 OpenAI Completions），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithSeed(seed int64) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeySeed] = seed
-	}
-}
-
-// WithToolChoice 设置工具选择策略。
-//
-// 仅部分 Provider 支持（如 Anthropic/OpenAI），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithToolChoice(choice any) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeyToolChoice] = choice
-	}
-}
-
-// WithResponseFormat 设置响应格式。
-//
-// 仅部分 Provider 支持（如 OpenAI），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithResponseFormat(format any) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeyResponseFormat] = format
-	}
-}
 
 // WithExtra 设置 Provider 特有的扩展参数。
 //
@@ -146,93 +65,22 @@ func WithExtra(key string, value any) RequestOption {
 	}
 }
 
-// WithUser 设置用户标识。
-//
-// 仅部分 Provider 支持（如 OpenAI Responses），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithUser(value string) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeyUser] = value
-	}
+// WithToolChoice 设置工具选择策略（如 "auto"/"none"/"required"）。
+func WithToolChoice(choice string) RequestOption {
+	return func(cfg *RequestConfig) { cfg.ToolChoice = choice }
 }
 
-// WithStore 设置响应存储策略。
-//
-// 仅部分 Provider 支持（如 OpenAI Responses），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithStore(value any) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeyStore] = value
-	}
+// WithResponseFormat 设置响应格式（如 "json_object"/"text"）。
+func WithResponseFormat(format string) RequestOption {
+	return func(cfg *RequestConfig) { cfg.ResponseFormat = format }
 }
 
-// WithModalities 设置输出模态。
-//
-// 仅部分 Provider 支持（如 OpenAI Responses），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithModalities(value any) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeyModalities] = value
-	}
-}
-
-// WithPrediction 设置预测内容。
-//
-// 仅部分 Provider 支持（如 OpenAI Completions），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithPrediction(value any) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeyPrediction] = value
-	}
+// WithUserID 设置用户标识。
+func WithUserID(userID string) RequestOption {
+	return func(cfg *RequestConfig) { cfg.UserID = userID }
 }
 
 // WithParallelToolCalls 设置是否允许并行工具调用。
-//
-// 仅部分 Provider 支持（如 OpenAI Completions/Responses），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithParallelToolCalls(value bool) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeyParallelToolCalls] = value
-	}
-}
-
-// WithTruncation 设置消息截断策略。
-//
-// 仅部分 Provider 支持（如 Anthropic），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithTruncation(value string) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeyTruncation] = value
-	}
-}
-
-// WithPreviousResponseID 设置前置响应 ID，用于多轮对话关联。
-//
-// 仅部分 Provider 支持（如 OpenAI Responses），
-// 参数值通过 ProviderExtra 透传到底层适配器。
-func WithPreviousResponseID(value string) RequestOption {
-	return func(cfg *RequestConfig) {
-		if cfg.ProviderExtra == nil {
-			cfg.ProviderExtra = make(map[string]any)
-		}
-		cfg.ProviderExtra[provider.ProviderExtraKeyPreviousResponseID] = value
-	}
+func WithParallelToolCalls(enabled bool) RequestOption {
+	return func(cfg *RequestConfig) { cfg.ParallelToolCalls = enabled }
 }

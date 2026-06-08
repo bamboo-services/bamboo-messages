@@ -15,6 +15,7 @@ internal/provider/openai/completions/
 ├── stream_test.go    # 流式事件单元测试
 ├── message.go        # 消息格式双向转换
 ├── models.go         # 模型常量 + GetAvailableModels
+├── option.go         # OpenaiCompletionsOption + WithFrequencyPenalty/WithPresencePenalty/WithSeed/WithPrediction
 ├── tools.go          # 工具定义转换
 └── provider_test.go  # 集成测试
 ```
@@ -38,8 +39,8 @@ internal/provider/openai/completions/
 - **Reasoning 内容提取** — 从 `delta.JSON.ExtraFields["reasoning_content"]` 提取推理内容，首次推理增量前合成 `NewBlockStartDelta("thinking")`
 - **双 Block 状态追踪** — `textBlockStarted` 和 `thinkingBlockStarted` 独立追踪，互不干扰
 - **Usage 流式返回** — 通过 `params.StreamOptions.IncludeUsage=true` 启用，在最后一个 chunk 中提取
-- **参数透传** — FrequencyPenalty/PresencePenalty/Seed/ToolChoice/ResponseFormat 均通过 `ProviderExtra` 透传
-- **ReasoningEffort 映射** — `ThinkingConfig.ReasoningEffort` → `shared.ReasoningEffort`
+- **参数透传** — FrequencyPenalty/PresencePenalty/Seed/Prediction 通过 `OpenaiCompletionsOption` 设置，合并到 ProviderExtra 后透传；ToolChoice/ResponseFormat 通过 `ChatConfig` 类型化字段传递
+- **ReasoningEffort 映射** — `ThinkingConfig.Effort` → `shared.ReasoningEffort`
 
 ## 反模式
 

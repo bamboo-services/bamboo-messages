@@ -16,23 +16,6 @@ const (
 	ProviderOpenAICompletions ProviderType = "openai-completions" // OpenAI Chat Completions 协议
 )
 
-// ProviderExtra 键常量
-const (
-	ProviderExtraKeyTopK             = "top_k"
-	ProviderExtraKeyFrequencyPenalty = "frequency_penalty"
-	ProviderExtraKeyPresencePenalty  = "presence_penalty"
-	ProviderExtraKeySeed             = "seed"
-	ProviderExtraKeyToolChoice       = "tool_choice"
-	ProviderExtraKeyResponseFormat   = "response_format"
-	ProviderExtraKeyUser             = "user"
-	ProviderExtraKeyStore            = "store"
-	ProviderExtraKeyModalities       = "modalities"
-	ProviderExtraKeyPrediction        = "prediction"
-	ProviderExtraKeyParallelToolCalls = "parallel_tool_calls"
-	ProviderExtraKeyTruncation       = "truncation"
-	ProviderExtraKeyPreviousResponseID = "previous_response_id"
-)
-
 // MessageRole 消息角色。
 //
 // 定义了对话中不同参与者的角色类型，包括系统提示、
@@ -75,13 +58,16 @@ type CompletionResult struct {
 
 // Message 对话消息。
 //
-// 表示对话中的一条消息，包含角色、内容、工具调用信息
-// 和工具响应的调用 ID。
+// 表示对话中的一条消息，包含角色、文本内容、多媒体内容块、
+// 工具调用信息和工具响应的调用 ID。
+// 当 ContentBlocks 不为空时，ContentBlocks 优先于 Content。
 type Message struct {
-	Role       MessageRole `json:"role"`                   // 消息角色
-	Content    string      `json:"content,omitempty"`      // 消息内容
-	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`   // 助手发起的工具调用
-	ToolCallID string      `json:"tool_call_id,omitempty"` // 工具响应的调用 ID
+	Role          MessageRole    `json:"role"`                     // 消息角色
+	Content       string         `json:"content,omitempty"`        // 消息文本内容（向后兼容）
+	ContentBlocks []ContentBlock `json:"content_blocks,omitempty"` // 多媒体内容块（优先于 Content）
+	ToolCalls     []ToolCall     `json:"tool_calls,omitempty"`     // 助手发起的工具调用
+	ToolCallID    string         `json:"tool_call_id,omitempty"`   // 工具响应的调用 ID
+	IsError       bool           `json:"is_error,omitempty"`       // 工具响应是否为错误
 }
 
 // ToolCall 工具调用。
@@ -126,24 +112,77 @@ type FunctionDef struct {
 }
 
 // ============================================
+// 多媒体内容块相关类型
+// ============================================
+
+// ContentBlock 多媒体内容块接口。
+//
+// 定义内容块的统一访问方法，支持文本、图片、文档等多种类型。
+type ContentBlock interface {
+	BlockType() string // 返回内容块类型标识
+}
+
+// ImageContentBlock 图片内容块。
+//
+// 用于在对话中传递图片数据，支持 base64 编码和 URL 两种来源方式。
+type ImageContentBlock struct {
+	Source ImageSource `json:"source"` // 图片来源
+}
+
+// BlockType 实现 ContentBlock 接口，返回 "image"。
+func (b ImageContentBlock) BlockType() string { return "image" }
+
+// ImageSource 图片来源。
+//
+// 图片的来源信息，支持 base64 编码内联数据和远程 URL 两种方式。
+// Type 为 "base64" 时使用 Data + MediaType；Type 为 "url" 时使用 URL。
+type ImageSource struct {
+	Type      string `json:"type"`                 // 来源类型："base64" | "url"
+	MediaType string `json:"media_type,omitempty"` // MIME 类型，如 "image/png"
+	Data      string `json:"data,omitempty"`       // base64 编码的图片数据
+	URL       string `json:"url,omitempty"`        // 图片远程地址
+}
+
+// DocumentContentBlock 文档内容块。
+//
+// 用于在对话中传递文档数据，支持 base64 编码和 URL 两种来源方式。
+type DocumentContentBlock struct {
+	Source DocumentSource `json:"source"` // 文档来源
+}
+
+// BlockType 实现 ContentBlock 接口，返回 "document"。
+func (b DocumentContentBlock) BlockType() string { return "document" }
+
+// DocumentSource 文档来源。
+//
+// 文档的来源信息，支持 base64 编码内联数据和远程 URL 两种方式。
+// Type 为 "base64" 时使用 Data + MediaType；Type 为 "url" 时使用 URL。
+type DocumentSource struct {
+	Type      string `json:"type"`                 // 来源类型："base64" | "url"
+	MediaType string `json:"media_type,omitempty"` // MIME 类型，如 "application/pdf"
+	Data      string `json:"data,omitempty"`       // base64 编码的文档数据
+	URL       string `json:"url,omitempty"`        // 文档远程地址
+}
+
+// ============================================
 // 配置相关结构体
 // ============================================
 
 // ThinkingConfig 思考/推理配置。
 //
-// 统一 Anthropic Thinking 和 OpenAI Reasoning 参数，
-// 支持通过 Enabled/BudgetTokens 配置 Anthropic 思考模式，
-// 或通过 ReasoningEffort/Summary 配置 OpenAI 推理模式。
+// Effort 统一控制所有 Provider 的思考/推理强度，支持 none/low/medium/high。
+// 由各适配器根据 Effort 值映射到 Provider 特有参数：
+//   - Anthropic: effort 值用于 adaptive thinking 模式
+//   - OpenAI Completions: 映射为 ReasoningEffort
+//   - OpenAI Responses: 映射为 ReasoningEffort，Summary 自动推导 (none→""、low→"concise"、medium→"auto"、high→"detailed")
 type ThinkingConfig struct {
-	Enabled         *bool  `json:"enabled,omitempty"`          // 是否启用思考/推理模式
-	BudgetTokens    *int64 `json:"budget_tokens,omitempty"`    // Anthropic: 思考 token 预算
-	ReasoningEffort string `json:"reasoning_effort,omitempty"` // OpenAI: none/low/medium/high
-	Summary         string `json:"summary,omitempty"`          // OpenAI Responses: auto/concise/detailed
+	Effort string `json:"effort,omitempty"` // 思考/推理强度: none/low/medium/high
 }
 
 // ChatConfig 聊天请求配置。
 //
 // 包含模型选择、温度参数、Token 限制、工具定义、
+// 用户标识、工具选择策略、响应格式、并行工具调用、
 // 思考配置和 Provider 特有参数等完整请求配置。
 type ChatConfig struct {
 	Model          string            `json:"model,omitempty"`          // 模型名称
@@ -153,6 +192,10 @@ type ChatConfig struct {
 	Stop           []string          `json:"stop,omitempty"`           // 停止词
 	Tools          []Tool            `json:"tools,omitempty"`          // 可用工具列表
 	Metadata       map[string]string `json:"metadata,omitempty"`       // 附加元数据
+	UserID         string            `json:"user_id,omitempty"`          // 用户标识，Anthropic→metadata.user_id，OpenAI→user
+	ToolChoice     string            `json:"tool_choice,omitempty"`      // 工具选择策略: auto/none/required/forced
+	ResponseFormat string            `json:"response_format,omitempty"`  // 响应格式: text/json_object
+	ParallelToolCalls bool           `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用
 	ThinkingConfig *ThinkingConfig   `json:"thinking_config,omitempty"` // 思考/推理配置
 	ProviderExtra  map[string]any    `json:"provider_extra,omitempty"`  // Provider 特有参数
 }

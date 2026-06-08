@@ -20,7 +20,71 @@ func (p *Provider) buildMessages(messages []provider.Message) []anthropic.BetaMe
 	for _, msg := range messages {
 		switch msg.Role {
 		case provider.RoleUser:
-			result = append(result, anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(msg.Content)))
+			if len(msg.ContentBlocks) > 0 {
+				blocks := make([]anthropic.BetaContentBlockParamUnion, 0, len(msg.ContentBlocks)+1)
+				if msg.Content != "" {
+					blocks = append(blocks, anthropic.NewBetaTextBlock(msg.Content))
+				}
+				for _, cb := range msg.ContentBlocks {
+					switch cb.BlockType() {
+					case "image":
+						if img, ok := cb.(provider.ImageContentBlock); ok {
+							if img.Source.Type == "base64" {
+								blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
+									OfImage: &anthropic.BetaImageBlockParam{
+										Source: anthropic.BetaImageBlockParamSourceUnion{
+											OfBase64: &anthropic.BetaBase64ImageSourceParam{
+												Data:      img.Source.Data,
+												MediaType: anthropic.BetaBase64ImageSourceMediaType(img.Source.MediaType),
+											},
+										},
+									},
+								})
+							} else if img.Source.Type == "url" {
+								blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
+									OfImage: &anthropic.BetaImageBlockParam{
+										Source: anthropic.BetaImageBlockParamSourceUnion{
+											OfURL: &anthropic.BetaURLImageSourceParam{
+												URL: img.Source.URL,
+											},
+										},
+									},
+								})
+							}
+						}
+					case "document":
+						if doc, ok := cb.(provider.DocumentContentBlock); ok {
+							if doc.Source.Type == "base64" {
+								blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
+									OfDocument: &anthropic.BetaRequestDocumentBlockParam{
+										Source: anthropic.BetaRequestDocumentBlockSourceUnionParam{
+											OfBase64: &anthropic.BetaBase64PDFSourceParam{
+												Data: doc.Source.Data,
+											},
+										},
+									},
+								})
+							} else if doc.Source.Type == "url" {
+								blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
+									OfDocument: &anthropic.BetaRequestDocumentBlockParam{
+										Source: anthropic.BetaRequestDocumentBlockSourceUnionParam{
+											OfURL: &anthropic.BetaURLPDFSourceParam{
+												URL: doc.Source.URL,
+											},
+										},
+									},
+								})
+							}
+						}
+					}
+				}
+				result = append(result, anthropic.BetaMessageParam{
+					Role:    anthropic.BetaMessageParamRoleUser,
+					Content: blocks,
+				})
+			} else {
+				result = append(result, anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(msg.Content)))
+			}
 		case provider.RoleAssistant:
 			if len(msg.ToolCalls) > 0 {
 				blocks := make([]anthropic.BetaContentBlockParamUnion, 0, len(msg.ToolCalls)+1)
@@ -42,7 +106,7 @@ func (p *Provider) buildMessages(messages []provider.Message) []anthropic.BetaMe
 			}
 		case provider.RoleTool:
 			result = append(result, anthropic.NewBetaUserMessage(
-				anthropic.NewBetaToolResultBlock(msg.ToolCallID, msg.Content, false),
+				anthropic.NewBetaToolResultBlock(msg.ToolCallID, msg.Content, msg.IsError),
 			))
 		}
 	}

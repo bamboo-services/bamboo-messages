@@ -23,7 +23,42 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 	for _, msg := range messages {
 		switch msg.Role {
 		case provider.RoleUser:
-			result = append(result, openai.UserMessage(msg.Content))
+			if len(msg.ContentBlocks) > 0 {
+				parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(msg.ContentBlocks)+1)
+				if msg.Content != "" {
+					parts = append(parts, openai.TextContentPart(msg.Content))
+				}
+				for _, cb := range msg.ContentBlocks {
+					switch cb.BlockType() {
+					case "image":
+						if img, ok := cb.(provider.ImageContentBlock); ok {
+							if img.Source.Type == "base64" {
+								dataURI := "data:" + img.Source.MediaType + ";base64," + img.Source.Data
+								parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+									URL:    dataURI,
+									Detail: "auto",
+								}))
+							} else if img.Source.Type == "url" {
+								parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+									URL:    img.Source.URL,
+									Detail: "auto",
+								}))
+							}
+						}
+					case "document":
+						// 静默忽略 — OpenAI Completions 不支持文档块
+					}
+				}
+				result = append(result, openai.ChatCompletionMessageParamUnion{
+					OfUser: &openai.ChatCompletionUserMessageParam{
+						Content: openai.ChatCompletionUserMessageParamContentUnion{
+							OfArrayOfContentParts: parts,
+						},
+					},
+				})
+			} else {
+				result = append(result, openai.UserMessage(msg.Content))
+			}
 		case provider.RoleAssistant:
 			result = append(result, p.buildAssistantMessage(msg))
 		case provider.RoleTool:

@@ -631,10 +631,10 @@ func TestToolChoiceSdkTypePassthrough(t *testing.T) {
 // TestToolChoiceStringTypeAssertion 验证从 ProviderExtra 提取 ToolChoice 字符串时的类型断言。
 func TestToolChoiceStringTypeAssertion(t *testing.T) {
 	extra := map[string]any{
-		provider.ProviderExtraKeyToolChoice: "required",
+		"tool_choice": "required",
 	}
 
-	tc, ok := provider.GetExtraAny(extra, provider.ProviderExtraKeyToolChoice)
+	tc, ok := provider.GetExtraAny(extra, "tool_choice")
 	if !ok {
 		t.Fatal("未能从 ProviderExtra 中获取 ToolChoice")
 	}
@@ -662,11 +662,11 @@ func TestToolChoiceStringTypeAssertion(t *testing.T) {
 // TestProviderExtraUserMapping 验证 User 参数从 ProviderExtra 映射到 SDK 参数。
 func TestProviderExtraUserMapping(t *testing.T) {
 	extra := map[string]any{
-		provider.ProviderExtraKeyUser: "test-user-123",
+		"user": "test-user-123",
 	}
 
 	// 模拟 chat.go 中的映射逻辑
-	u, ok := provider.GetExtraString(extra, provider.ProviderExtraKeyUser)
+	u, ok := provider.GetExtraString(extra, "user")
 	if !ok {
 		t.Fatal("未能从 ProviderExtra 中获取 User")
 	}
@@ -690,11 +690,11 @@ func TestProviderExtraPredictionMapping(t *testing.T) {
 	}
 
 	extra := map[string]any{
-		provider.ProviderExtraKeyPrediction: prediction,
+		"prediction": prediction,
 	}
 
 	// 模拟 chat.go 中的映射逻辑
-	pred, ok := provider.GetExtraAny(extra, provider.ProviderExtraKeyPrediction)
+	pred, ok := provider.GetExtraAny(extra, "prediction")
 	if !ok {
 		t.Fatal("未能从 ProviderExtra 中获取 Prediction")
 	}
@@ -716,11 +716,11 @@ func TestProviderExtraPredictionMapping(t *testing.T) {
 // TestProviderExtraParallelToolCallsMapping 验证 ParallelToolCalls 参数映射。
 func TestProviderExtraParallelToolCallsMapping(t *testing.T) {
 	extra := map[string]any{
-		provider.ProviderExtraKeyParallelToolCalls: true,
+		"parallel_tool_calls": true,
 	}
 
 	// 模拟 chat.go 中的映射逻辑
-	ptc, ok := provider.GetExtraBool(extra, provider.ProviderExtraKeyParallelToolCalls)
+	ptc, ok := provider.GetExtraBool(extra, "parallel_tool_calls")
 	if !ok {
 		t.Fatal("未能从 ProviderExtra 中获取 ParallelToolCalls")
 	}

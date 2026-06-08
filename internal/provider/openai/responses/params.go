@@ -38,41 +38,43 @@ func (p *ResponsesProvider) buildResponseNewParams(model string, input responses
 		params.TopP = openai.Float(*config.TopP)
 	}
 
-	// 透传 Stop 参数 (Responses SDK 无原生 Stop 字段，通过 ProviderExtra 传递)
+	// Stop 参数 — Responses SDK 无原生 Stop 字段，通过 ExtraFields 传递
 	if len(config.Stop) > 0 {
-		if config.ProviderExtra == nil {
-			config.ProviderExtra = make(map[string]any)
-		}
-		config.ProviderExtra["stop"] = config.Stop
+		params.SetExtraFields(map[string]any{"stop": config.Stop})
 	}
 
-	// 透传 User 参数 — 标识终端用户，用于缓存优化和安全审计
-	if user, ok := provider.GetExtraString(config.ProviderExtra, provider.ProviderExtraKeyUser); ok {
-		params.User = openai.Opt(user)
+	// UserID — 统一字段，标识终端用户，用于缓存优化和安全审计
+	if config.UserID != "" {
+		params.User = openai.Opt(config.UserID)
 	}
 
-	// 透传 Store 参数 — 是否持久化存储响应
-	if store, ok := provider.GetExtraBool(config.ProviderExtra, provider.ProviderExtraKeyStore); ok {
+	// ParallelToolCalls — 是否允许并行工具调用，通过 ExtraFields 传递
+	if config.ParallelToolCalls {
+		params.SetExtraFields(map[string]any{"parallel_tool_calls": true})
+	}
+
+	// ProviderExtra: store — 是否持久化存储响应
+	if store, ok := provider.GetExtraBool(config.ProviderExtra, "store"); ok {
 		params.Store = openai.Opt(store)
 	}
 
-	// 透传 Truncation 参数 — 上下文截断策略 ("auto" / "disabled")
-	if truncation, ok := provider.GetExtraString(config.ProviderExtra, provider.ProviderExtraKeyTruncation); ok {
+	// ProviderExtra: truncation — 上下文截断策略 ("auto" / "disabled")
+	if truncation, ok := provider.GetExtraString(config.ProviderExtra, "truncation"); ok {
 		params.Truncation = responses.ResponseNewParamsTruncation(truncation)
 	}
 
-	// 透传 PreviousResponseID 参数 — 关联上一轮响应实现多轮对话
-	if prevID, ok := provider.GetExtraString(config.ProviderExtra, provider.ProviderExtraKeyPreviousResponseID); ok {
+	// ProviderExtra: previous_response_id — 关联上一轮响应实现多轮对话
+	if prevID, ok := provider.GetExtraString(config.ProviderExtra, "previous_response_id"); ok {
 		params.PreviousResponseID = openai.Opt(prevID)
 	}
 
-	// 透传 Metadata 参数 — 附加键值对元数据
+	// Metadata — 附加键值对元数据
 	if len(config.Metadata) > 0 {
 		params.Metadata = shared.Metadata(config.Metadata)
 	}
 
-	// 透传 Modalities 参数 (ResponseNewParams 无原生 Modalities 字段，通过 SetExtraFields 传递)
-	if modalities, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyModalities); ok {
+	// ProviderExtra: modalities — 输出模态（ResponseNewParams 无原生字段，通过 ExtraFields 传递）
+	if modalities, ok := provider.GetExtraAny(config.ProviderExtra, "modalities"); ok {
 		params.SetExtraFields(map[string]any{"modalities": modalities})
 	}
 
@@ -80,42 +82,49 @@ func (p *ResponsesProvider) buildResponseNewParams(model string, input responses
 		params.Tools = tools
 	}
 
-	// 透传 Reasoning 参数 (Effort + Summary)
-	if config.ThinkingConfig != nil && (config.ThinkingConfig.ReasoningEffort != "" || config.ThinkingConfig.Summary != "") {
-		reasoning := shared.ReasoningParam{}
-		if config.ThinkingConfig.ReasoningEffort != "" {
-			reasoning.Effort = shared.ReasoningEffort(config.ThinkingConfig.ReasoningEffort)
+	// ThinkingConfig.Effort → Reasoning 参数 (Effort + Summary 自动推导)
+	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
+		reasoning := shared.ReasoningParam{
+			Effort: shared.ReasoningEffort(config.ThinkingConfig.Effort),
 		}
-		if config.ThinkingConfig.Summary != "" {
-			reasoning.Summary = shared.ReasoningSummary(config.ThinkingConfig.Summary)
+		// 根据 Effort 自动映射 Summary
+		switch config.ThinkingConfig.Effort {
+		case "none":
+			// 无需 summary
+		case "low":
+			reasoning.Summary = "concise"
+		case "medium":
+			reasoning.Summary = "auto"
+		case "high":
+			reasoning.Summary = "detailed"
 		}
 		params.Reasoning = reasoning
 	}
 
-	// 透传 ToolChoice 参数
-	if tc, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyToolChoice); ok {
-		if tcStr, ok := tc.(string); ok {
-			params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
-				OfToolChoiceMode: openai.Opt(responses.ToolChoiceOptions(tcStr)),
-			}
+	// ToolChoice — 统一字段，工具选择策略
+	if config.ToolChoice != "" {
+		tc := config.ToolChoice
+		if tc == "forced" {
+			tc = "required"
+		}
+		params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
+			OfToolChoiceMode: openai.Opt(responses.ToolChoiceOptions(tc)),
 		}
 	}
 
-	// 透传 ResponseFormat 参数 (通过 Text.Format)
-	if rf, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyResponseFormat); ok {
-		if rfStr, ok := rf.(string); ok {
-			if rfStr == "text" {
-				params.Text = responses.ResponseTextConfigParam{
-					Format: responses.ResponseFormatTextConfigUnionParam{
-						OfText: openai.Ptr(shared.NewResponseFormatTextParam()),
-					},
-				}
-			} else if rfStr == "json_object" {
-				params.Text = responses.ResponseTextConfigParam{
-					Format: responses.ResponseFormatTextConfigUnionParam{
-						OfJSONObject: openai.Ptr(shared.NewResponseFormatJSONObjectParam()),
-					},
-				}
+	// ResponseFormat — 统一字段，响应格式 (text / json_object)
+	if config.ResponseFormat != "" {
+		if config.ResponseFormat == "text" {
+			params.Text = responses.ResponseTextConfigParam{
+				Format: responses.ResponseFormatTextConfigUnionParam{
+					OfText: openai.Ptr(shared.NewResponseFormatTextParam()),
+				},
+			}
+		} else if config.ResponseFormat == "json_object" {
+			params.Text = responses.ResponseTextConfigParam{
+				Format: responses.ResponseFormatTextConfigUnionParam{
+					OfJSONObject: openai.Ptr(shared.NewResponseFormatJSONObjectParam()),
+				},
 			}
 		}
 	}

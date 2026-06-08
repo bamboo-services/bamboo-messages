@@ -221,25 +221,8 @@ func demoThinking(ctx context.Context, client bamboo.BambooClient, model string)
 		bamboo.NewUserMessage("请分析一下人工智能的未来发展趋势。"),
 	}
 
-	// 根据 Provider 类型选择 ThinkingConfig 配置
-	providerType := os.Getenv("BAMBOO_PROVIDER")
-	if providerType == "" {
-		providerType = "anthropic"
-	}
-
-	var thinkingCfg *bamboo.ThinkingConfig
-	switch providerType {
-	case "anthropic":
-		thinkingCfg = &bamboo.ThinkingConfig{
-			Enabled:      bamboo.PtrBool(true),
-			BudgetTokens: bamboo.PtrInt64(10000),
-		}
-	default:
-		// OpenAI 系列使用 ReasoningEffort
-		thinkingCfg = &bamboo.ThinkingConfig{
-			ReasoningEffort: "high",
-			Summary:         "auto",
-		}
+	thinkingCfg := &bamboo.ThinkingConfig{
+		Effort: "high",
 	}
 
 	config := &bamboo.RequestConfig{

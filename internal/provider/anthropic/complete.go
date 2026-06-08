@@ -56,31 +56,40 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 		params.Tools = tools
 	}
 
-	if config.ThinkingConfig != nil && config.ThinkingConfig.Enabled != nil && *config.ThinkingConfig.Enabled {
-		budgetTokens := int64(10000)
-		if config.ThinkingConfig.BudgetTokens != nil {
-			budgetTokens = *config.ThinkingConfig.BudgetTokens
-		}
-		params.Thinking.OfEnabled = &anthropic.BetaThinkingConfigEnabledParam{
-			BudgetTokens: budgetTokens,
+	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
+		params.Thinking = anthropic.BetaThinkingConfigParamUnion{
+			OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{},
 		}
 	}
 
-	if topK, ok := provider.GetExtraFloat64(config.ProviderExtra, provider.ProviderExtraKeyTopK); ok {
+	if topK, ok := provider.GetExtraFloat64(config.ProviderExtra, paramTopK); ok {
 		params.TopK = param.NewOpt(int64(topK))
 	}
 
-	if tc, ok := provider.GetExtraAny(config.ProviderExtra, provider.ProviderExtraKeyToolChoice); ok {
-		if s, ok := tc.(string); ok {
-			switch s {
-			case "auto":
-				params.ToolChoice.OfAuto = &anthropic.BetaToolChoiceAutoParam{}
-			case "any":
-				params.ToolChoice.OfAny = &anthropic.BetaToolChoiceAnyParam{}
-			case "none":
-				noneParam := anthropic.NewBetaToolChoiceNoneParam()
-				params.ToolChoice.OfNone = &noneParam
+	// ToolChoice 映射: auto→OfAuto, none→OfNone, required/forced→OfAny
+	if config.ToolChoice != "" {
+		switch config.ToolChoice {
+		case "auto":
+			params.ToolChoice.OfAuto = &anthropic.BetaToolChoiceAutoParam{}
+		case "any", "required", "forced":
+			params.ToolChoice.OfAny = &anthropic.BetaToolChoiceAnyParam{}
+		case "none":
+			noneParam := anthropic.NewBetaToolChoiceNoneParam()
+			params.ToolChoice.OfNone = &noneParam
+		}
+	}
+
+	if config.UserID != "" || len(config.Metadata) > 0 {
+		params.Metadata = anthropic.BetaMetadataParam{}
+		if config.UserID != "" {
+			params.Metadata.UserID = param.NewOpt(config.UserID)
+		}
+		if len(config.Metadata) > 0 {
+			extra := make(map[string]any, len(config.Metadata))
+			for k, v := range config.Metadata {
+				extra[k] = v
 			}
+			params.Metadata.SetExtraFields(extra)
 		}
 	}
 

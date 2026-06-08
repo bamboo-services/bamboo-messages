@@ -14,6 +14,7 @@ internal/provider/anthropic/
 ├── stream.go        # SSE → StreamEvent 转换
 ├── message.go       # 消息格式双向转换
 ├── models.go        # 模型常量 + GetAvailableModels
+├── option.go        # AnthropicMessagesOption + WithTopK/WithBudgetTokens
 ├── tools.go         # 工具定义转换
 └── provider_test.go # 集成测试
 ```
@@ -33,8 +34,8 @@ internal/provider/anthropic/
 ## 约定
 
 - **原生 BlockStart 支持** — Anthropic 协议原生提供 `content_block_start` 事件，直接映射为 `NewBlockStartDelta`，无需合成
-- **Thinking 配置映射** — `ThinkingConfig.Enabled=true + BudgetTokens` → `anthropic.BetaThinkingConfigEnabledParam`
-- **TopK 透传** — 通过 `ProviderExtra` 中的 `top_k` 键透传，使用 `param.NewOpt(int64)` 包装
+- **Thinking 配置映射** — `ThinkingConfig.Effort` → `anthropic.BetaThinkingConfigEnabledParam` (adaptive thinking 模式)
+- **TopK 透传** — 通过 `AnthropicMessagesOption` 的 `WithTopK` 设置，合并到 ProviderExtra 后使用 `param.NewOpt(int64)` 包装
 - **ToolChoice 字符串模式** — 支持 `"auto"` / `"any"` / `"none"` 三种字符串值
 - **消息角色映射** — `RoleUser→NewBetaUserMessage`, `RoleAssistant→支持 text+tool_use blocks`, `RoleTool→NewBetaToolResultBlock`
 - **UserAgent 统一** — 构造函数中通过 `option.WithHeader("User-Agent", provider.GetUserAgent())` 设置
@@ -49,7 +50,7 @@ internal/provider/anthropic/
 
 1. 流式输出异常 → 检查 `stream.go` 的 `handleStreamEvent` 是否正确分发事件类型
 2. 消息格式错误 → 检查 `message.go` 的 `buildMessages` 是否正确处理 `RoleAssistant` 的 tool_calls
-3. Thinking 不生效 → 确认 `ThinkingConfig.Enabled` 为 true 且 `BudgetTokens` 已设置
+3. Thinking 不生效 → 确认 `ThinkingConfig.Effort` 已设置为 low/medium/high
 4. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成 `BetaToolUnionParam`
 5. 认证/连接问题 → 检查 `provider.go` 中 Options 是否正确应用到 `sdkOpts`
 

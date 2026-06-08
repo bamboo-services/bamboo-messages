@@ -33,6 +33,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		var textBuilder strings.Builder
 		var toolCalls []provider.ToolCall
 		var toolResults []provider.Message
+		var contentBlocks []provider.ContentBlock
 
 		for _, block := range msg.Content {
 			switch b := block.(type) {
@@ -55,9 +56,30 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 					Content:    b.Content,
 					ToolCallID: b.ToolUseID,
 				})
-			case *ImageBlock, *DocumentBlock:
-				// 静默丢弃不支持的图片/文档类型
-				log.Printf("[bamboo] dropped unsupported content block type: %s", b.BlockType())
+			case *ImageBlock:
+				// 仅用户消息支持图片内容块
+				if msg.Role == RoleUser && b.Source != nil {
+					contentBlocks = append(contentBlocks, provider.ImageContentBlock{
+						Source: provider.ImageSource{
+							Type:      b.Source.Type,
+							MediaType: b.Source.MediaType,
+							Data:      b.Source.Data,
+							URL:       b.Source.URL,
+						},
+					})
+				}
+			case *DocumentBlock:
+				// 仅用户消息支持文档内容块
+				if msg.Role == RoleUser && b.Source != nil {
+					contentBlocks = append(contentBlocks, provider.DocumentContentBlock{
+						Source: provider.DocumentSource{
+							Type:      b.Source.Type,
+							MediaType: b.Source.MediaType,
+							Data:      b.Source.Data,
+							URL:       b.Source.URL,
+						},
+					})
+				}
 			default:
 				// 未来未知类型
 				log.Printf("[bamboo] dropped unknown content block type: %s", b.BlockType())
@@ -65,11 +87,12 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		}
 
 		content := textBuilder.String()
-		if content != "" || len(toolCalls) > 0 {
+		if content != "" || len(toolCalls) > 0 || len(contentBlocks) > 0 {
 			result = append(result, provider.Message{
-				Role:      providerRole(msg.Role),
-				Content:   content,
-				ToolCalls: toolCalls,
+				Role:          providerRole(msg.Role),
+				Content:       content,
+				ContentBlocks: contentBlocks,
+				ToolCalls:     toolCalls,
 			})
 		}
 		result = append(result, toolResults...)
@@ -97,15 +120,19 @@ func configToProvider(cfg *RequestConfig) *provider.ChatConfig {
 		return nil
 	}
 	return &provider.ChatConfig{
-		Model:         cfg.Model,
-		MaxTokens:     cfg.MaxTokens,
-		Temperature:   cfg.Temperature,
-		TopP:          cfg.TopP,
-		Stop:          cfg.StopSequences,
-		Tools:         toolsToProvider(cfg.Tools),
-		Metadata:      cfg.Metadata,
-		ThinkingConfig: cfg.ThinkingConfig,
-		ProviderExtra: cfg.ProviderExtra,
+		Model:             cfg.Model,
+		MaxTokens:         cfg.MaxTokens,
+		Temperature:       cfg.Temperature,
+		TopP:              cfg.TopP,
+		Stop:              cfg.StopSequences,
+		Tools:             toolsToProvider(cfg.Tools),
+		Metadata:          cfg.Metadata,
+		UserID:            cfg.UserID,
+		ToolChoice:        cfg.ToolChoice,
+		ResponseFormat:    cfg.ResponseFormat,
+		ParallelToolCalls: cfg.ParallelToolCalls,
+		ThinkingConfig:    cfg.ThinkingConfig,
+		ProviderExtra:     cfg.ProviderExtra,
 	}
 }
 

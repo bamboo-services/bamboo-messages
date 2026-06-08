@@ -15,7 +15,7 @@ Bamboo Messages 是一个**纯 Go SDK 库**，为上层业务提供标准化的 
 | **Provider 可插拔** | 每种协议实现独立包，按需引入，互不依赖 |
 | **端点可配置** | 支持自定义 BaseURL，对接任意兼容端点（官方 API / 自建网关 / 第三方代理） |
 | **Options 模式** | Functional Options 灵活配置 API Key、BaseURL、Headers 等 |
-| **参数透传** | 统一 ThinkingConfig + ProviderExtra 机制，支持 Thinking/Reasoning/TopK/FrequencyPenalty 等全部参数 |
+| **参数透传** | 统一 ThinkingConfig(Effort) + 类型化字段(ToolChoice/ResponseFormat等) + ProviderExtra 机制，支持全部参数 |
 
 ## 快速开始
 
@@ -54,8 +54,7 @@ func main() {
         MaxTokens:   1024,
         Temperature: bamboo.PtrFloat64(0.7),
         ThinkingConfig: &bamboo.ThinkingConfig{
-            Enabled:      bamboo.PtrBool(true),
-            BudgetTokens: bamboo.PtrInt64(10000),
+            Effort: "high",
         },
     }
 
@@ -189,52 +188,35 @@ client := bamboo.NewClient(p)
 > OpenAI Completions / Responses 的 Options 用法完全一致，只需替换包名前缀即可：
 > `completions.NewCompletionsProviderWithOptions(...)` / `responses.NewResponsesProviderWithOptions(...)`
 
-> **注意**: Provider Options（WithAPIKey/WithBaseURL/WithHeader）用于创建 Provider 实例；RequestOption（WithTopK/WithFrequencyPenalty 等）用于配置每次请求参数。两者是独立的体系。
+> **注意**: Provider Options（WithAPIKey/WithBaseURL/WithHeader）用于创建 Provider 实例；RequestOption（WithToolChoice/WithResponseFormat 等）用于配置每次请求参数。两者是独立的体系。
 
 ## 请求参数配置
 
 ### ThinkingConfig — 思考/推理配置
 
 ```go
-// Anthropic Thinking
 config := &bamboo.RequestConfig{
     Model: "claude-sonnet-4-20250514",
     ThinkingConfig: &bamboo.ThinkingConfig{
-        Enabled:      bamboo.PtrBool(true),
-        BudgetTokens: bamboo.PtrInt64(10000),
-    },
-}
-
-// OpenAI Reasoning
-config := &bamboo.RequestConfig{
-    Model: "o3",
-    ThinkingConfig: &bamboo.ThinkingConfig{
-        ReasoningEffort: "high",
-    },
-}
-
-// OpenAI Responses Reasoning with Summary
-config := &bamboo.RequestConfig{
-    Model: "o4-mini",
-    ThinkingConfig: &bamboo.ThinkingConfig{
-        ReasoningEffort: "medium",
-        Summary:         "auto",
+        Effort: "high",
     },
 }
 ```
 
+`Effort` 统一控制所有 Provider 的思考/推理强度，支持 `none` / `low` / `medium` / `high`。各适配器自动映射为 Provider 特有参数：
+
+- **Anthropic**: effort 值用于 adaptive thinking 模式
+- **OpenAI Completions**: 映射为 `ReasoningEffort`
+- **OpenAI Responses**: 映射为 `ReasoningEffort`，`Summary` 按 effort 自动推导 (`none`→""、`low`→"concise"、`medium`→"auto"、`high`→"detailed")
+
 ### WithXxx() 请求配置函数
 
 ```go
-// 使用 RequestOption 配置 Provider 特有参数
+// 使用 RequestOption 配置请求参数
 opts := []bamboo.RequestOption{
-    bamboo.WithTopK(40),
-    bamboo.WithFrequencyPenalty(0.5),
-    bamboo.WithPresencePenalty(0.3),
-    bamboo.WithSeed(42),
     bamboo.WithToolChoice("auto"),
-    bamboo.WithResponseFormat(map[string]any{"type": "json_object"}),
-    bamboo.WithUser("user-123"),
+    bamboo.WithResponseFormat("json_object"),
+    bamboo.WithUserID("user-123"),
     bamboo.WithParallelToolCalls(true),
     bamboo.WithExtra("custom_key", "custom_value"),
 }
@@ -244,22 +226,73 @@ for _, opt := range opts {
 }
 ```
 
-| Option | 类型 | 说明 | 支持 Provider |
-|--------|------|------|--------------|
-| `WithTopK(v)` | `float64` | Top-K 采样参数 | Anthropic |
-| `WithFrequencyPenalty(v)` | `float64` | 频率惩罚 | OpenAI Completions/Responses（Responses 通过 ExtraFields 传递） |
-| `WithPresencePenalty(v)` | `float64` | 存在惩罚 | OpenAI Completions/Responses（Responses 通过 ExtraFields 传递） |
-| `WithSeed(v)` | `int64` | 随机种子 | OpenAI Completions（Responses 不支持） |
-| `WithToolChoice(v)` | `any` | 工具选择策略 | Anthropic/OpenAI（Completions 支持字符串 "auto"/"none"/"required"） |
-| `WithResponseFormat(v)` | `any` | 响应格式 | OpenAI Completions/Responses（Completions 支持 `{"type": "json_object"}` 和 `{"type": "text"}`） |
-| `WithUser(v)` | `string` | 用户标识 | OpenAI Completions/Responses |
-| `WithStore(v)` | `any` | 响应存储策略 | OpenAI Responses |
-| `WithModalities(v)` | `any` | 输出模态 | OpenAI Responses |
-| `WithPrediction(v)` | `any` | 预测内容 | OpenAI Completions |
-| `WithParallelToolCalls(v)` | `bool` | 并行工具调用 | OpenAI Completions/Responses |
-| `WithTruncation(v)` | `string` | 消息截断策略 | Anthropic |
-| `WithPreviousResponseID(v)` | `string` | 前置响应 ID | OpenAI Responses |
-| `WithExtra(k, v)` | `string, any` | 自定义扩展参数 | 所有 |
+| Option | 类型 | 说明 |
+|--------|------|------|
+| `WithToolChoice(v)` | `string` | 工具选择: auto/none/required/forced |
+| `WithResponseFormat(v)` | `string` | 响应格式: text/json_object |
+| `WithUserID(v)` | `string` | 用户标识 |
+| `WithParallelToolCalls(v)` | `bool` | 并行工具调用 |
+| `WithExtra(k, v)` | `string, any` | 自定义扩展参数 |
+
+### Provider 特有 Option
+
+除 `bamboo` 包的通用 `RequestOption` 外，各 Provider 包还提供了独立的 Options 体系，用于配置该 Provider 特有的请求参数：
+
+**Anthropic Messages** (`internal/provider/anthropic`)
+
+```go
+import "github.com/bamboo-services/bamboo-messages/internal/provider/anthropic"
+
+opts := []anthropic.AnthropicMessagesOption{
+    anthropic.WithTopK(40),
+    anthropic.WithBudgetTokens(10000), // Deprecated: 请使用 ThinkingConfig.Effort 替代
+}
+```
+
+| Option | 类型 | 说明 |
+|--------|------|------|
+| `WithTopK(v)` | `float64` | Top-K 采样参数 |
+| `WithBudgetTokens(v)` | `int64` | 思考 token 预算（已废弃） |
+
+**OpenAI Completions** (`internal/provider/openai/completions`)
+
+```go
+import "github.com/bamboo-services/bamboo-messages/internal/provider/openai/completions"
+
+opts := []completions.OpenaiCompletionsOption{
+    completions.WithFrequencyPenalty(0.5),
+    completions.WithPresencePenalty(0.3),
+    completions.WithSeed(42),
+    completions.WithPrediction(predictionContent),
+}
+```
+
+| Option | 类型 | 说明 |
+|--------|------|------|
+| `WithFrequencyPenalty(v)` | `float64` | 频率惩罚 |
+| `WithPresencePenalty(v)` | `float64` | 存在惩罚 |
+| `WithSeed(v)` | `int64` | 随机种子 |
+| `WithPrediction(v)` | `any` | 预测内容 |
+
+**OpenAI Responses** (`internal/provider/openai/responses`)
+
+```go
+import "github.com/bamboo-services/bamboo-messages/internal/provider/openai/responses"
+
+opts := []responses.OpenaiResponsesOption{
+    responses.WithStore(true),
+    responses.WithModalities([]string{"text"}),
+    responses.WithPreviousResponseID("prev-resp-id"),
+    responses.WithTruncation("auto"),
+}
+```
+
+| Option | 类型 | 说明 |
+|--------|------|------|
+| `WithStore(v)` | `bool` | 是否在 OpenAI 端存储响应 |
+| `WithModalities(v)` | `any` | 输出模态 |
+| `WithPreviousResponseID(v)` | `string` | 前置响应 ID |
+| `WithTruncation(v)` | `string` | 消息截断策略 |
 
 ## 核心类型
 
@@ -339,7 +372,7 @@ config := &bamboo.RequestConfig{
     Temperature:    bamboo.PtrFloat64(0.7), // *float64，区分未设置和零值
     Tools:          []bamboo.Tool{...}, // 工具定义（可选）
     ThinkingConfig: &bamboo.ThinkingConfig{...},
-    ProviderExtra:  map[string]any{"top_k": 40},
+    ProviderExtra:  map[string]any{"custom_key": "custom_value"},
 }
 ```
 

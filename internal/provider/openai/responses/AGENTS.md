@@ -15,6 +15,7 @@ internal/provider/openai/responses/
 ├── stream_test.go    # 流式事件单元测试
 ├── message.go        # 消息格式双向转换 (buildInput/buildAssistantItem)
 ├── models.go         # 模型常量 + GetAvailableModels
+├── option.go         # OpenaiResponsesOption + WithStore/WithModalities/WithPreviousResponseID/WithTruncation
 ├── tools.go          # 工具定义转换
 └── provider_test.go  # 集成测试
 ```
@@ -36,7 +37,7 @@ internal/provider/openai/responses/
 
 - **事件类型丰富** — OpenAI Responses 协议提供更多事件类型：`response.created`, `response.output_item.added`, `response.output_text.delta`, `response.reasoning_text.delta`, `response.function_call_arguments.delta`, `response.function_call_arguments.done`, `response.completed`, `response.failed`, `response.incomplete`
 - **BlockStart 合成** — 同 Completions，没有原生 `content_block_start`，通过 `textBlockStarted`/`thinkingBlockStarted` 合成
-- **Reasoning 参数** — 支持 `ReasoningEffort` + `Summary` 双参数，映射到 `shared.ReasoningParam`
+- **Reasoning 参数** — `ThinkingConfig.Effort` 映射为 `ReasoningEffort`，`Summary` 按 effort 自动推导，映射到 `shared.ReasoningParam`
 - **ResponseFormat 字符串模式** — 支持 `"text"` 和 `"json_object"` 两种简单字符串值
 - **ToolChoice 字符串模式** — 支持 `"auto"`, `"none"`, `"required"` 等值
 - **完成原因推断** — Responses 协议不直接提供 finish_reason，根据 `Status` 和是否有 ToolCalls 推断
