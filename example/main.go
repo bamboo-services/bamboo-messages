@@ -22,10 +22,10 @@ import (
 	"os"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
-	"github.com/bamboo-services/bamboo-messages/internal/provider"
-	anthropicPkg "github.com/bamboo-services/bamboo-messages/internal/provider/anthropic"
-	completionsPkg "github.com/bamboo-services/bamboo-messages/internal/provider/openai/completions"
-	responsesPkg "github.com/bamboo-services/bamboo-messages/internal/provider/openai/responses"
+	"github.com/bamboo-services/bamboo-messages/provider"
+	anthropicPkg "github.com/bamboo-services/bamboo-messages/provider/anthropic"
+	completionsPkg "github.com/bamboo-services/bamboo-messages/provider/openai/completions"
+	responsesPkg "github.com/bamboo-services/bamboo-messages/provider/openai/responses"
 )
 
 // createProvider 根据环境变量创建对应的 Provider 实例。

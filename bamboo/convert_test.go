@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bamboo-services/bamboo-messages/internal/provider"
-	xError "github.com/bamboo-services/bamboo-base-go/common/error"
+	"github.com/bamboo-services/bamboo-messages/provider"
+	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
 )
 
 // ---- messagesToProvider 测试 ----

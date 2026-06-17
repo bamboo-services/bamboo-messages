@@ -1,6 +1,6 @@
 package bamboo
 
-import "github.com/bamboo-services/bamboo-messages/internal/provider"
+import "github.com/bamboo-services/bamboo-messages/provider"
 
 // ThinkingConfig 思考/推理配置，控制模型的推理行为。
 //

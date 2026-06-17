@@ -9,7 +9,7 @@ import (
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
 	_ "github.com/bamboo-services/bamboo-messages/bamboo/codec/anthropic"
 	_ "github.com/bamboo-services/bamboo-messages/bamboo/codec/openai"
-	"github.com/bamboo-services/bamboo-messages/internal/provider"
+	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // ════════════════════════════════════════════════════════════

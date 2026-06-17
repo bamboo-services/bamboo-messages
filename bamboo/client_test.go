@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/bamboo-services/bamboo-messages/internal/provider"
-	"github.com/bamboo-services/bamboo-messages/internal/provider/anthropic"
+	"github.com/bamboo-services/bamboo-messages/provider"
+	"github.com/bamboo-services/bamboo-messages/provider/anthropic"
 )
 
 // mockProvider 用于单元测试的 Provider 模拟实现。

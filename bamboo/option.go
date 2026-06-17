@@ -1,6 +1,6 @@
 package bamboo
 
-import "github.com/bamboo-services/bamboo-messages/internal/provider" // 保留：ClientOption 系统依赖 provider.Provider
+import "github.com/bamboo-services/bamboo-messages/provider" // 保留：ClientOption 系统依赖 provider.Provider
 
 // ClientOption 客户端配置选项函数。
 //

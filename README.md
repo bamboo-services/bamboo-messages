@@ -25,7 +25,7 @@ import (
     "fmt"
 
     "github.com/bamboo-services/bamboo-messages/bamboo"
-    "github.com/bamboo-services/bamboo-messages/internal/provider/anthropic"
+    "github.com/bamboo-services/bamboo-messages/provider/anthropic"
 )
 
 func main() {
@@ -163,7 +163,7 @@ case *bamboo.ToolUseBlock:
 所有 Provider 构造函数均支持 Functional Options 模式：
 
 ```go
-import "github.com/bamboo-services/bamboo-messages/internal/provider/anthropic"
+import "github.com/bamboo-services/bamboo-messages/provider/anthropic"
 
 // 完整选项（以 Anthropic 为例）
 p := anthropic.NewProviderWithOptions(
@@ -241,7 +241,7 @@ for _, opt := range opts {
 **Anthropic Messages** (`internal/provider/anthropic`)
 
 ```go
-import "github.com/bamboo-services/bamboo-messages/internal/provider/anthropic"
+import "github.com/bamboo-services/bamboo-messages/provider/anthropic"
 
 opts := []anthropic.AnthropicMessagesOption{
     anthropic.WithTopK(40),
@@ -257,7 +257,7 @@ opts := []anthropic.AnthropicMessagesOption{
 **OpenAI Completions** (`internal/provider/openai/completions`)
 
 ```go
-import "github.com/bamboo-services/bamboo-messages/internal/provider/openai/completions"
+import "github.com/bamboo-services/bamboo-messages/provider/openai/completions"
 
 opts := []completions.OpenaiCompletionsOption{
     completions.WithFrequencyPenalty(0.5),
@@ -277,7 +277,7 @@ opts := []completions.OpenaiCompletionsOption{
 **OpenAI Responses** (`internal/provider/openai/responses`)
 
 ```go
-import "github.com/bamboo-services/bamboo-messages/internal/provider/openai/responses"
+import "github.com/bamboo-services/bamboo-messages/provider/openai/responses"
 
 opts := []responses.OpenaiResponsesOption{
     responses.WithStore(true),

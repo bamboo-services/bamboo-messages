@@ -6,7 +6,7 @@ import (
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
-	"github.com/bamboo-services/bamboo-messages/internal/provider"
+	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // Relay 非流式协议互转。

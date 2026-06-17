@@ -9,7 +9,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/bamboo-services/bamboo-messages/internal/provider"
+	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // BambooClient Bamboo Messages SDK 核心接口，定义流式对话和非流式对话两种交互模式。
