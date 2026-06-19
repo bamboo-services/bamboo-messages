@@ -435,11 +435,17 @@ func TestParseRequest_Tools(t *testing.T) {
 	if tool.Description != "Get weather" {
 		t.Errorf("Description = %q", tool.Description)
 	}
-	if tool.InputSchema.Type != "object" {
-		t.Errorf("InputSchema.Type = %q", tool.InputSchema.Type)
+	// InputSchema 现在是 json.RawMessage，解析后验证
+	var schema map[string]any
+	if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+		t.Fatalf("解析 InputSchema 失败: %v", err)
 	}
-	if len(tool.InputSchema.Required) != 1 || tool.InputSchema.Required[0] != "city" {
-		t.Errorf("Required = %v", tool.InputSchema.Required)
+	if schema["type"] != "object" {
+		t.Errorf("InputSchema.type = %v", schema["type"])
+	}
+	requiredField, ok := schema["required"].([]any)
+	if !ok || len(requiredField) != 1 || requiredField[0] != "city" {
+		t.Errorf("Required = %v", schema["required"])
 	}
 }
 

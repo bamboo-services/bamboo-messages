@@ -243,8 +243,12 @@ func TestParseRequest_Tools(t *testing.T) {
 	if tool.Description != "Get weather" {
 		t.Errorf("Description = %q", tool.Description)
 	}
-	if tool.InputSchema.Type != "object" {
-		t.Errorf("Schema Type = %q", tool.InputSchema.Type)
+	var schema map[string]any
+	if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+		t.Fatalf("解析 InputSchema 失败: %v", err)
+	}
+	if schema["type"] != "object" {
+		t.Errorf("Schema Type = %v", schema["type"])
 	}
 }
 

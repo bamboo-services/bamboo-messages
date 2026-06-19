@@ -408,17 +408,13 @@ func parseTools(tools []geminiTool) []bamboo.Tool {
 			t := bamboo.Tool{
 				Name:        fd.Name,
 				Description: fd.Description,
-				InputSchema: bamboo.InputSchema{
-					Type:       "object",
-					Properties: make(map[string]bamboo.PropertyDef),
-				},
 			}
-			// 尝试解析 parameters 为 InputSchema
+			// parameters 原样保留为 json.RawMessage，确保完整透传所有 JSON Schema 字段
 			if len(fd.Parameters) > 0 {
-				var schema bamboo.InputSchema
-				if err := json.Unmarshal(fd.Parameters, &schema); err == nil {
-					t.InputSchema = schema
-				}
+				t.InputSchema = fd.Parameters
+			} else {
+				// 无参数工具的默认 schema
+				t.InputSchema = json.RawMessage(`{"type":"object"}`)
 			}
 			result = append(result, t)
 		}

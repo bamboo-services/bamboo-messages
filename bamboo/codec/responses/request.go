@@ -327,12 +327,8 @@ func parseResponsesTools(tools []responsesTool) []bamboo.Tool {
 			Name:        t.Name,
 			Description: t.Description,
 		}
-		if len(t.Parameters) > 0 {
-			var schema bamboo.InputSchema
-			if err := json.Unmarshal(t.Parameters, &schema); err == nil {
-				tool.InputSchema = schema
-			}
-		}
+		// parameters 原样保留为 json.RawMessage，确保完整透传所有 JSON Schema 字段
+		tool.InputSchema = t.Parameters
 		result = append(result, tool)
 	}
 	return result

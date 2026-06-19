@@ -188,13 +188,13 @@ func TestConvertConfig(t *testing.T) {
 			{
 				Name:        "get_weather",
 				Description: "Get weather",
-				InputSchema: InputSchema{
-					Type: "object",
-					Properties: map[string]PropertyDef{
-						"city": {Type: "string", Description: "City name"},
-					},
-					Required: []string{"city"},
+			InputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"city": {"type": "string", "description": "City name"}
 				},
+				"required": ["city"]
+			}`),
 			},
 		},
 		Metadata: map[string]string{"key": "value"},
@@ -264,14 +264,14 @@ func TestConvertTools(t *testing.T) {
 		{
 			Name:        "search",
 			Description: "Search the web",
-			InputSchema: InputSchema{
-				Type: "object",
-				Properties: map[string]PropertyDef{
-					"query": {Type: "string", Description: "Search query"},
-					"limit": {Type: "number", Description: "Max results"},
-				},
-				Required: []string{"query"},
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"query": {"type": "string", "description": "Search query"},
+				"limit": {"type": "number", "description": "Max results"}
 			},
+			"required": ["query"]
+		}`),
 		},
 	}
 
@@ -306,12 +306,12 @@ func TestConvertTools(t *testing.T) {
 	if queryProp["type"] != "string" {
 		t.Errorf("query.type = %v, want string", queryProp["type"])
 	}
-	req, ok := params["required"].([]string)
+	reqAny, ok := params["required"].([]any)
 	if !ok {
-		t.Fatal("required is not []string")
+		t.Fatalf("required is not []any, got %T", params["required"])
 	}
-	if len(req) != 1 || req[0] != "query" {
-		t.Errorf("required = %v, want [query]", req)
+	if len(reqAny) != 1 || reqAny[0] != "query" {
+		t.Errorf("required = %v, want [query]", reqAny)
 	}
 }
 
@@ -829,21 +829,13 @@ func TestConvertToolWithEnumAndItems(t *testing.T) {
 		{
 			Name:        "search",
 			Description: "Search",
-			InputSchema: InputSchema{
-				Type: "object",
-				Properties: map[string]PropertyDef{
-					"sort": {
-						Type:        "string",
-						Description: "Sort order",
-						Enum:        []string{"asc", "desc"},
-					},
-					"tags": {
-						Type:        "array",
-						Description: "Tags",
-						Items:       map[string]any{"type": "string"},
-					},
-				},
-			},
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"sort": {"type": "string", "description": "Sort order", "enum": ["asc", "desc"]},
+				"tags": {"type": "array", "description": "Tags", "items": {"type": "string"}}
+			}
+		}`),
 		},
 	}
 
@@ -854,7 +846,7 @@ func TestConvertToolWithEnumAndItems(t *testing.T) {
 	if sortProp["type"] != "string" {
 		t.Errorf("sort.type = %v", sortProp["type"])
 	}
-	enumVals, ok := sortProp["enum"].([]string)
+	enumVals, ok := sortProp["enum"].([]any)
 	if !ok || len(enumVals) != 2 {
 		t.Errorf("sort.enum = %v, want [asc desc]", sortProp["enum"])
 	}
@@ -1097,7 +1089,7 @@ func TestNewToolUseBlock_MarshalError(t *testing.T) {
 
 // TestBuildParameters_EmptySchema 验证空 schema 构建参数。
 func TestBuildParameters_EmptySchema(t *testing.T) {
-	params := buildParameters(InputSchema{Type: "object"})
+	params := buildParameters(json.RawMessage(`{"type":"object"}`))
 	if params["type"] != "object" {
 		t.Errorf("type = %v, 期望 object", params["type"])
 	}

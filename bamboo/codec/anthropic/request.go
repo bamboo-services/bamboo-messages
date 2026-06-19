@@ -282,12 +282,8 @@ func parseTools(tools []anthropicTool) []bamboo.Tool {
 			Name:        t.Name,
 			Description: t.Description,
 		}
-		if len(t.InputSchema) > 0 {
-			var schema bamboo.InputSchema
-			if err := json.Unmarshal(t.InputSchema, &schema); err == nil {
-				tool.InputSchema = schema
-			}
-		}
+		// input_schema 原样保留为 json.RawMessage，确保完整透传所有 JSON Schema 字段
+		tool.InputSchema = t.InputSchema
 		result = append(result, tool)
 	}
 	return result

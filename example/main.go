@@ -265,16 +265,16 @@ func demoToolCalling(ctx context.Context, client bamboo.BambooClient, model stri
 	weatherTool := bamboo.Tool{
 		Name:        "get_weather",
 		Description: "获取指定城市的天气信息",
-		InputSchema: bamboo.InputSchema{
-			Type: "object",
-			Properties: map[string]bamboo.PropertyDef{
+		InputSchema: json.RawMessage(`{
+			"type": "object",
+			"properties": {
 				"city": {
-					Type:        "string",
-					Description: "城市名称",
-				},
+					"type": "string",
+					"description": "城市名称"
+				}
 			},
-			Required: []string{"city"},
-		},
+			"required": ["city"]
+		}`),
 	}
 
 	messages := []bamboo.BambooMessage{

@@ -371,13 +371,8 @@ func parseTools(tools []openaiTool) []bamboo.Tool {
 			Name:        t.Function.Name,
 			Description: t.Function.Description,
 		}
-		// 尝试解析 parameters 为 InputSchema
-		if len(t.Function.Parameters) > 0 {
-			var schema bamboo.InputSchema
-			if err := json.Unmarshal(t.Function.Parameters, &schema); err == nil {
-				tool.InputSchema = schema
-			}
-		}
+		// parameters 原样保留为 json.RawMessage，确保完整透传所有 JSON Schema 字段
+		tool.InputSchema = t.Function.Parameters
 		result = append(result, tool)
 	}
 	return result

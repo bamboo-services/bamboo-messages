@@ -2,6 +2,7 @@ package bamboo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -388,13 +389,13 @@ func TestCompleteWithConfig(t *testing.T) {
 			{
 				Name:        "get_weather",
 				Description: "Get weather info",
-				InputSchema: InputSchema{
-					Type: "object",
-					Properties: map[string]PropertyDef{
-						"city": {Type: "string", Description: "City name"},
-					},
-					Required: []string{"city"},
+			InputSchema: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"city": {"type": "string", "description": "City name"}
 				},
+				"required": ["city"]
+			}`),
 			},
 		},
 		StopSequences: []string{"STOP"},

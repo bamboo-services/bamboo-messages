@@ -1,6 +1,7 @@
 package bamboo
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -140,6 +141,7 @@ func configToProvider(cfg *RequestConfig) *provider.ChatConfig {
 //
 // 将每个 bamboo.Tool 转换为 provider.Tool，类型固定为 "function"，
 // 函数定义包含名称、描述和 JSON Schema 参数。
+// InputSchema 作为 json.RawMessage 原样解析为 map，确保完整保留所有 JSON Schema 字段。
 func toolsToProvider(tools []Tool) []provider.Tool {
 	if len(tools) == 0 {
 		return nil
@@ -158,27 +160,19 @@ func toolsToProvider(tools []Tool) []provider.Tool {
 	return result
 }
 
-func buildParameters(schema InputSchema) map[string]any {
-	params := map[string]any{"type": schema.Type}
-	if len(schema.Properties) > 0 {
-		props := make(map[string]any, len(schema.Properties))
-		for name, def := range schema.Properties {
-			prop := map[string]any{"type": def.Type}
-			if def.Description != "" {
-				prop["description"] = def.Description
-			}
-			if len(def.Enum) > 0 {
-				prop["enum"] = def.Enum
-			}
-			if def.Items != nil {
-				prop["items"] = def.Items
-			}
-			props[name] = prop
-		}
-		params["properties"] = props
+// buildParameters 将 InputSchema（json.RawMessage）解析为 map[string]any。
+//
+// 作为完整 JSON Schema 的无损中间表示，直接反序列化原始 JSON，
+// 避免结构体字段穷举导致的 schema 字段丢失（如 additionalProperties、嵌套 properties 等）。
+// 若 schema 为空则返回 nil（表示工具无参数）。
+func buildParameters(schema json.RawMessage) map[string]any {
+	if len(schema) == 0 {
+		return nil
 	}
-	if len(schema.Required) > 0 {
-		params["required"] = schema.Required
+	var params map[string]any
+	if err := json.Unmarshal(schema, &params); err != nil {
+		// 解析失败时回退为最小合法 schema，保证请求不因工具定义格式问题中断
+		return map[string]any{"type": "object"}
 	}
 	return params
 }
