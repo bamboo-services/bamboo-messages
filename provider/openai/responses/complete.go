@@ -26,6 +26,13 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 
 	params := p.buildResponseNewParams(config.Model, p.buildInput(systemPrompt, messages), config)
 
+	provider.DebugRequest(
+		"openai-responses",
+		"POST /responses (non-stream, model="+config.Model+")",
+		nil,
+		params,
+	)
+
 	response, err := p.Client.Responses.New(ctx, params)
 	if err != nil {
 		return nil, xError.NewError(ctx, nil, "OpenAI Responses 非流式对话失败", false, err)

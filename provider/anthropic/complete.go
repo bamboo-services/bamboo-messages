@@ -25,6 +25,13 @@ func (p *Provider) Complete(ctx context.Context, messages []provider.Message, co
 func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
 	params := p.buildParams(systemPrompt, messages, config)
 
+	provider.DebugRequest(
+		"anthropic",
+		"POST /v1/messages (non-stream, model="+config.Model+")",
+		nil,
+		params,
+	)
+
 	response, err := p.Client.Beta.Messages.New(ctx, params)
 	if err != nil {
 		return nil, xError.NewError(ctx, nil, "Anthropic 非流式对话失败", false, err)

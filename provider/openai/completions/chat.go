@@ -40,6 +40,13 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			IncludeUsage: openai.Bool(true),
 		}
 
+		provider.DebugRequest(
+			"openai-completions",
+			"POST /chat/completions (streaming, model="+config.Model+")",
+			nil,
+			params,
+		)
+
 		stream := p.Client.Chat.Completions.NewStreaming(ctx, params)
 		defer stream.Close()
 

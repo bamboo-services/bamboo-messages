@@ -62,11 +62,16 @@ func Relay(
 	}
 
 	// ── 解析请求 ──
+	dbg := shouldDebug(cfg)
+	debugRelayInput(dbg, "Relay", inFormat, outFormat, body)
+
 	req, err := inCodec.ParseRequest(body)
 	if err != nil {
 		cfg.triggerError(err)
 		return nil, fmt.Errorf("relay: failed to parse request: %w", err)
 	}
+
+	debugRelayParsed(dbg, "Relay", inFormat, req)
 
 	// ── 调用 Provider（通过 bamboo client 包装） ──
 	client := bamboo.NewClient(p)
@@ -143,11 +148,16 @@ func RelayStream(
 	}
 
 	// ── 解析请求 ──
+	dbg := shouldDebug(cfg)
+	debugRelayInput(dbg, "RelayStream", inFormat, outFormat, body)
+
 	req, err := inCodec.ParseRequest(body)
 	if err != nil {
 		cfg.triggerError(err)
 		return nil, fmt.Errorf("relay: failed to parse request: %w", err)
 	}
+
+	debugRelayParsed(dbg, "RelayStream", inFormat, req)
 
 	// ── 调用 Provider 获取流事件 channel ──
 	client := bamboo.NewClient(p)

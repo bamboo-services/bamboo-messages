@@ -38,6 +38,13 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 
 		params := p.buildResponseNewParams(config.Model, p.buildInput(systemPrompt, messages), config)
 
+		provider.DebugRequest(
+			"openai-responses",
+			"POST /responses (streaming, model="+config.Model+")",
+			nil,
+			params,
+		)
+
 	stream := p.Client.Responses.NewStreaming(ctx, params)
 	defer stream.Close()
 

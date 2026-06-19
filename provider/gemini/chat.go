@@ -40,7 +40,16 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 		contents := p.buildMessages(messages)
 		gc := p.buildContentConfig(systemPrompt, config)
 
-		// 追踪文本块是否已开始，用于合成 Gemini 缺失的 content_block_start 事件
+		provider.DebugRequest(
+			"gemini",
+			"GenerateContentStream (model="+config.Model+")",
+			nil,
+			map[string]any{
+				"contents": contents,
+				"config":   gc,
+			},
+		)
+
 		textBlockStarted := false
 		thinkingBlockStarted := false
 

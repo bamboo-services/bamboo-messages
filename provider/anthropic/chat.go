@@ -35,6 +35,13 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 
 		params := p.buildParams(systemPrompt, messages, config)
 
+		provider.DebugRequest(
+			"anthropic",
+			"POST /v1/messages (streaming, model="+config.Model+")",
+			nil,
+			params,
+		)
+
 		stream := p.Client.Beta.Messages.NewStreaming(ctx, params)
 		defer stream.Close()
 

@@ -19,10 +19,15 @@ func (p *CompletionsProvider) Complete(ctx context.Context, messages []provider.
 //
 // 在消息列表前插入系统提示，然后发起同步对话。
 func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
-	// 构建请求参数（共享逻辑提取至 buildParams）
 	params := p.buildParams(systemPrompt, messages, config)
 
-	// 调用非流式 SDK 方法
+	provider.DebugRequest(
+		"openai-completions",
+		"POST /chat/completions (non-stream, model="+config.Model+")",
+		nil,
+		params,
+	)
+
 	response, err := p.Client.Chat.Completions.New(ctx, params)
 	if err != nil {
 		return nil, xError.NewError(ctx, nil, "OpenAI Completions 非流式对话失败", false, err)

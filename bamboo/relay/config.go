@@ -18,7 +18,7 @@ package relay
 
 import "github.com/bamboo-services/bamboo-messages/bamboo"
 
-// Config relay 运行时配置，携带可选的回调函数。
+// Config relay 运行时配置，携带可选的回调函数和 debug 开关。
 //
 // 通过 Option 函数式选项配置，零值 Config 即可正常工作。
 type Config struct {
@@ -29,6 +29,10 @@ type Config struct {
 	// OnError 错误回调。
 	// 在 relay 过程中发生任何错误时触发（不影响错误返回，仅通知）。
 	OnError func(err error)
+
+	// Debug 是否输出 relay 层 debug 日志（传入的原始 body、codec 解析后的 RelayRequest）。
+	// 通过 WithDebug(true) 启用，或通过环境变量 BAMBOO_DEBUG=1 全局启用。
+	Debug bool
 }
 
 // Option relay 配置选项函数。
@@ -54,6 +58,19 @@ func WithUsageCallback(fn func(bamboo.Usage)) Option {
 func WithErrorCallback(fn func(error)) Option {
 	return func(c *Config) {
 		c.OnError = fn
+	}
+}
+
+// WithDebug 启用 relay 层 debug 日志。
+//
+// 启用后，Relay / RelayStream 会输出：
+//   - 上游传入的原始请求体（raw body）
+//   - codec 解析后的 RelayRequest 中间表示
+//
+// 等价于设置环境变量 BAMBOO_DEBUG=1，但作用域仅限本次 relay 调用。
+func WithDebug(enabled bool) Option {
+	return func(c *Config) {
+		c.Debug = enabled
 	}
 }
 

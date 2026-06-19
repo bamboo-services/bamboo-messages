@@ -31,6 +31,16 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	contents := p.buildMessages(messages)
 	gc := p.buildContentConfig(systemPrompt, config)
 
+	provider.DebugRequest(
+		"gemini",
+		"GenerateContent (model="+config.Model+")",
+		nil,
+		map[string]any{
+			"contents": contents,
+			"config":   gc,
+		},
+	)
+
 	resp, err := p.Client.Models.GenerateContent(ctx, config.Model, contents, gc)
 	if err != nil {
 		return nil, xError.NewError(ctx, nil, "Gemini 非流式对话失败", false, err)

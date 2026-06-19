@@ -29,6 +29,7 @@ type config struct {
 	apiKey  string
 	baseURL string
 	headers map[string]string
+	debug   bool
 }
 
 // WithAPIKey 设置 API 密钥。
@@ -60,6 +61,14 @@ func WithHeader(key, value string) Option {
 		}
 		c.headers[key] = value
 	}
+}
+
+// WithDebug 启用 debug 日志。
+//
+// 启用后，适配器在发起请求前会输出 Provider 类型、端点、headers 和 body（正文截断）。
+// 等价于设置环境变量 BAMBOO_DEBUG=1。
+func WithDebug() Option {
+	return func(c *config) { c.debug = true }
 }
 
 // ============================================
@@ -115,6 +124,9 @@ func applyOptions(opts ...Option) *config {
 	cfg := &config{}
 	for _, opt := range opts {
 		opt(cfg)
+	}
+	if cfg.debug {
+		provider.SetDebug(true)
 	}
 	return cfg
 }
