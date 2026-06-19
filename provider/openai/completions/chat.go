@@ -3,7 +3,6 @@ package completions
 import (
 	"context"
 
-	"github.com/openai/openai-go/v3"
 	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
@@ -34,11 +33,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 
 		// 构建请求参数（共享逻辑提取至 buildParams）
 		params := p.buildParams(systemPrompt, messages, config)
-
-		// 启用 usage 流式返回
-		params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
-			IncludeUsage: openai.Bool(true),
-		}
+		params.StreamOptions = p.buildStreamOptions()
 
 		provider.DebugRequest(
 			"openai-completions",

@@ -130,3 +130,16 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 
 	return params
 }
+
+// buildStreamOptions 构建流式请求的 StreamOptions。
+//
+// 智谱 GLM 等第三方 OpenAI 兼容端点不支持 stream_options 参数，
+// 发送该参数会导致 400 code:1210 参数错误，因此 Legacy 模式下返回零值（序列化时省略）。
+func (p *CompletionsProvider) buildStreamOptions() openai.ChatCompletionStreamOptionsParam {
+	if p.legacyCompat {
+		return openai.ChatCompletionStreamOptionsParam{}
+	}
+	return openai.ChatCompletionStreamOptionsParam{
+		IncludeUsage: openai.Bool(true),
+	}
+}

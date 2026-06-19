@@ -105,6 +105,33 @@ func TestBuildParams_LegacyParallelToolCallsOmittedWhenFalse(t *testing.T) {
 	}
 }
 
+// TestBuildStreamOptions_LegacyOmitted 验证 Legacy 模式下 buildStreamOptions 返回零值（序列化时省略）。
+//
+// 该测试复现并防护智谱 GLM 等 OpenAI 兼容端点的 400 code:1210 参数错误问题：
+// 这些端点不支持 stream_options 参数，发送 include_usage 会导致请求被拒绝。
+func TestBuildStreamOptions_LegacyOmitted(t *testing.T) {
+	p := newLegacyProvider(t)
+	opts := p.buildStreamOptions()
+
+	if !param.IsOmitted(opts.IncludeUsage) {
+		t.Error("Legacy: StreamOptions.IncludeUsage should be omitted; " +
+			"sending stream_options to OpenAI-compatible endpoints (e.g. Zhipu GLM) causes 400 code:1210")
+	}
+}
+
+// TestBuildStreamOptions_DefaultSet 验证默认模式（非 Legacy）下 buildStreamOptions 设置 IncludeUsage=true。
+func TestBuildStreamOptions_DefaultSet(t *testing.T) {
+	p := newDefaultProvider(t)
+	opts := p.buildStreamOptions()
+
+	if param.IsOmitted(opts.IncludeUsage) {
+		t.Error("Default: StreamOptions.IncludeUsage should be set")
+	}
+	if !opts.IncludeUsage.Value {
+		t.Error("Default: StreamOptions.IncludeUsage.Value should be true")
+	}
+}
+
 // TestBuildParams_LegacyNoReasoningEffort 验证 Legacy 模式跳过 reasoning_effort 映射。
 func TestBuildParams_LegacyNoReasoningEffort(t *testing.T) {
 	p := newLegacyProvider(t)
