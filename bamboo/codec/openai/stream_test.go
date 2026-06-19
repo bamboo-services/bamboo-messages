@@ -265,3 +265,132 @@ func TestStreamSerializer_MultipleToolCalls(t *testing.T) {
 		t.Errorf("second tool index = %d, want 1", chunk.Choices[0].Delta.ToolCalls[0].Index)
 	}
 }
+
+// TestStreamSerializer_ToolCallIndexConsistency 验证 tool_call 的 index 在
+// content_block_start 和 content_block_delta(input_json_delta) 之间保持一致。
+//
+// 该测试模拟 bamboo.StreamConverter 的真实行为：当模型发起工具调用时，
+// StreamConverter 的 sc.blockIndex 会在 ToolCall 事件中先递增，导致
+// content_block_start 和 content_block_delta 的 Index 字段携带的是
+// StreamConverter 内部的 blockIndex（而非从 0 起算的 tool 序号）。
+//
+// 之前 codec 的 DeltaInputJSON 分支直接使用 event.Index，而 ContentBlockStart
+// 分支使用内部 toolIndex（从 0 起算），两者不一致。这导致下游客户端（如
+// Vercel AI SDK）把参数增量误认为新的 tool_call，因缺少 id 而抛出
+// "Expected 'id' to be a string."。
+//
+// 场景一：模型直接调用工具（无前置 text block）
+//   StreamConverter 行为: stopIdx=0, blockIndex++→1, block_start Index=1, delta Index=1
+//
+// 场景二：模型先输出 text 再调用工具
+//   StreamConverter 行为: text block Index=0; tool: stopIdx=0, blockIndex++→1,
+//   block_start Index=1, delta Index=1
+func TestStreamSerializer_ToolCallIndexConsistency_NoPrecedingText(t *testing.T) {
+	s := newStreamSerializer()
+
+	// message_start
+	s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+
+	// 模拟 StreamConverter 在"无前置 text"时的输出：
+	// content_block_start (tool_use) Index=1
+	blockStartData, err := s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        1, // StreamConverter: sc.blockIndex 已递增到 1
+		ContentBlock: bamboo.NewToolUseBlock("call_abc", "get_weather", nil),
+	})
+	if err != nil {
+		t.Fatalf("Serialize(block_start tool_use) error = %v", err)
+	}
+	blockStartChunk := parseSSEChunk(t, blockStartData)
+	if len(blockStartChunk.Choices[0].Delta.ToolCalls) != 1 {
+		t.Fatalf("block_start ToolCalls len = %d", len(blockStartChunk.Choices[0].Delta.ToolCalls))
+	}
+	startIndex := blockStartChunk.Choices[0].Delta.ToolCalls[0].Index
+
+	// content_block_delta (input_json_delta) Index=1（StreamConverter: sc.blockIndex 仍为 1）
+	deltaData, err := s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 1, // StreamConverter: sc.blockIndex 仍为 1
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaInputJSON, PartialJSON: `{"city":"SF"}`},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(input_json_delta) error = %v", err)
+	}
+	deltaChunk := parseSSEChunk(t, deltaData)
+	if len(deltaChunk.Choices[0].Delta.ToolCalls) != 1 {
+		t.Fatalf("delta ToolCalls len = %d", len(deltaChunk.Choices[0].Delta.ToolCalls))
+	}
+	deltaIndex := deltaChunk.Choices[0].Delta.ToolCalls[0].Index
+
+	if startIndex != deltaIndex {
+		t.Errorf("tool_call index mismatch: block_start=%d, delta=%d — "+
+			"downstream client will treat delta as a new tool_call and fail "+
+			"with 'Expected id to be a string'", startIndex, deltaIndex)
+	}
+}
+
+func TestStreamSerializer_ToolCallIndexConsistency_WithPrecedingText(t *testing.T) {
+	s := newStreamSerializer()
+
+	// message_start
+	s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+
+	// text block (Index=0)
+	s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        0,
+		ContentBlock: bamboo.NewTextBlock(""),
+	})
+	s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 0,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaTextDelta, Text: "Let me check."},
+	})
+	s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockStop,
+		Index: 0,
+	})
+
+	// 模拟 StreamConverter 在 ToolCall 事件中的行为：
+	// stopIdx = sc.blockIndex = 0, sc.blockIndex++ → 1
+	// content_block_stop Index=0
+	s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockStop,
+		Index: 0,
+	})
+	// content_block_start (tool_use) Index=1
+	blockStartData, err := s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        1, // StreamConverter: sc.blockIndex 已递增到 1
+		ContentBlock: bamboo.NewToolUseBlock("call_def", "search", nil),
+	})
+	if err != nil {
+		t.Fatalf("Serialize(block_start tool_use) error = %v", err)
+	}
+	blockStartChunk := parseSSEChunk(t, blockStartData)
+	startIndex := blockStartChunk.Choices[0].Delta.ToolCalls[0].Index
+
+	// content_block_delta (input_json_delta) Index=1
+	deltaData, err := s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 1, // StreamConverter: sc.blockIndex 仍为 1
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaInputJSON, PartialJSON: `{"q":"weather"}`},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(input_json_delta) error = %v", err)
+	}
+	deltaChunk := parseSSEChunk(t, deltaData)
+	deltaIndex := deltaChunk.Choices[0].Delta.ToolCalls[0].Index
+
+	if startIndex != deltaIndex {
+		t.Errorf("tool_call index mismatch: block_start=%d, delta=%d — "+
+			"downstream client will treat delta as a new tool_call and fail "+
+			"with 'Expected id to be a string'", startIndex, deltaIndex)
+	}
+}

@@ -44,11 +44,12 @@ type openaiDeltaTCFn struct {
 
 // openaiStreamSerializer OpenAI 流式序列化器，有状态。
 type openaiStreamSerializer struct {
-	id        string
-	created   int64
-	model     string
-	toolIndex int
-	started   bool
+	id               string
+	created          int64
+	model            string
+	toolIndex        int
+	currentToolIndex int
+	started          bool
 }
 
 // newStreamSerializer 创建一个新的 OpenAI 流式序列化器实例。
@@ -128,6 +129,7 @@ func (s *openaiStreamSerializer) handleContentBlockStart(event bamboo.StreamEven
 		if !ok {
 			return nil, nil
 		}
+		s.currentToolIndex = s.toolIndex
 		chunk := openaiChunk{
 			ID:      s.id,
 			Object:  "chat.completion.chunk",
@@ -199,7 +201,7 @@ func (s *openaiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 				Index: 0,
 				Delta: openaiDeltaMsg{
 					ToolCalls: []openaiDeltaTC{{
-						Index:    event.Index,
+						Index:    s.currentToolIndex,
 						Function: openaiDeltaTCFn{Arguments: delta.PartialJSON},
 					}},
 				},
