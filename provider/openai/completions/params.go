@@ -91,10 +91,13 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 		}
 	}
 
-	// === ParallelToolCalls — Legacy 仅在有工具时设置 ===
+	// === ParallelToolCalls — Legacy 仅在显式启用且存在工具时设置 ===
+	// 注意：ChatConfig.ParallelToolCalls 为 bool 类型，零值 false 表示未启用。
+	// 智谱 GLM 等第三方 OpenAI 兼容端点不支持 parallel_tool_calls 参数，
+	// 即使发送 false 也会返回 400 code:1210，因此 Legacy 模式仅在显式 true 时才设置。
 	if !p.legacyCompat {
 		params.ParallelToolCalls = openai.Bool(config.ParallelToolCalls)
-	} else if len(config.Tools) > 0 {
+	} else if len(config.Tools) > 0 && config.ParallelToolCalls {
 		params.ParallelToolCalls = openai.Bool(config.ParallelToolCalls)
 	}
 

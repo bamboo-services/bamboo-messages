@@ -84,6 +84,27 @@ func TestBuildParams_LegacyParallelToolCallsWithTools(t *testing.T) {
 	}
 }
 
+// TestBuildParams_LegacyParallelToolCallsOmittedWhenFalse 验证 Legacy 模式下有工具但
+// ParallelToolCalls 为 false（零值）时不发送 ParallelToolCalls 字段。
+//
+// 该测试复现并防护智谱 GLM 等 OpenAI 兼容端点的 400 code:1210 参数错误问题：
+// 这些端点不支持 parallel_tool_calls 参数，即使发送 false 也会被拒绝。
+func TestBuildParams_LegacyParallelToolCallsOmittedWhenFalse(t *testing.T) {
+	p := newLegacyProvider(t)
+	config := &provider.ChatConfig{
+		Tools: []provider.Tool{
+			{Type: "function", Function: provider.FunctionDef{Name: "test_tool"}},
+		},
+		ParallelToolCalls: false,
+	}
+	params := p.buildParams("", nil, config)
+
+	if !param.IsOmitted(params.ParallelToolCalls) {
+		t.Error("Legacy (with tools, ParallelToolCalls=false): ParallelToolCalls should NOT be set; " +
+			"sending it to OpenAI-compatible endpoints (e.g. Zhipu GLM) causes 400 param error")
+	}
+}
+
 // TestBuildParams_LegacyNoReasoningEffort 验证 Legacy 模式跳过 reasoning_effort 映射。
 func TestBuildParams_LegacyNoReasoningEffort(t *testing.T) {
 	p := newLegacyProvider(t)
