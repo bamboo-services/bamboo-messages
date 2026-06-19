@@ -2,7 +2,7 @@
 
 ## 概述
 
-Bamboo Messages SDK 的公共 API 层（门面层），面向业务开发者提供统一的消息模型、流事件、工具定义和客户端接口。该包零外部 SDK 依赖，仅依赖 Go 标准库和 `internal/provider` 核心抽象层。
+Bamboo Messages SDK 的公共 API 层（门面层），面向业务开发者提供统一的消息模型、流事件、工具定义和客户端接口。该包零外部 SDK 依赖，仅依赖 Go 标准库和 `provider` 核心抽象层。
 
 ## 目录结构
 
@@ -18,6 +18,8 @@ bamboo/
 ├── convert.go       # 类型转换 (provider ↔ bamboo) + StreamConverter
 ├── content.go       # ContentBlock 构造函数
 ├── errors.go        # BambooError 错误类型
+├── codec/           # N-to-N 协议编解码层
+├── relay/           # 跨协议中继层 (Relay / RelayStream)
 └── *_test.go        # 单元测试 + 集成测试
 ```
 
@@ -33,6 +35,8 @@ bamboo/
 | 理解类型转换 | `convert.go` | `messagesToProvider`, `configToProvider`, `resultToResponse` |
 | 添加 ContentBlock 类型 | `content.go` + `stream.go` | 扩展 `ContentBlockType` 和 `StreamDeltaType` |
 | 自定义错误处理 | `errors.go` | `BambooError` 类型 + 错误类型常量 |
+| 协议互转 | `relay/` | `relay.Relay()` / `relay.RelayStream()` |
+| 外部协议编解码 | `codec/` | Anthropic / OpenAI / Responses / Gemini 格式的请求解析与响应序列化 |
 
 ## 约定
 
@@ -58,7 +62,9 @@ bamboo/
 3. 配置参数不生效 → 检查 `configToProvider` 是否遗漏了新字段
 4. 工具调用结果丢失 → 检查 `messagesToProvider` 中 tool_result 的拆分逻辑
 5. 客户端初始化失败 → 确认 `NewClient` 传入了非 nil 的 provider
+6. 协议互转异常 → 先查 `codec/` 对应格式子包的解析/序列化，再查 `relay/` 的调用链
 
 ## 引用
 
-无子级 AGENTS.md
+- [codec](./codec/AGENTS.md) — N-to-N 协议编解码层
+- [relay](./relay/AGENTS.md) — 跨协议中继层
