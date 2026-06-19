@@ -3,13 +3,9 @@ package anthropic
 import (
 	"context"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
-
-const paramTopK = "top_k"
 
 // Chat 流式对话。
 //
@@ -30,10 +26,6 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 	go func() {
 		defer close(eventCh)
 
-		if config == nil {
-			config = &provider.ChatConfig{}
-		}
-
 		// 发送流开始事件
 		select {
 		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
@@ -41,70 +33,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			return
 		}
 
-		params := anthropic.BetaMessageNewParams{
-			MaxTokens: config.MaxTokens,
-			Messages:  p.buildMessages(messages),
-			Model:     config.Model,
-		}
-
-		// 设置系统提示
-		if systemPrompt != "" {
-			params.System = []anthropic.BetaTextBlockParam{
-				{Text: systemPrompt},
-			}
-		}
-
-		// 设置可选参数（检查 nil 避免空指针解引用）
-		if config.Temperature != nil {
-			params.Temperature = anthropic.Float(*config.Temperature)
-		}
-		if config.TopP != nil {
-			params.TopP = anthropic.Float(*config.TopP)
-		}
-
-		if len(config.Stop) > 0 {
-			params.StopSequences = config.Stop
-		}
-		if tools := buildTools(config.Tools); tools != nil {
-			params.Tools = tools
-		}
-
-		if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
-			params.Thinking = anthropic.BetaThinkingConfigParamUnion{
-				OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{},
-			}
-		}
-
-	if topK, ok := provider.GetExtraFloat64(config.ProviderExtra, paramTopK); ok {
-		params.TopK = param.NewOpt(int64(topK))
-	}
-
-	// ToolChoice 映射: auto→OfAuto, none→OfNone, required/forced→OfAny
-	if config.ToolChoice != "" {
-		switch config.ToolChoice {
-		case "auto":
-			params.ToolChoice.OfAuto = &anthropic.BetaToolChoiceAutoParam{}
-		case "any", "required", "forced":
-			params.ToolChoice.OfAny = &anthropic.BetaToolChoiceAnyParam{}
-		case "none":
-			noneParam := anthropic.NewBetaToolChoiceNoneParam()
-			params.ToolChoice.OfNone = &noneParam
-		}
-	}
-
-	if config.UserID != "" || len(config.Metadata) > 0 {
-		params.Metadata = anthropic.BetaMetadataParam{}
-		if config.UserID != "" {
-			params.Metadata.UserID = param.NewOpt(config.UserID)
-		}
-		if len(config.Metadata) > 0 {
-			extra := make(map[string]any, len(config.Metadata))
-			for k, v := range config.Metadata {
-				extra[k] = v
-			}
-			params.Metadata.SetExtraFields(extra)
-		}
-	}
+		params := p.buildParams(systemPrompt, messages, config)
 
 		stream := p.Client.Beta.Messages.NewStreaming(ctx, params)
 		defer stream.Close()

@@ -9,7 +9,10 @@ import (
 // CompletionsProvider OpenAI Chat Completions 协议适配器实现。
 //
 // 基于泛型基座 provider.BaseProvider，封装 OpenAI Chat Completions SDK Client。
-type CompletionsProvider provider.BaseProvider[openai.Client]
+type CompletionsProvider struct {
+	provider.BaseProvider[openai.Client]
+	legacyCompat bool
+}
 
 // ============================================
 // Options 模式 — Functional Options
@@ -24,9 +27,10 @@ type Option func(*config)
 //
 // 存储 API Key、BaseURL、Headers 等配置项。
 type config struct {
-	apiKey  string
-	baseURL string
-	headers map[string]string
+	apiKey       string
+	baseURL      string
+	headers      map[string]string
+	legacyCompat bool
 }
 
 // WithAPIKey 设置 API 密钥。
@@ -56,6 +60,14 @@ func WithHeader(key, value string) Option {
 		}
 		c.headers[key] = value
 	}
+}
+
+// WithLegacyCompat 启用旧版兼容模式。
+//
+// 开启后，CompletionsProvider 将使用旧版行为模式，
+// 用于兼容早期 API 响应格式或特定第三方端点的非标准行为。
+func WithLegacyCompat() Option {
+	return func(c *config) { c.legacyCompat = true }
 }
 
 // ============================================
@@ -91,7 +103,10 @@ func NewCompletionsProviderWithOptions(opts ...Option) *CompletionsProvider {
 	client := openai.NewClient(sdkOpts...)
 
 	return &CompletionsProvider{
-		Client: client,
+		BaseProvider: provider.BaseProvider[openai.Client]{
+			Client: client,
+		},
+		legacyCompat: cfg.legacyCompat,
 	}
 }
 

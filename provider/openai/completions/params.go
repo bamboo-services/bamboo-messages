@@ -1,0 +1,129 @@
+package completions
+
+import (
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/packages/param"
+	"github.com/openai/openai-go/v3/shared"
+	"github.com/bamboo-services/bamboo-messages/provider"
+)
+
+// buildParams 构建 OpenAI Chat Completions 请求参数。
+//
+// 将统一的 provider.ChatConfig 转换为 openai.ChatCompletionNewParams，
+// 包含所有共享参数构建逻辑（Model/Messages/MaxTokens/Temperature 等），
+// 并根据 p.legacyCompat 做条件分支处理 Legacy 兼容场景。
+//
+// Legacy 模式差异：
+//   - MaxTokens → 使用旧字段名 max_tokens（而非 max_completion_tokens）
+//   - ParallelToolCalls → 仅在有工具时设置（而非无条件设置）
+//   - ReasoningEffort → 跳过自动映射（不设置 reasoning_effort）
+//   - thinking 透传 → 从 ProviderExtra 提取 thinking 值，通过 SetExtraFields 注入
+func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provider.Message, config *provider.ChatConfig) openai.ChatCompletionNewParams {
+	if config == nil {
+		config = &provider.ChatConfig{}
+	}
+
+	params := openai.ChatCompletionNewParams{
+		Model:    config.Model,
+		Messages: p.buildMessages(systemPrompt, messages),
+	}
+
+	// === MaxTokens — Legacy 使用旧字段名 max_tokens ===
+	if config.MaxTokens > 0 {
+		if p.legacyCompat {
+			params.MaxTokens = openai.Int(config.MaxTokens)
+		} else {
+			params.MaxCompletionTokens = openai.Int(config.MaxTokens)
+		}
+	}
+
+	if config.Temperature != nil {
+		params.Temperature = openai.Float(*config.Temperature)
+	}
+
+	if config.TopP != nil {
+		params.TopP = openai.Float(*config.TopP)
+	}
+
+	if len(config.Stop) > 0 {
+		params.Stop = buildStop(config.Stop)
+	}
+
+	if tools := buildTools(config.Tools); tools != nil {
+		params.Tools = tools
+	}
+
+	// === ReasoningEffort — Legacy 跳过自动映射 ===
+	if !p.legacyCompat {
+		if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
+			params.ReasoningEffort = shared.ReasoningEffort(config.ThinkingConfig.Effort)
+		}
+	}
+
+	// === thinking 透传 — Legacy only，从 ProviderExtra 提取并注入 JSON extra fields ===
+	if p.legacyCompat {
+		if thinking, ok := provider.GetExtraAny(config.ProviderExtra, "thinking"); ok {
+			params.SetExtraFields(map[string]any{"thinking": thinking})
+		}
+	}
+
+	if fp, ok := provider.GetExtraFloat64(config.ProviderExtra, "frequency_penalty"); ok {
+		params.FrequencyPenalty = openai.Float(fp)
+	}
+
+	if pp, ok := provider.GetExtraFloat64(config.ProviderExtra, "presence_penalty"); ok {
+		params.PresencePenalty = openai.Float(pp)
+	}
+
+	if seed, ok := provider.GetExtraInt64(config.ProviderExtra, "seed"); ok {
+		params.Seed = openai.Int(seed)
+	}
+
+	// 用户标识
+	if config.UserID != "" {
+		params.User = openai.String(config.UserID)
+	}
+
+	// 预测内容（用于加速已知内容的生成）
+	if pred, ok := provider.GetExtraAny(config.ProviderExtra, "prediction"); ok {
+		if prediction, ok := pred.(openai.ChatCompletionPredictionContentParam); ok {
+			params.Prediction = prediction
+		}
+	}
+
+	// === ParallelToolCalls — Legacy 仅在有工具时设置 ===
+	if !p.legacyCompat {
+		params.ParallelToolCalls = openai.Bool(config.ParallelToolCalls)
+	} else if len(config.Tools) > 0 {
+		params.ParallelToolCalls = openai.Bool(config.ParallelToolCalls)
+	}
+
+	// 附加元数据
+	if len(config.Metadata) > 0 {
+		params.Metadata = shared.Metadata(config.Metadata)
+	}
+
+	// 工具选择策略
+	if config.ToolChoice != "" {
+		tc := config.ToolChoice
+		if tc == "forced" {
+			tc = "required" // map forced→required for OpenAI
+		}
+		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(tc)}
+	}
+
+	// 响应格式
+	if config.ResponseFormat != "" {
+		if config.ResponseFormat == "json_object" {
+			params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
+				OfJSONObject: openai.Ptr(shared.NewResponseFormatJSONObjectParam()),
+			}
+		} else if config.ResponseFormat == "text" {
+			params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
+				OfText: openai.Ptr(shared.NewResponseFormatTextParam()),
+			}
+		}
+	}
+
+	return params
+}
