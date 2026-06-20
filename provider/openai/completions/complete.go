@@ -37,9 +37,11 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 
 	// 检查响应
 	if len(response.Choices) == 0 {
-		return nil, xError.NewError(ctx, nil,
-			fmt.Sprintf("OpenAI Completions 返回空响应 (choices=0), resp=%s", truncateResponseJSON(response)),
-			false, nil)
+		diag := fmt.Sprintf(
+			"OpenAI Completions 返回空响应 (choices=0), model=%s, legacyCompat=%v, tools=%d, maxTokens=%d, resp=%s",
+			config.Model, p.legacyCompat, len(config.Tools), config.MaxTokens, truncateResponseJSON(response),
+		)
+		return nil, xError.NewError(ctx, nil, diag, false, nil)
 	}
 
 	choice := response.Choices[0]

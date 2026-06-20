@@ -184,19 +184,49 @@ func TestBuildParams_DefaultReasoningEffort(t *testing.T) {
 	}
 }
 
-// TestBuildParams_DefaultParallelToolCalls 验证默认模式无条件发送 ParallelToolCalls。
+// TestBuildParams_DefaultParallelToolCalls 验证默认模式仅在工具存在且显式 true 时发送 ParallelToolCalls。
+//
+// 回归测试：默认模式不再无条件发送 parallel_tool_calls: false，避免智谱 GLM / Kimi
+// 等第三方 OpenAI 兼容端点因该参数返回 400 code:1210 或空响应（choices=0）。
 func TestBuildParams_DefaultParallelToolCalls(t *testing.T) {
 	p := newDefaultProvider(t)
-	// 无工具配置，默认模式仍应设置 ParallelToolCalls
-	params := p.buildParams("", nil, &provider.ChatConfig{})
 
-	if param.IsOmitted(params.ParallelToolCalls) {
-		t.Error("Default: ParallelToolCalls should always be set")
-	}
-	// 默认 ChatConfig.ParallelToolCalls 为 false，验证值
-	if params.ParallelToolCalls.Value {
-		t.Error("Default: ParallelToolCalls.Value should be false (zero value from config)")
-	}
+	// 无工具时不应发送 ParallelToolCalls
+	t.Run("no tools omitted", func(t *testing.T) {
+		params := p.buildParams("", nil, &provider.ChatConfig{})
+		if !param.IsOmitted(params.ParallelToolCalls) {
+			t.Error("Default (no tools): ParallelToolCalls should be omitted")
+		}
+	})
+
+	// 有工具但 ParallelToolCalls=false 时不应发送（bool 无法区分未设置与显式 false）
+	t.Run("with tools false omitted", func(t *testing.T) {
+		params := p.buildParams("", nil, &provider.ChatConfig{
+			Tools: []provider.Tool{
+				{Type: "function", Function: provider.FunctionDef{Name: "test_tool"}},
+			},
+			ParallelToolCalls: false,
+		})
+		if !param.IsOmitted(params.ParallelToolCalls) {
+			t.Error("Default (with tools, false): ParallelToolCalls should be omitted")
+		}
+	})
+
+	// 有工具且 ParallelToolCalls=true 时应发送 true
+	t.Run("with tools true set", func(t *testing.T) {
+		params := p.buildParams("", nil, &provider.ChatConfig{
+			Tools: []provider.Tool{
+				{Type: "function", Function: provider.FunctionDef{Name: "test_tool"}},
+			},
+			ParallelToolCalls: true,
+		})
+		if param.IsOmitted(params.ParallelToolCalls) {
+			t.Fatal("Default (with tools, true): ParallelToolCalls should be set")
+		}
+		if !params.ParallelToolCalls.Value {
+			t.Error("Default (with tools, true): ParallelToolCalls.Value should be true")
+		}
+	})
 }
 
 // TestMarshalJSON_LegacyFields 验证 JSON 序列化中 Legacy 使用 max_tokens 而非 max_completion_tokens。
