@@ -41,8 +41,10 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	result := &provider.CompletionResult{
 		FinishReason: mapFinishReason(response.StopReason),
 		Usage: provider.UsageData{
-			InputTokens:  response.Usage.InputTokens,
-			OutputTokens: response.Usage.OutputTokens,
+			InputTokens:              response.Usage.InputTokens,
+			OutputTokens:             response.Usage.OutputTokens,
+			CacheCreationInputTokens: response.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     response.Usage.CacheReadInputTokens,
 		},
 	}
 

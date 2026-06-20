@@ -16,8 +16,13 @@ func (p *CompletionsProvider) handleChunk(chunk openai.ChatCompletionChunk, text
 	// 处理 usage（最后一个 chunk 可能没有 choices）
 	if chunk.Usage.TotalTokens > 0 {
 		events = append(events, provider.StreamEvent{
-			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewUsageDelta(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens),
+			Type: provider.StreamTypeDelta,
+			Delta: provider.NewUsageDeltaWithCache(
+				chunk.Usage.PromptTokens,
+				chunk.Usage.CompletionTokens,
+				0,
+				chunk.Usage.PromptTokensDetails.CachedTokens,
+			),
 		})
 	}
 

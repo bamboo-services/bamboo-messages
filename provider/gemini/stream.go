@@ -22,9 +22,11 @@ func (p *Provider) handleStreamEvent(resp *genai.GenerateContentResponse, textBl
 	if resp.UsageMetadata != nil {
 		events = append(events, provider.StreamEvent{
 			Type: provider.StreamTypeDelta,
-			Delta: provider.NewUsageDelta(
+			Delta: provider.NewUsageDeltaWithCache(
 				int64(resp.UsageMetadata.PromptTokenCount),
 				int64(resp.UsageMetadata.CandidatesTokenCount),
+				0,
+				int64(resp.UsageMetadata.CachedContentTokenCount),
 			),
 		})
 	}

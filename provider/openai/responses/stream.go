@@ -150,8 +150,13 @@ func (p *ResponsesProvider) contentResponseCompleted(event responses.ResponseStr
 	usage := e.Response.Usage
 	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
 		return []provider.StreamEvent{{
-			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewUsageDelta(usage.InputTokens, usage.OutputTokens),
+			Type: provider.StreamTypeDelta,
+			Delta: provider.NewUsageDeltaWithCache(
+				usage.InputTokens,
+				usage.OutputTokens,
+				0,
+				usage.InputTokensDetails.CachedTokens,
+			),
 		}}
 	}
 	return nil

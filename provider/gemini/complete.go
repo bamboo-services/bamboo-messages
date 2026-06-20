@@ -52,8 +52,9 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	// 提取 Token 用量
 	if resp.UsageMetadata != nil {
 		result.Usage = provider.UsageData{
-			InputTokens:  int64(resp.UsageMetadata.PromptTokenCount),
-			OutputTokens: int64(resp.UsageMetadata.CandidatesTokenCount),
+			InputTokens:          int64(resp.UsageMetadata.PromptTokenCount),
+			OutputTokens:         int64(resp.UsageMetadata.CandidatesTokenCount),
+			CacheReadInputTokens: int64(resp.UsageMetadata.CachedContentTokenCount),
 		}
 	}
 

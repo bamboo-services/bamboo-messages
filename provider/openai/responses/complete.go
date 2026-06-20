@@ -74,8 +74,9 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 
 	// 设置用量统计
 	result.Usage = provider.UsageData{
-		InputTokens:  response.Usage.InputTokens,
-		OutputTokens: response.Usage.OutputTokens,
+		InputTokens:          response.Usage.InputTokens,
+		OutputTokens:         response.Usage.OutputTokens,
+		CacheReadInputTokens: response.Usage.InputTokensDetails.CachedTokens,
 	}
 
 	return result, nil

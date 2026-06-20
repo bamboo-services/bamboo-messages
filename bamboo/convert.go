@@ -222,7 +222,12 @@ func resultToResponse(result *provider.CompletionResult, providerType string) *R
 		Role:         RoleAssistant,
 		Content:      content,
 		StopReason:   mapFinishReason(result.FinishReason),
-		Usage:        Usage{InputTokens: result.Usage.InputTokens, OutputTokens: result.Usage.OutputTokens},
+		Usage: Usage{
+			InputTokens:              result.Usage.InputTokens,
+			OutputTokens:             result.Usage.OutputTokens,
+			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
+		},
 		ProviderType: providerType,
 		RequestID:    fmt.Sprintf("req_%d", time.Now().UnixNano()),
 		CreatedAt:    time.Now().Unix(),
@@ -365,7 +370,12 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		}}
 	case provider.StreamDeltaTypeUsage:
 		data := delta.Data.(provider.UsageData)
-		sc.usage = &Usage{InputTokens: data.InputTokens, OutputTokens: data.OutputTokens}
+		sc.usage = &Usage{
+		InputTokens:              data.InputTokens,
+		OutputTokens:             data.OutputTokens,
+		CacheCreationInputTokens: data.CacheCreationInputTokens,
+		CacheReadInputTokens:     data.CacheReadInputTokens,
+	}
 		return nil
 	default:
 		return nil

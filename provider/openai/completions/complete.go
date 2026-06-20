@@ -49,8 +49,9 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 		Content:      choice.Message.Content,
 		FinishReason: mapFinishReason(choice.FinishReason),
 		Usage: provider.UsageData{
-			InputTokens:  response.Usage.PromptTokens,
-			OutputTokens: response.Usage.CompletionTokens,
+			InputTokens:          response.Usage.PromptTokens,
+			OutputTokens:         response.Usage.CompletionTokens,
+			CacheReadInputTokens: response.Usage.PromptTokensDetails.CachedTokens,
 		},
 	}
 

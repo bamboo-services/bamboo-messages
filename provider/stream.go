@@ -78,9 +78,12 @@ type ToolCallDeltaData string
 // UsageData Token 使用量统计数据。
 //
 // 记录本次对话的输入和输出 Token 数量，用于计费和用量分析。
+// CacheCreationInputTokens 和 CacheReadInputTokens 用于追踪 prompt caching 的命中情况。
 type UsageData struct {
-	InputTokens  int64 `json:"input_tokens"`  // 输入 Token 数量
-	OutputTokens int64 `json:"output_tokens"` // 输出 Token 数量
+	InputTokens              int64 `json:"input_tokens"`                        // 输入 Token 数量
+	OutputTokens             int64 `json:"output_tokens"`                       // 输出 Token 数量
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"` // 缓存创建消耗的输入 token 数量（Anthropic）
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`     // 缓存命中读取的输入 token 数量（Anthropic/OpenAI/Gemini）
 }
 
 // BlockStartData 内容块开始数据。
@@ -166,6 +169,18 @@ func NewUsageDelta(inputTokens, outputTokens int64) StreamDelta[any] {
 		Data: UsageData{
 			InputTokens:  inputTokens,
 			OutputTokens: outputTokens,
+		},
+	}
+}
+
+func NewUsageDeltaWithCache(inputTokens, outputTokens, cacheCreation, cacheRead int64) StreamDelta[any] {
+	return StreamDelta[any]{
+		Type: StreamDeltaTypeUsage,
+		Data: UsageData{
+			InputTokens:              inputTokens,
+			OutputTokens:             outputTokens,
+			CacheCreationInputTokens: cacheCreation,
+			CacheReadInputTokens:     cacheRead,
 		},
 	}
 }

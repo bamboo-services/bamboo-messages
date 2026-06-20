@@ -111,8 +111,13 @@ func (p *Provider) contentMessageDelta(event anthropic.BetaRawMessageStreamEvent
 	msgDelta := event.AsMessageDelta()
 	if msgDelta.Usage.InputTokens > 0 || msgDelta.Usage.OutputTokens > 0 {
 		return []provider.StreamEvent{{
-			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewUsageDelta(msgDelta.Usage.InputTokens, msgDelta.Usage.OutputTokens),
+			Type: provider.StreamTypeDelta,
+			Delta: provider.NewUsageDeltaWithCache(
+				msgDelta.Usage.InputTokens,
+				msgDelta.Usage.OutputTokens,
+				msgDelta.Usage.CacheCreationInputTokens,
+				msgDelta.Usage.CacheReadInputTokens,
+			),
 		}}
 	}
 	return nil
