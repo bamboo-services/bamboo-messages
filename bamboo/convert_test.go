@@ -43,9 +43,15 @@ func TestConvertMultiBlockMessage(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(result))
 	}
-	// thinking 被跳过，两个 text 拼接
+	// thinking 被保留到 ThinkingContent，两个 text 拼接
 	if result[0].Content != "hello world" {
 		t.Errorf("Content = %q, want %q", result[0].Content, "hello world")
+	}
+	if result[0].ThinkingContent != "let me think" {
+		t.Errorf("ThinkingContent = %q, want %q", result[0].ThinkingContent, "let me think")
+	}
+	if result[0].ThinkingSignature != "sig123" {
+		t.Errorf("ThinkingSignature = %q, want %q", result[0].ThinkingSignature, "sig123")
 	}
 	if result[0].Role != provider.RoleAssistant {
 		t.Errorf("Role = %q, want %q", result[0].Role, provider.RoleAssistant)
@@ -972,9 +978,15 @@ func TestMessagesToProvider_ThinkingBlock(t *testing.T) {
 	if len(result) != 1 {
 		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
 	}
-	// thinking 被跳过，只保留 text
+	// thinking 被保留到 ThinkingContent，text 正常保留
 	if result[0].Content != "real message" {
 		t.Errorf("Content = %q, 期望 %q", result[0].Content, "real message")
+	}
+	if result[0].ThinkingContent != "deep thoughts" {
+		t.Errorf("ThinkingContent = %q, 期望 %q", result[0].ThinkingContent, "deep thoughts")
+	}
+	if result[0].ThinkingSignature != "sig_abc" {
+		t.Errorf("ThinkingSignature = %q, 期望 %q", result[0].ThinkingSignature, "sig_abc")
 	}
 }
 
@@ -1068,9 +1080,18 @@ func TestMessagesToProvider_OnlyThinkingBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// thinking 被跳过，没有 text 也没有 tool_calls，不生成消息
-	if len(result) != 0 {
-		t.Errorf("期望 0 条消息, 实际 %d", len(result))
+	// thinking 被保留到 ThinkingContent，即使没有 text 也生成消息
+	if len(result) != 1 {
+		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	}
+	if result[0].ThinkingContent != "hmm" {
+		t.Errorf("ThinkingContent = %q, 期望 %q", result[0].ThinkingContent, "hmm")
+	}
+	if result[0].ThinkingSignature != "sig" {
+		t.Errorf("ThinkingSignature = %q, 期望 %q", result[0].ThinkingSignature, "sig")
+	}
+	if result[0].Content != "" {
+		t.Errorf("Content = %q, 期望空字符串", result[0].Content)
 	}
 }
 

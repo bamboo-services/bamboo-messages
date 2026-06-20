@@ -65,6 +65,10 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 
 		if candidate.Content != nil {
 			for i, part := range candidate.Content.Parts {
+				// 推理内容（Thought 标记）
+				if part.Thought && part.Text != "" {
+					result.Thinking += part.Text
+				}
 				// 文本内容（忽略 Thought==true 的推理内容）
 				if !part.Thought && part.Text != "" {
 					result.Content += part.Text

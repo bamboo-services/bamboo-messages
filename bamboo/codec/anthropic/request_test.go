@@ -301,7 +301,7 @@ func TestParseRequest_ToolChoiceMapping(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := parseToolChoice(json.RawMessage(tt.input))
+		got, _ := parseToolChoice(json.RawMessage(tt.input))
 		if got != tt.expected {
 			t.Errorf("parseToolChoice(%s) = %q, want %q", tt.input, got, tt.expected)
 		}

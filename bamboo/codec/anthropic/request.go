@@ -124,8 +124,15 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	}
 
 	// tool_choice
-	if choice := parseToolChoice(req.ToolChoice); choice != "" {
+	if choice, toolName := parseToolChoice(req.ToolChoice); choice != "" {
 		config.ToolChoice = choice
+		// tool_choice.type="tool" 时，存储 forced tool name 避免丢失
+		if toolName != "" {
+			if config.ProviderExtra == nil {
+				config.ProviderExtra = make(map[string]any)
+			}
+			config.ProviderExtra["forced_tool_name"] = toolName
+		}
 	}
 
 	// thinking
@@ -315,6 +322,22 @@ func convertContentBlock(rb rawContentBlock) bamboo.ContentBlock {
 			Signature:    rb.Signature,
 			CacheControl: cc,
 		}
+
+	case "document":
+		if rb.Source == nil {
+			return nil
+		}
+		source := bamboo.ContentSource{
+			Type:      rb.Source.Type,
+			MediaType: rb.Source.MediaType,
+			Data:      rb.Source.Data,
+			URL:       rb.Source.URL,
+		}
+		return &bamboo.DocumentBlock{
+			Type:         bamboo.ContentBlockDocument,
+			Source:       &source,
+			CacheControl: cc,
+		}
 	}
 	return nil
 }
@@ -365,29 +388,31 @@ func parseTools(tools []anthropicTool) []bamboo.Tool {
 //   - {type:"auto"}  → "auto"
 //   - {type:"any"}   → "required"
 //   - {type:"none"}  → "none"
-//   - {type:"tool", name:"xxx"} → "forced"
-func parseToolChoice(raw json.RawMessage) string {
+//   - {type:"tool", name:"xxx"} → "forced", name:"xxx"
+//
+// 返回 toolChoice 字符串和可选的 forced tool name。
+func parseToolChoice(raw json.RawMessage) (string, string) {
 	if len(raw) == 0 {
-		return ""
+		return "", ""
 	}
 	var obj struct {
 		Type string `json:"type"`
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		return ""
+		return "", ""
 	}
 	switch obj.Type {
 	case "auto":
-		return "auto"
+		return "auto", ""
 	case "any":
-		return "required"
+		return "required", ""
 	case "none":
-		return "none"
+		return "none", ""
 	case "tool":
-		return "forced"
+		return "forced", obj.Name
 	}
-	return ""
+	return "", ""
 }
 
 // parseThinking 解析 thinking 字段。

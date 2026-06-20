@@ -264,14 +264,19 @@ func TestProvider_handleStreamEvent(t *testing.T) {
 		{
 			name:     "content_block_start with thinking",
 			rawJSON:  `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"Let me think..."}}`,
-			wantLen:  1,
+			wantLen:  2,
 			wantType: provider.StreamTypeDelta,
 			check: func(t *testing.T, events []provider.StreamEvent) {
-				if events[0].Delta.Type != provider.StreamDeltaTypeThinking {
-					t.Errorf("expected thinking delta, got %v", events[0].Delta.Type)
+				// 第一个事件应为 BlockStart
+				if events[0].Delta.Type != provider.StreamDeltaTypeBlockStart {
+					t.Errorf("expected block_start delta, got %v", events[0].Delta.Type)
 				}
-				if data, ok := events[0].Delta.Data.(provider.ThinkingData); !ok || string(data) != "Let me think..." {
-					t.Errorf("expected ThinkingData 'Let me think...', got %v", events[0].Delta.Data)
+				// 第二个事件应为 ThinkingDelta
+				if events[1].Delta.Type != provider.StreamDeltaTypeThinking {
+					t.Errorf("expected thinking delta, got %v", events[1].Delta.Type)
+				}
+				if data, ok := events[1].Delta.Data.(provider.ThinkingData); !ok || string(data) != "Let me think..." {
+					t.Errorf("expected ThinkingData 'Let me think...', got %v", events[1].Delta.Data)
 				}
 			},
 		},
@@ -365,10 +370,11 @@ func TestProvider_handleStreamEvent(t *testing.T) {
 		},
 	}
 
+	var finishReason provider.FinishReason
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			event := unmarshalEvent(t, tt.rawJSON)
-			result := p.handleStreamEvent(event)
+			result := p.handleStreamEvent(event, &finishReason)
 			if len(result) != tt.wantLen {
 				t.Errorf("handleStreamEvent() returned %d events, want %d", len(result), tt.wantLen)
 				return

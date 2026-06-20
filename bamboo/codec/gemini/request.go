@@ -7,6 +7,7 @@ import (
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
+	"google.golang.org/genai"
 )
 
 // ── Gemini 请求 JSON 结构体 ──
@@ -75,12 +76,18 @@ type geminiFuncResponse struct {
 
 // geminiGenConfig 生成配置。
 type geminiGenConfig struct {
-	Temperature      *float64 `json:"temperature,omitempty"`
-	TopP             *float64 `json:"topP,omitempty"`
-	TopK             *float64 `json:"topK,omitempty"`
-	MaxOutputTokens  *int64   `json:"maxOutputTokens,omitempty"`
-	StopSequences    []string `json:"stopSequences,omitempty"`
-	ResponseMimeType string   `json:"responseMimeType,omitempty"`
+	Temperature      *float64           `json:"temperature,omitempty"`
+	TopP             *float64           `json:"topP,omitempty"`
+	TopK             *float64           `json:"topK,omitempty"`
+	MaxOutputTokens  *int64             `json:"maxOutputTokens,omitempty"`
+	StopSequences    []string           `json:"stopSequences,omitempty"`
+	ResponseMimeType string             `json:"responseMimeType,omitempty"`
+	ThinkingConfig   *geminiThinkingCfg `json:"thinkingConfig,omitempty"`
+}
+
+// geminiThinkingCfg Gemini thinking 配置。
+type geminiThinkingCfg struct {
+	ThinkingBudget *int64 `json:"thinkingBudget,omitempty"`
 }
 
 // geminiTool 工具定义（包含 functionDeclarations 数组）。
@@ -131,6 +138,8 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	}
 
 	// ── 3. 构建配置 ──
+	// 注意: Gemini 的 model 名称在 URL 路径中（如 /v1beta/models/gemini-2.5-pro:generateContent），
+	// 不在请求 body 中，因此 config.Model 为空。relay 层需从 URL 路径提取 model。
 	config := &bamboo.RequestConfig{}
 	applyGenerationConfig(config, req.GenerationConfig)
 
@@ -144,12 +153,12 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 		config.ToolChoice = mapToolChoiceMode(req.ToolConfig.FunctionCallingConfig.Mode)
 	}
 
-	// ── 6. safetySettings 透传到 ProviderExtra ──
+	// ── 6. safetySettings 转换为 []*genai.SafetySetting 后透传到 ProviderExtra ──
 	if len(req.SafetySettings) > 0 {
 		if config.ProviderExtra == nil {
 			config.ProviderExtra = make(map[string]any)
 		}
-		config.ProviderExtra["safety_settings"] = req.SafetySettings
+		config.ProviderExtra["safety_settings"] = convertSafetySettings(req.SafetySettings)
 	}
 
 	// ── 7. cachedContent 透传到 ProviderExtra ──
@@ -164,7 +173,8 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 		Messages: messages,
 		System:   system,
 		Config:   config,
-		IsStream: false, // Gemini stream 由 URL 参数 `?alt=sse` 决定，body 中不包含
+		IsStream: false, // Gemini 的流式标识不在 body 中，由 URL 参数 `?alt=sse` 决定。
+		// relay 层应根据实际 URL 路径中的 `?alt=sse` 覆盖此值。
 	}, nil
 }
 
@@ -227,7 +237,9 @@ func parseContents(contents []geminiContent) ([]bamboo.BambooMessage, error) {
 						toolUseID = part.FunctionResponse.Name
 					}
 					contentStr := serializeFuncResponse(part.FunctionResponse.Response)
-					blocks = append(blocks, bamboo.NewToolResultBlock(toolUseID, contentStr, false))
+					trb := bamboo.NewToolResultBlock(toolUseID, contentStr, false).(*bamboo.ToolResultBlock)
+					trb.ToolName = part.FunctionResponse.Name
+					blocks = append(blocks, trb)
 				}
 			}
 			if len(blocks) == 0 {
@@ -310,7 +322,9 @@ func parseParts(parts []geminiPart, callIndex *int) ([]bamboo.ContentBlock, erro
 				toolUseID = part.FunctionResponse.Name
 			}
 			contentStr := serializeFuncResponse(part.FunctionResponse.Response)
-			blocks = append(blocks, bamboo.NewToolResultBlock(toolUseID, contentStr, false))
+			trb := bamboo.NewToolResultBlock(toolUseID, contentStr, false).(*bamboo.ToolResultBlock)
+			trb.ToolName = part.FunctionResponse.Name
+			blocks = append(blocks, trb)
 			continue
 		}
 	}
@@ -372,6 +386,11 @@ func applyGenerationConfig(config *bamboo.RequestConfig, gc *geminiGenConfig) {
 		}
 		config.ProviderExtra["top_k"] = *gc.TopK
 	}
+
+	// thinkingConfig → ThinkingConfig
+	if gc.ThinkingConfig != nil {
+		config.ThinkingConfig = mapThinkingBudgetToEffort(gc.ThinkingConfig.ThinkingBudget)
+	}
 }
 
 // mapResponseMimeType 将 Gemini responseMimeType 映射为 bamboo ResponseFormat。
@@ -429,4 +448,73 @@ func parseTools(tools []geminiTool) []bamboo.Tool {
 		}
 	}
 	return result
+}
+
+// convertSafetySettings 将 geminiSafetySetting 列表转换为 []*genai.SafetySetting。
+//
+// 确保 codec 层输出的类型与 provider 期望的类型一致，
+// 避免 relay 路径上类型断言失败导致 safety_settings 被静默丢弃。
+func convertSafetySettings(settings []geminiSafetySetting) []*genai.SafetySetting {
+	result := make([]*genai.SafetySetting, 0, len(settings))
+	for _, s := range settings {
+		result = append(result, &genai.SafetySetting{
+			Category:  mapHarmCategory(s.Category),
+			Threshold: mapHarmBlockThreshold(s.Threshold),
+		})
+	}
+	return result
+}
+
+// mapHarmCategory 将字符串形式的 harm category 映射为 genai.HarmCategory。
+func mapHarmCategory(category string) genai.HarmCategory {
+	switch category {
+	case "HARM_CATEGORY_HARASSMENT":
+		return genai.HarmCategoryHarassment
+	case "HARM_CATEGORY_HATE_SPEECH":
+		return genai.HarmCategoryHateSpeech
+	case "HARM_CATEGORY_SEXUALLY_EXPLICIT":
+		return genai.HarmCategorySexuallyExplicit
+	case "HARM_CATEGORY_DANGEROUS_CONTENT":
+		return genai.HarmCategoryDangerousContent
+	default:
+		return genai.HarmCategoryUnspecified
+	}
+}
+
+// mapHarmBlockThreshold 将字符串形式的 threshold 映射为 genai.HarmBlockThreshold。
+func mapHarmBlockThreshold(threshold string) genai.HarmBlockThreshold {
+	switch threshold {
+	case "BLOCK_NONE":
+		return genai.HarmBlockThresholdBlockNone
+	case "BLOCK_ONLY_HIGH":
+		return genai.HarmBlockThresholdBlockOnlyHigh
+	case "BLOCK_MEDIUM_AND_ABOVE":
+		return genai.HarmBlockThresholdBlockMediumAndAbove
+	case "BLOCK_LOW_AND_ABOVE":
+		return genai.HarmBlockThresholdBlockLowAndAbove
+	default:
+		return genai.HarmBlockThresholdUnspecified
+	}
+}
+
+// mapThinkingBudgetToEffort 将 Gemini thinkingBudget 映射为 ThinkingConfig。
+//
+// budget 为 nil 时返回 nil（不启用思考）；
+// budget > 0 时根据大小推断 effort 级别。
+func mapThinkingBudgetToEffort(budget *int64) *bamboo.ThinkingConfig {
+	if budget == nil {
+		return nil
+	}
+	b := *budget
+	if b <= 0 {
+		return &bamboo.ThinkingConfig{Effort: "none"}
+	}
+	// 按 budget 大小推断 effort：低预算→low，中预算→medium，高预算→high
+	if b <= 2048 {
+		return &bamboo.ThinkingConfig{Effort: "low"}
+	}
+	if b <= 8192 {
+		return &bamboo.ThinkingConfig{Effort: "medium"}
+	}
+	return &bamboo.ThinkingConfig{Effort: "high"}
 }

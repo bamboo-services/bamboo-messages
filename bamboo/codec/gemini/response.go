@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"encoding/json"
+	"log"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 )
@@ -30,11 +31,13 @@ type geminiContentOut struct {
 	Role  string          `json:"role"`
 }
 
-// geminiPartOut 输出方向的 Part（支持 text / functionCall / thought 标记）。
+// geminiPartOut 输出方向的 Part（支持 text / functionCall / thought / inlineData / fileData）。
 type geminiPartOut struct {
-	Text         string             `json:"text,omitempty"`
-	Thought      bool               `json:"thought,omitempty"`
-	FunctionCall *geminiFuncCallOut `json:"functionCall,omitempty"`
+	Text         string              `json:"text,omitempty"`
+	Thought      bool                `json:"thought,omitempty"`
+	FunctionCall *geminiFuncCallOut  `json:"functionCall,omitempty"`
+	InlineData   *geminiInlineData   `json:"inlineData,omitempty"`
+	FileData     *geminiFileData     `json:"fileData,omitempty"`
 }
 
 // geminiFuncCallOut 输出方向的 functionCall。
@@ -73,6 +76,8 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 			CachedContentTokenCount: resp.Usage.CacheReadInputTokens,
 		},
 	}
+	// Gemini 无原生 cache_creation_input_tokens 字段，仅映射 CacheReadInputTokens 到 cachedContentTokenCount。
+	// CacheCreationInputTokens 在跨协议转换中会丢失，此为已知限制。
 
 	if resp.Model != "" {
 		out.ModelVersion = resp.Model
@@ -84,9 +89,12 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 // buildResponseParts 将 Bamboo ContentBlock 列表转换为 Gemini parts 数组。
 //
 // 映射规则:
-//   - TextBlock     → {text: "..."}
-//   - ThinkingBlock → 忽略（本期不完整支持 thought 标记的输出方向）
-//   - ToolUseBlock  → {functionCall: {name, args}}
+//   - TextBlock      → {text: "..."}
+//   - ThinkingBlock  → {text: "...", thought: true}
+//   - ToolUseBlock   → {functionCall: {name, args}}
+//   - ImageBlock     → {inlineData: {mimeType, data}} 或 {fileData: {fileUri}}
+//   - DocumentBlock  → {inlineData: {mimeType, data}} 或 {fileData: {fileUri}}
+//   - ToolResultBlock → 不应出现在 assistant 响应中，记录警告并跳过
 func buildResponseParts(blocks []bamboo.ContentBlock) []geminiPartOut {
 	parts := make([]geminiPartOut, 0, len(blocks))
 	for _, block := range blocks {
@@ -111,10 +119,61 @@ func buildResponseParts(blocks []bamboo.ContentBlock) []geminiPartOut {
 			}
 			parts = append(parts, part)
 		case *bamboo.ThinkingBlock:
-			// 本期忽略 thought 输出
+			if b.Thinking != "" {
+				parts = append(parts, geminiPartOut{Text: b.Thinking, Thought: true})
+			}
+		case *bamboo.ImageBlock:
+			// Gemini 原生支持 inlineData / fileData，映射为 inlineData part
+			if b.Source == nil {
+				continue
+			}
+			part := buildInlineDataPart(b.Source)
+			if part != nil {
+				parts = append(parts, *part)
+			}
+		case *bamboo.DocumentBlock:
+			// Gemini 原生支持 inlineData / fileData，映射为 inlineData part
+			if b.Source == nil {
+				continue
+			}
+			part := buildInlineDataPart(b.Source)
+			if part != nil {
+				parts = append(parts, *part)
+			}
+		case *bamboo.ToolResultBlock:
+			// ToolResultBlock 不应出现在 assistant 响应中，记录警告并跳过
+			log.Printf("[codec/gemini] warning: ToolResultBlock should not appear in assistant response, skipped (tool_use_id=%s)", b.ToolUseID)
 		}
 	}
 	return parts
+}
+
+// buildInlineDataPart 将 ContentSource 转换为 Gemini inlineData 或 fileData part。
+//
+// 映射规则:
+//   - base64 类型 → {inlineData: {mimeType, data}}
+//   - url 类型    → {fileData: {mimeType, fileUri}}
+//   - 其他类型    → 返回 nil
+func buildInlineDataPart(source *bamboo.ContentSource) *geminiPartOut {
+	switch source.Type {
+	case "base64":
+		return &geminiPartOut{
+			InlineData: &geminiInlineData{
+				MimeType: source.MediaType,
+				Data:     source.Data,
+			},
+		}
+	case "url":
+		return &geminiPartOut{
+			FileData: &geminiFileData{
+				MimeType: source.MediaType,
+				FileURI:  source.URL,
+			},
+		}
+	default:
+		log.Printf("[codec/gemini] warning: unsupported ContentSource type %q for inline_data mapping, skipped", source.Type)
+		return nil
+	}
 }
 
 // mapFinishReasonToGemini 将 Bamboo FinishReason 映射为 Gemini finishReason。

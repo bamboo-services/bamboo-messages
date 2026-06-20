@@ -192,7 +192,8 @@ func (s *geminiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 		return nil, nil
 
 	case bamboo.DeltaSignature:
-		// 签名增量在 Gemini 中不输出
+		// signature_delta 为 Anthropic Extended Thinking 特有的签名增量，
+		// Gemini 协议无对应字段，跨协议转换时丢弃。
 		return nil, nil
 	}
 
@@ -265,6 +266,8 @@ func (s *geminiStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([
 		}
 	}
 
+	// Gemini 无原生 cache_creation_input_tokens 字段，仅映射 CacheReadInputTokens 到 cachedContentTokenCount。
+	// CacheCreationInputTokens 在跨协议转换中会丢失，此为已知限制。
 	chunk := geminiStreamChunk{
 		Candidates: []geminiStreamCandidate{{
 			Index:        0,

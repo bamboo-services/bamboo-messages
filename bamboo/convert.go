@@ -24,6 +24,7 @@ var finishReasonMap = map[provider.FinishReason]FinishReason{
 //
 // tool_result 消息会被拆分为独立的 Role=tool 消息；
 // image/document 类型会被静默丢弃并记录日志。
+// thinking block 的内容会被保留到 provider.Message 的 ThinkingContent/ThinkingSignature 字段。
 func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 	var result []provider.Message
 	for _, msg := range msgs {
@@ -37,6 +38,8 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		var contentBlocks []provider.ContentBlock
 		var msgCacheControl *provider.CacheControl
 		var ccCount int
+		var thinkingContent string
+		var thinkingSignature string
 
 		for _, block := range msg.Content {
 			switch b := block.(type) {
@@ -47,7 +50,17 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 					msgCacheControl = b.CacheControl
 				}
 			case *ThinkingBlock:
-				// 思考过程不发送给 provider，其 CacheControl 也不参与消息级提升
+				// 保留思考过程到 provider.Message 的 ThinkingContent/ThinkingSignature 字段，
+				// 用于多轮对话中向 provider 回传 thinking block 内容。
+				// 多个 ThinkingBlock 时拼接内容，保留最后一个签名。
+				if b.Thinking != "" {
+					thinkingContent += b.Thinking
+					thinkingSignature = b.Signature
+				}
+				if b.CacheControl != nil {
+					ccCount++
+					msgCacheControl = b.CacheControl
+				}
 			case *ToolUseBlock:
 				toolCalls = append(toolCalls, provider.ToolCall{
 					ID:   b.ID,
@@ -66,6 +79,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 					Role:         provider.RoleTool,
 					Content:      b.Content,
 					ToolCallID:   b.ToolUseID,
+					ToolName:     b.ToolName,
 					CacheControl: b.CacheControl,
 				})
 			case *ImageBlock:
@@ -101,8 +115,8 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 					msgCacheControl = b.CacheControl
 				}
 			default:
-				// 未来未知类型
-				log.Printf("[bamboo] dropped unknown content block type: %s", b.BlockType())
+				// 未知的 ContentBlock 类型，记录详细信息以便排查
+				log.Printf("[bamboo] warning: dropped unsupported content block type %q (implement %T in messagesToProvider to support it)", b.BlockType(), b)
 			}
 		}
 
@@ -111,13 +125,15 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		}
 
 		content := textBuilder.String()
-		if content != "" || len(toolCalls) > 0 || len(contentBlocks) > 0 {
+		if content != "" || len(toolCalls) > 0 || len(contentBlocks) > 0 || thinkingContent != "" {
 			result = append(result, provider.Message{
-				Role:          providerRole(msg.Role),
-				Content:       content,
-				ContentBlocks: contentBlocks,
-				ToolCalls:     toolCalls,
-				CacheControl:  msgCacheControl,
+				Role:              providerRole(msg.Role),
+				Content:           content,
+				ContentBlocks:     contentBlocks,
+				ThinkingContent:   thinkingContent,
+				ThinkingSignature: thinkingSignature,
+				ToolCalls:         toolCalls,
+				CacheControl:      msgCacheControl,
 			})
 		}
 		result = append(result, toolResults...)
@@ -125,13 +141,23 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 	return result, nil
 }
 
+// providerRole 将 bamboo.MessageRole 转换为 provider.MessageRole。
+//
+// 已知角色直接映射；"system" 角色记录警告并降级为 user（应通过 system 参数传递）；
+// 其他未知角色记录警告并降级为 user。
 func providerRole(role MessageRole) provider.MessageRole {
 	switch role {
 	case RoleUser:
 		return provider.RoleUser
 	case RoleAssistant:
 		return provider.RoleAssistant
+	case "system":
+		// system 角色应通过 Chat/Complete 的 system 参数传递，而非消息角色。
+		// 此处记录警告并降级为 user 角色，避免请求被拒绝。
+		log.Printf(`[bamboo] warning: message role "system" should use the system parameter instead, falling back to "user"`)
+		return provider.RoleUser
 	default:
+		log.Printf("[bamboo] warning: unknown message role %q, falling back to \"user\"", role)
 		return provider.RoleUser
 	}
 }
@@ -208,11 +234,15 @@ func buildParameters(schema json.RawMessage) map[string]any {
 //
 // 生成唯一的 ID 和 RequestID，填充 Type / Role / StopReason / Usage /
 // ProviderType / CreatedAt 等字段，将工具调用转换为 ToolUse 类型的 ContentBlock。
+// 若 result 包含 Thinking 内容，会生成 ThinkingBlock 放在 Content 最前面。
 func resultToResponse(result *provider.CompletionResult, providerType string) *Response {
 	if result == nil {
 		return nil
 	}
 	var content []ContentBlock
+	if result.Thinking != "" {
+		content = append(content, NewThinkingBlock(result.Thinking, ""))
+	}
 	if result.Content != "" {
 		content = append(content, NewTextBlock(result.Content))
 	}
@@ -254,6 +284,7 @@ type StreamConverter struct {
 	started              bool
 	textBlockStarted     bool
 	thinkingBlockStarted bool
+	finishReason         FinishReason
 }
 
 func NewStreamConverter() *StreamConverter { return &StreamConverter{} }
@@ -269,6 +300,8 @@ func (sc *StreamConverter) Convert(event provider.StreamEvent) []StreamEvent {
 	case provider.StreamTypeDelta:
 		return sc.handleDelta(event.Delta)
 	case provider.StreamTypeStop:
+		// 记录适配器提供的完成原因，供 handleStop 使用
+		sc.finishReason = mapFinishReason(event.FinishReason)
 		return sc.handleStop()
 	case provider.StreamTypeDone:
 		return nil
@@ -294,7 +327,10 @@ func (sc *StreamConverter) handleStart() []StreamEvent {
 func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []StreamEvent {
 	switch delta.Type {
 	case provider.StreamDeltaTypeBlockStart:
-		data := delta.Data.(provider.BlockStartData)
+		data, ok := delta.Data.(provider.BlockStartData)
+		if !ok {
+			return nil
+		}
 		if data.BlockType == "text" {
 			sc.textBlockStarted = true
 		}
@@ -332,10 +368,14 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 				ContentBlock: tb,
 			})
 		}
+		textData, ok := delta.Data.(provider.TextData)
+		if !ok {
+			return events
+		}
 		events = append(events, StreamEvent{
 			Type:  EventContentBlockDelta,
 			Index: sc.blockIndex,
-			Delta: &StreamDelta{Type: DeltaTextDelta, Text: string(delta.Data.(provider.TextData))},
+			Delta: &StreamDelta{Type: DeltaTextDelta, Text: string(textData)},
 		})
 		return events
 	case provider.StreamDeltaTypeThinking:
@@ -349,14 +389,21 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 				ContentBlock: thb,
 			})
 		}
+		thinkingData, ok := delta.Data.(provider.ThinkingData)
+		if !ok {
+			return events
+		}
 		events = append(events, StreamEvent{
 			Type:  EventContentBlockDelta,
 			Index: sc.blockIndex,
-			Delta: &StreamDelta{Type: DeltaThinkingDelta, Thinking: string(delta.Data.(provider.ThinkingData))},
+			Delta: &StreamDelta{Type: DeltaThinkingDelta, Thinking: string(thinkingData)},
 		})
 		return events
 	case provider.StreamDeltaTypeToolCall:
-		data := delta.Data.(provider.ToolCallData)
+		data, ok := delta.Data.(provider.ToolCallData)
+		if !ok {
+			return nil
+		}
 		stopIdx := sc.blockIndex
 		sc.blockIndex++
 		tub := NewToolUseBlock(data.ID, data.Name, nil)
@@ -369,13 +416,20 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 			},
 		}
 	case provider.StreamDeltaTypeToolCallDelta:
+		tcdData, ok := delta.Data.(provider.ToolCallDeltaData)
+		if !ok {
+			return nil
+		}
 		return []StreamEvent{{
 			Type:  EventContentBlockDelta,
 			Index: sc.blockIndex,
-			Delta: &StreamDelta{Type: DeltaInputJSON, PartialJSON: string(delta.Data.(provider.ToolCallDeltaData))},
+			Delta: &StreamDelta{Type: DeltaInputJSON, PartialJSON: string(tcdData)},
 		}}
 	case provider.StreamDeltaTypeUsage:
-		data := delta.Data.(provider.UsageData)
+		data, ok := delta.Data.(provider.UsageData)
+		if !ok {
+			return nil
+		}
 		sc.usage = &Usage{
 			InputTokens:              data.InputTokens,
 			OutputTokens:             data.OutputTokens,
@@ -393,9 +447,14 @@ func (sc *StreamConverter) handleStop() []StreamEvent {
 	if usage == nil {
 		usage = &Usage{}
 	}
+	// 使用适配器提供的完成原因，若未提供则默认为 FinishReasonEndTurn
+	stopReason := sc.finishReason
+	if stopReason == "" {
+		stopReason = FinishReasonEndTurn
+	}
 	return []StreamEvent{
 		{Type: EventContentBlockStop, Index: sc.blockIndex},
-		{Type: EventMessageDelta, Delta: &MessageDelta{StopReason: FinishReasonEndTurn}, Usage: usage},
+		{Type: EventMessageDelta, Delta: &MessageDelta{StopReason: stopReason}, Usage: usage},
 		{Type: EventMessageStop},
 	}
 }

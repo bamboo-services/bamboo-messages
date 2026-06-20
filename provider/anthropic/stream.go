@@ -13,7 +13,8 @@ import (
 //
 // 将 Anthropic SSE 事件类型映射到内部处理函数：
 // message_start → contentMessageStart, content_block_start → contentBlockStart 等。
-func (p *Provider) handleStreamEvent(event anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
+// finishReason 用于跨事件追踪完成原因（message_delta 提取，message_stop 使用）。
+func (p *Provider) handleStreamEvent(event anthropic.BetaRawMessageStreamEventUnion, finishReason *provider.FinishReason) []provider.StreamEvent {
 	switch event.Type {
 	case "message_start":
 		return p.contentMessageStart(event)
@@ -24,9 +25,9 @@ func (p *Provider) handleStreamEvent(event anthropic.BetaRawMessageStreamEventUn
 	case "content_block_stop":
 		return p.contentBlockStop(event)
 	case "message_delta":
-		return p.contentMessageDelta(event)
+		return p.contentMessageDelta(event, finishReason)
 	case "message_stop":
-		return p.contentMessageStop(event)
+		return p.contentMessageStop(finishReason)
 	default:
 		return nil
 	}
@@ -44,7 +45,7 @@ func (p *Provider) contentMessageStart(_ anthropic.BetaRawMessageStreamEventUnio
 // contentBlockStart 处理内容块开始事件。
 //
 // 根据内容块类型发出对应的 BlockStart delta：
-// text → NewBlockStartDelta("text"), thinking → NewThinkingDelta, tool_use → NewToolCallDelta。
+// text → NewBlockStartDelta("text"), thinking → NewBlockStartDelta("thinking") + NewThinkingDelta, tool_use → NewToolCallDelta。
 func (p *Provider) contentBlockStart(event anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
 	block := event.AsContentBlockStart()
 	switch block.ContentBlock.Type {
@@ -54,10 +55,17 @@ func (p *Provider) contentBlockStart(event anthropic.BetaRawMessageStreamEventUn
 			Delta: provider.NewBlockStartDelta("text"),
 		}}
 	case "thinking":
-		return []provider.StreamEvent{{
+		events := []provider.StreamEvent{{
 			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewThinkingDelta(block.ContentBlock.Thinking),
+			Delta: provider.NewBlockStartDelta("thinking"),
 		}}
+		if block.ContentBlock.Thinking != "" {
+			events = append(events, provider.StreamEvent{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewThinkingDelta(block.ContentBlock.Thinking),
+			})
+		}
+		return events
 	case "tool_use":
 		return []provider.StreamEvent{{
 			Type:  provider.StreamTypeDelta,
@@ -103,12 +111,18 @@ func (p *Provider) contentBlockStop(_ anthropic.BetaRawMessageStreamEventUnion) 
 	return nil
 }
 
-// contentMessageDelta 处理消息增量事件（包含 usage）。
+// contentMessageDelta 处理消息增量事件（包含 usage 和 stop_reason）。
 //
-// Anthropic message_delta 事件携带 Token 用量统计，
-// 发送 NewUsageDelta。
-func (p *Provider) contentMessageDelta(event anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
+// Anthropic message_delta 事件携带 Token 用量统计和停止原因，
+// 发送 NewUsageDelta 并提取 stop_reason 供后续 contentMessageStop 使用。
+func (p *Provider) contentMessageDelta(event anthropic.BetaRawMessageStreamEventUnion, finishReason *provider.FinishReason) []provider.StreamEvent {
 	msgDelta := event.AsMessageDelta()
+
+	// 提取 stop_reason 供 contentMessageStop 使用
+	if msgDelta.Delta.StopReason != "" {
+		*finishReason = mapFinishReason(msgDelta.Delta.StopReason)
+	}
+
 	if msgDelta.Usage.InputTokens > 0 || msgDelta.Usage.OutputTokens > 0 {
 		return []provider.StreamEvent{{
 			Type: provider.StreamTypeDelta,
@@ -125,9 +139,10 @@ func (p *Provider) contentMessageDelta(event anthropic.BetaRawMessageStreamEvent
 
 // contentMessageStop 处理消息结束事件。
 //
-// Anthropic message_stop 事件，发送 StreamTypeStop。
-func (p *Provider) contentMessageStop(_ anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
+// Anthropic message_stop 事件，发送 StreamTypeStop 并携带从 message_delta 提取的完成原因。
+func (p *Provider) contentMessageStop(finishReason *provider.FinishReason) []provider.StreamEvent {
 	return []provider.StreamEvent{{
-		Type: provider.StreamTypeStop,
+		Type:         provider.StreamTypeStop,
+		FinishReason: *finishReason,
 	}}
 }

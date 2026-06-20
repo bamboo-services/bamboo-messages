@@ -55,6 +55,14 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 		},
 	}
 
+	// 提取 reasoning_content（从 ExtraFields）
+	if field, ok := choice.Message.JSON.ExtraFields["reasoning_content"]; ok && field.Raw() != "" {
+		var reasoning string
+		if err := json.Unmarshal([]byte(field.Raw()), &reasoning); err == nil && reasoning != "" {
+			result.Thinking = reasoning
+		}
+	}
+
 	// 解析工具调用
 	for _, tc := range choice.Message.ToolCalls {
 		result.ToolCalls = append(result.ToolCalls, provider.ToolCall{

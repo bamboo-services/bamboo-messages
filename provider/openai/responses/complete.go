@@ -50,6 +50,13 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 					result.Content += content.Text
 				}
 			}
+		case "reasoning":
+			rc := item.AsReasoning()
+			for _, content := range rc.Content {
+				if content.Text != "" {
+					result.Thinking += content.Text
+				}
+			}
 		case "function_call":
 			fc := item.AsFunctionCall()
 			result.ToolCalls = append(result.ToolCalls, provider.ToolCall{
@@ -65,7 +72,11 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 
 	// 设置完成原因
 	if response.Status == "incomplete" {
-		result.FinishReason = provider.FinishReasonLength
+		if len(result.ToolCalls) > 0 {
+			result.FinishReason = provider.FinishReasonToolCalls
+		} else {
+			result.FinishReason = provider.FinishReasonLength
+		}
 	} else if len(result.ToolCalls) > 0 {
 		result.FinishReason = provider.FinishReasonToolCalls
 	} else {

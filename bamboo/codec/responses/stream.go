@@ -302,6 +302,11 @@ func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamE
 			Delta:       delta.PartialJSON,
 		}
 		return s.marshalSSE("response.function_call_arguments.delta", ev)
+
+	case bamboo.DeltaSignature:
+		// signature_delta 为 Anthropic Extended Thinking 特有的签名增量，
+		// OpenAI Responses 协议无对应字段，跨协议转换时丢弃。
+		return nil, nil
 	}
 
 	return nil, nil
@@ -355,6 +360,8 @@ func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 			InputTokens:  event.Usage.InputTokens,
 			OutputTokens: event.Usage.OutputTokens,
 		}
+		// Responses 无原生 cache_creation_input_tokens 字段，仅映射 CacheReadInputTokens 到 cached_tokens。
+		// CacheCreationInputTokens 在跨协议转换中会丢失，此为已知限制。
 		if event.Usage.CacheCreationInputTokens > 0 || event.Usage.CacheReadInputTokens > 0 {
 			u.InputTokensDetails = &responsesInputTokensDet{
 				CachedTokens: event.Usage.CacheReadInputTokens,

@@ -45,9 +45,12 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 		stream := p.Client.Beta.Messages.NewStreaming(ctx, params)
 		defer stream.Close()
 
+		// 追踪完成原因，从 message_delta 提取，供 message_stop 使用
+		var finishReason provider.FinishReason
+
 		for stream.Next() {
 			event := stream.Current()
-			events := p.handleStreamEvent(event)
+			events := p.handleStreamEvent(event, &finishReason)
 			for _, e := range events {
 				select {
 				case eventCh <- e:

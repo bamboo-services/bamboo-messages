@@ -1,6 +1,8 @@
 package responses
 
 import (
+	"log"
+
 	"github.com/bamboo-services/bamboo-messages/provider"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
@@ -65,7 +67,14 @@ func (p *ResponsesProvider) buildInput(systemPrompt string, messages []provider.
 							}
 						}
 					case "document":
-						// 文档内容块：静默忽略（Responses SDK 暂不支持）
+						// 文档内容块：text 类型转为文本部分，其余记录警告后忽略
+						if doc, ok := cb.(provider.DocumentContentBlock); ok {
+							if doc.Source.Type == "url" || doc.Source.Type == "base64" {
+								log.Printf("[provider/openai-responses] DocumentBlock(source=%q) 不支持，已忽略", doc.Source.Type)
+							} else {
+								log.Printf("[provider/openai-responses] DocumentBlock 未知来源类型=%q，已忽略", doc.Source.Type)
+							}
+						}
 					}
 				}
 

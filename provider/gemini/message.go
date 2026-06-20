@@ -92,9 +92,12 @@ func (p *Provider) buildAssistantMessage(msg provider.Message) *genai.Content {
 // buildToolMessage 构建工具响应消息 Content。
 //
 // Gemini 要求 FunctionResponse 放在 user 角色的 Content 中。
-// tool name 通过 ToolCallID 反查；若上层未提供 name，使用 fallback。
+// 优先使用 ToolName（函数名），回退到 ToolCallID；两者都为空时使用 fallback。
 func (p *Provider) buildToolMessage(msg provider.Message) *genai.Content {
-	name := msg.ToolCallID
+	name := msg.ToolName
+	if name == "" {
+		name = msg.ToolCallID
+	}
 	if name == "" {
 		name = "tool_response"
 	}
@@ -102,7 +105,16 @@ func (p *Provider) buildToolMessage(msg provider.Message) *genai.Content {
 	if msg.IsError {
 		response["error"] = msg.Content
 	}
-	return genai.NewContentFromFunctionResponse(name, response, "user")
+	return &genai.Content{
+		Parts: []*genai.Part{{
+			FunctionResponse: &genai.FunctionResponse{
+				ID:       msg.ToolCallID,
+				Name:     name,
+				Response: response,
+			},
+		}},
+		Role: "user",
+	}
 }
 
 // buildImagePart 构建 image Part。

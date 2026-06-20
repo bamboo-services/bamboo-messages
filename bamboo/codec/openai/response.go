@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"log"
 	"strings"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
@@ -24,8 +25,10 @@ type openaiChoice struct {
 }
 
 type openaiMsgOut struct {
-	Role             string          `json:"role"`
-	Content          *string         `json:"content"`
+	Role    string          `json:"role"`
+	Content *string         `json:"content"`
+	// ReasoningContent 思考/推理内容。
+	// 注意：此字段为 DeepSeek/vLLM 兼容性扩展，非官方 OpenAI Chat Completions 规范字段。
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
 	ToolCalls        []openaiToolOut `json:"tool_calls,omitempty"`
 }
@@ -83,6 +86,15 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 					Arguments: args,
 				},
 			})
+		case *bamboo.ImageBlock:
+			// OpenAI Chat Completions 响应中不支持图片内容块，记录警告并跳过
+			log.Printf("[codec/openai] warning: ImageBlock in assistant response is non-standard, skipped")
+		case *bamboo.DocumentBlock:
+			// OpenAI Chat Completions 响应中不支持文档内容块，记录警告并跳过
+			log.Printf("[codec/openai] warning: DocumentBlock in assistant response is non-standard, skipped")
+		case *bamboo.ToolResultBlock:
+			// ToolResultBlock 不应出现在 assistant 响应中，记录警告并跳过
+			log.Printf("[codec/openai] warning: ToolResultBlock should not appear in assistant response, skipped (tool_use_id=%s)", b.ToolUseID)
 		}
 	}
 
@@ -114,6 +126,8 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 		CompletionTokens: completionTokens,
 		TotalTokens:      promptTokens + completionTokens,
 	}
+	// OpenAI 无原生 cache_creation_input_tokens 字段，仅映射 CacheReadInputTokens 到 cached_tokens。
+	// CacheCreationInputTokens 在跨协议转换中会丢失，此为已知限制。
 	if resp.Usage.CacheCreationInputTokens > 0 || resp.Usage.CacheReadInputTokens > 0 {
 		usage.PromptTokensDetails = &openaiPromptTokensDet{
 			CachedTokens: resp.Usage.CacheReadInputTokens,

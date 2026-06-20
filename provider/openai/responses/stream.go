@@ -142,14 +142,16 @@ func (p *ResponsesProvider) contentFunctionCallDone(_ responses.ResponseStreamEv
 	return nil
 }
 
-// contentResponseCompleted 处理响应完成事件（包含 usage）。
+// contentResponseCompleted 处理响应完成事件（包含 usage 和 stop 事件）。
 //
-// 当 OpenAI 响应完成时触发，提取 Token 用量信息并返回 UsageDelta 事件。
+// 当 OpenAI 响应完成时触发，提取 Token 用量信息并返回 UsageDelta 和 StreamTypeStop 事件。
 func (p *ResponsesProvider) contentResponseCompleted(event responses.ResponseStreamEventUnion) []provider.StreamEvent {
 	e := event.AsResponseCompleted()
 	usage := e.Response.Usage
+	var events []provider.StreamEvent
+
 	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
-		return []provider.StreamEvent{{
+		events = append(events, provider.StreamEvent{
 			Type: provider.StreamTypeDelta,
 			Delta: provider.NewUsageDeltaWithCache(
 				usage.InputTokens,
@@ -157,9 +159,16 @@ func (p *ResponsesProvider) contentResponseCompleted(event responses.ResponseStr
 				0,
 				usage.InputTokensDetails.CachedTokens,
 			),
-		}}
+		})
 	}
-	return nil
+
+	// 发送 StreamTypeStop 并携带完成原因
+	events = append(events, provider.StreamEvent{
+		Type:         provider.StreamTypeStop,
+		FinishReason: mapResponseFinishReason(e.Response),
+	})
+
+	return events
 }
 
 // contentResponseFailed 处理响应失败事件。
@@ -180,9 +189,37 @@ func (p *ResponsesProvider) contentResponseFailed(ctx context.Context, event res
 // contentResponseIncomplete 处理响应未完成事件。
 //
 // 当响应因长度限制等原因未完成时触发，发送停止事件结束流。
-func (p *ResponsesProvider) contentResponseIncomplete(_ responses.ResponseStreamEventUnion) []provider.StreamEvent {
-	// 响应未完成，发送停止事件
+func (p *ResponsesProvider) contentResponseIncomplete(event responses.ResponseStreamEventUnion) []provider.StreamEvent {
+	e := event.AsResponseIncomplete()
+	// 响应未完成，发送停止事件并携带完成原因
 	return []provider.StreamEvent{{
-		Type: provider.StreamTypeStop,
+		Type:         provider.StreamTypeStop,
+		FinishReason: mapResponseFinishReason(e.Response),
 	}}
+}
+
+// mapResponseFinishReason 根据 OpenAI Responses 状态和输出推断完成原因。
+//
+// incomplete 状态：有 function_call 输出时为 ToolCalls，否则为 Length；
+// 其他状态：有 function_call 输出时为 ToolCalls，否则为 Stop。
+func mapResponseFinishReason(response responses.Response) provider.FinishReason {
+	hasToolCalls := false
+	for _, item := range response.Output {
+		if item.Type == "function_call" {
+			hasToolCalls = true
+			break
+		}
+	}
+
+	if response.Status == responses.ResponseStatusIncomplete {
+		if hasToolCalls {
+			return provider.FinishReasonToolCalls
+		}
+		return provider.FinishReasonLength
+	}
+
+	if hasToolCalls {
+		return provider.FinishReasonToolCalls
+	}
+	return provider.FinishReasonStop
 }

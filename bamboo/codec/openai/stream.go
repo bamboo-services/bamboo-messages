@@ -32,8 +32,10 @@ type openaiDelta struct {
 }
 
 type openaiDeltaMsg struct {
-	Role             string          `json:"role,omitempty"`
-	Content          string          `json:"content,omitempty"`
+	Role    string          `json:"role,omitempty"`
+	Content string          `json:"content,omitempty"`
+	// ReasoningContent 思考/推理内容增量。
+	// 注意：此字段为 DeepSeek/vLLM 兼容性扩展，非官方 OpenAI Chat Completions 规范字段。
 	ReasoningContent string          `json:"reasoning_content,omitempty"`
 	ToolCalls        []openaiDeltaTC `json:"tool_calls,omitempty"`
 }
@@ -216,6 +218,11 @@ func (s *openaiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 			}},
 		}
 		return s.marshalChunk(chunk)
+
+	case bamboo.DeltaSignature:
+		// signature_delta 为 Anthropic Extended Thinking 特有的签名增量，
+		// OpenAI Chat Completions 协议无对应字段，跨协议转换时丢弃。
+		return nil, nil
 	}
 
 	return nil, nil
@@ -246,6 +253,8 @@ func (s *openaiStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([
 			CompletionTokens: event.Usage.OutputTokens,
 			TotalTokens:      event.Usage.InputTokens + event.Usage.OutputTokens,
 		}
+		// OpenAI 无原生 cache_creation_input_tokens 字段，仅映射 CacheReadInputTokens 到 cached_tokens。
+		// CacheCreationInputTokens 在跨协议转换中会丢失，此为已知限制。
 		if event.Usage.CacheCreationInputTokens > 0 || event.Usage.CacheReadInputTokens > 0 {
 			usage.PromptTokensDetails = &openaiPromptTokensDet{
 				CachedTokens: event.Usage.CacheReadInputTokens,

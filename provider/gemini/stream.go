@@ -55,7 +55,8 @@ func (p *Provider) handleCandidate(candidate *genai.Candidate, textBlockStarted 
 	// 处理 FinishReason — 非空表示生成结束
 	if candidate.FinishReason != "" && candidate.FinishReason != genai.FinishReasonUnspecified {
 		events = append(events, provider.StreamEvent{
-			Type: provider.StreamTypeStop,
+			Type:         provider.StreamTypeStop,
+			FinishReason: mapFinishReason(candidate.FinishReason),
 		})
 	}
 
@@ -104,11 +105,9 @@ func (p *Provider) handlePart(part *genai.Part, textBlockStarted *bool, thinking
 	}
 
 	// 工具调用（FunctionCall）
+	// 不发送 BlockStartDelta，由 StreamConverter 的 ToolCall 处理自动管理 block 生命周期。
+	// 与 Anthropic/OpenAI 适配器保持一致：仅发送 ToolCallDelta + ToolCallDeltaData。
 	if part.FunctionCall != nil {
-		events = append(events, provider.StreamEvent{
-			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewBlockStartDeltaWithID("tool_use", part.FunctionCall.ID, part.FunctionCall.Name),
-		})
 		events = append(events, provider.StreamEvent{
 			Type:  provider.StreamTypeDelta,
 			Delta: provider.NewToolCallDelta(part.FunctionCall.ID, part.FunctionCall.Name),

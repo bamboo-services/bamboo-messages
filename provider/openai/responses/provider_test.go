@@ -214,11 +214,16 @@ func TestResponsesProvider_handleStreamEvent(t *testing.T) {
 		{
 			name:     "response.completed with usage",
 			rawJSON:  `{"type":"response.completed","response":{"id":"resp_01","object":"response","created_at":1743000000,"status":"completed","model":"gpt-4o","output":[],"usage":{"input_tokens":100,"output_tokens":50,"total_tokens":150}}}`,
-			wantLen:  1,
+			wantLen:  2,
 			wantType: provider.StreamTypeDelta,
 			check: func(t *testing.T, events []provider.StreamEvent) {
+				// 第一个事件为 UsageDelta
 				if events[0].Delta.Type != provider.StreamDeltaTypeUsage {
 					t.Errorf("expected usage delta, got %v", events[0].Delta.Type)
+				}
+				// 第二个事件为 StreamTypeStop
+				if events[1].Type != provider.StreamTypeStop {
+					t.Errorf("expected stop event, got %v", events[1].Type)
 				}
 			},
 		},

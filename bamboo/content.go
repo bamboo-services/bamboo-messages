@@ -95,6 +95,7 @@ func (b ToolUseBlock) BlockType() ContentBlockType { return ContentBlockToolUse 
 type ToolResultBlock struct {
 	Type         ContentBlockType       `json:"type"`
 	ToolUseID    string                 `json:"tool_use_id,omitempty"`
+	ToolName     string                 `json:"tool_name,omitempty"`
 	Content      string                 `json:"content,omitempty"`
 	IsError      bool                   `json:"is_error,omitempty"`
 	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`

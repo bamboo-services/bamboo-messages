@@ -135,7 +135,7 @@ func TestSerializeResponse_FunctionCall(t *testing.T) {
 	}
 }
 
-func TestSerializeResponse_ThinkingBlock_Ignored(t *testing.T) {
+func TestSerializeResponse_ThinkingBlock_Serialized(t *testing.T) {
 	resp := &bamboo.Response{
 		ID:         "resp-789",
 		Model:      "gemini-2.5-pro",
@@ -158,12 +158,23 @@ func TestSerializeResponse_ThinkingBlock_Ignored(t *testing.T) {
 	}
 
 	parts := out.Candidates[0].Content.Parts
-	// thinking should be ignored, only text remains
-	if len(parts) != 1 {
-		t.Fatalf("Parts len = %d, want 1 (thinking ignored)", len(parts))
+	// Fix: thinking should now be serialized as {text, thought: true}
+	if len(parts) != 2 {
+		t.Fatalf("Parts len = %d, want 2 (thinking + text)", len(parts))
 	}
-	if parts[0].Text != "answer" {
-		t.Errorf("text = %q", parts[0].Text)
+	// thinking part
+	if parts[0].Text != "thinking content" {
+		t.Errorf("parts[0].text = %q, want 'thinking content'", parts[0].Text)
+	}
+	if !parts[0].Thought {
+		t.Errorf("parts[0].thought = false, want true")
+	}
+	// text part
+	if parts[1].Text != "answer" {
+		t.Errorf("parts[1].text = %q, want 'answer'", parts[1].Text)
+	}
+	if parts[1].Thought {
+		t.Errorf("parts[1].thought = true, want false")
 	}
 }
 

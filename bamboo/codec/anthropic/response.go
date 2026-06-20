@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"encoding/json"
+	"log"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 )
@@ -113,6 +114,26 @@ func serializeContentBlock(block bamboo.ContentBlock) (json.RawMessage, error) {
 				"url":        b.Source.URL,
 			},
 		})
+
+	case *bamboo.DocumentBlock:
+		if b.Source == nil {
+			return nil, nil
+		}
+		return json.Marshal(map[string]any{
+			"type": "document",
+			"source": map[string]any{
+				"type":       b.Source.Type,
+				"media_type": b.Source.MediaType,
+				"data":       b.Source.Data,
+				"url":        b.Source.URL,
+				"content":    b.Source.Content,
+			},
+		})
+
+	case *bamboo.ToolResultBlock:
+		// ToolResultBlock 不应出现在 assistant 响应中，记录警告并跳过
+		log.Printf("[codec/anthropic] warning: ToolResultBlock should not appear in assistant response, skipped (tool_use_id=%s)", b.ToolUseID)
+		return nil, nil
 	}
 	return nil, nil
 }

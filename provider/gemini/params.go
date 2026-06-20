@@ -1,6 +1,9 @@
 package gemini
 
 import (
+	"log"
+	"math"
+
 	"github.com/bamboo-services/bamboo-messages/provider"
 	"google.golang.org/genai"
 )
@@ -33,9 +36,13 @@ func (p *Provider) buildContentConfig(systemPrompt string, config *provider.Chat
 		gc.TopP = &topP
 	}
 
-	// MaxTokens
+	// MaxTokens（溢出保护：超过 int32 最大值时截断）
 	if config.MaxTokens > 0 {
-		gc.MaxOutputTokens = int32(config.MaxTokens)
+		if config.MaxTokens > math.MaxInt32 {
+			gc.MaxOutputTokens = math.MaxInt32
+		} else {
+			gc.MaxOutputTokens = int32(config.MaxTokens)
+		}
 	}
 
 	// Stop sequences
@@ -81,6 +88,22 @@ func (p *Provider) buildContentConfig(systemPrompt string, config *provider.Chat
 	// Labels（元数据）
 	if len(config.Metadata) > 0 {
 		gc.Labels = config.Metadata
+	}
+
+	// UserID — Gemini 无原生 UserID 字段，best-effort 存入 Labels
+	if config.UserID != "" {
+		if gc.Labels == nil {
+			gc.Labels = make(map[string]string)
+		}
+		gc.Labels["user_id"] = config.UserID
+		if provider.DebugEnabled {
+			log.Printf("[provider/gemini] UserID=%q 已映射到 Labels[user_id]（Gemini 无原生 UserID 支持）", config.UserID)
+		}
+	}
+
+	// ParallelToolCalls — Gemini 不支持此参数，记录 debug 日志
+	if config.ParallelToolCalls && provider.DebugEnabled {
+		log.Printf("[provider/gemini] ParallelToolCalls=true 不被 Gemini 协议支持，已忽略")
 	}
 
 	// CachedContent — Gemini 外部缓存资源引用（从 ProviderExtra 提取）

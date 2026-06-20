@@ -74,8 +74,11 @@ type inputItem struct {
 
 // inputContent input message 的 content 元素。
 type inputContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL string `json:"image_url,omitempty"` // input_image 专用
+	FileID   string `json:"file_id,omitempty"`   // input_file 专用（file ID 引用）
+	FileData string `json:"file_data,omitempty"` // input_file 专用（base64 数据）
 }
 
 // parseRequest 将 OpenAI Responses 请求体解析为 RelayRequest。
@@ -157,9 +160,25 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 		extra["truncation"] = req.Truncation
 	}
 	if len(req.Metadata) > 0 {
-		var meta any
-		if err := json.Unmarshal(req.Metadata, &meta); err == nil {
-			extra["metadata"] = meta
+		var metaMap map[string]any
+		if err := json.Unmarshal(req.Metadata, &metaMap); err == nil {
+			// 检查是否所有值都是 string，如果是则存入 config.Metadata
+			allStrings := true
+			stringMeta := make(map[string]string, len(metaMap))
+			for k, v := range metaMap {
+				if s, ok := v.(string); ok {
+					stringMeta[k] = s
+				} else {
+					allStrings = false
+					break
+				}
+			}
+			if allStrings && len(stringMeta) > 0 {
+				config.Metadata = stringMeta
+			} else {
+				// 混合类型回退到 ProviderExtra
+				extra["metadata"] = metaMap
+			}
 		}
 	}
 	if len(extra) > 0 {
@@ -273,8 +292,30 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 	case "assistant":
 		var blocks []bamboo.ContentBlock
 		for _, p := range parts {
-			if p.Text != "" {
-				blocks = append(blocks, bamboo.NewTextBlock(p.Text))
+			switch p.Type {
+			case "input_image":
+				if p.ImageURL != "" {
+					blocks = append(blocks, bamboo.NewImageBlock(bamboo.ContentSource{
+						Type: "url",
+						URL:  p.ImageURL,
+					}))
+				}
+			case "input_file":
+				if p.FileID != "" {
+					blocks = append(blocks, bamboo.NewDocumentBlock(bamboo.ContentSource{
+						Type: "url",
+						URL:  p.FileID,
+					}))
+				} else if p.FileData != "" {
+					blocks = append(blocks, bamboo.NewDocumentBlock(bamboo.ContentSource{
+						Type: "base64",
+						Data: p.FileData,
+					}))
+				}
+			default:
+				if p.Text != "" {
+					blocks = append(blocks, bamboo.NewTextBlock(p.Text))
+				}
 			}
 		}
 		if len(blocks) == 0 {
@@ -285,8 +326,30 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 	default: // user 或未知角色都按 user 处理
 		var blocks []bamboo.ContentBlock
 		for _, p := range parts {
-			if p.Text != "" {
-				blocks = append(blocks, bamboo.NewTextBlock(p.Text))
+			switch p.Type {
+			case "input_image":
+				if p.ImageURL != "" {
+					blocks = append(blocks, bamboo.NewImageBlock(bamboo.ContentSource{
+						Type: "url",
+						URL:  p.ImageURL,
+					}))
+				}
+			case "input_file":
+				if p.FileID != "" {
+					blocks = append(blocks, bamboo.NewDocumentBlock(bamboo.ContentSource{
+						Type: "url",
+						URL:  p.FileID,
+					}))
+				} else if p.FileData != "" {
+					blocks = append(blocks, bamboo.NewDocumentBlock(bamboo.ContentSource{
+						Type: "base64",
+						Data: p.FileData,
+					}))
+				}
+			default:
+				if p.Text != "" {
+					blocks = append(blocks, bamboo.NewTextBlock(p.Text))
+				}
 			}
 		}
 		if len(blocks) == 0 {

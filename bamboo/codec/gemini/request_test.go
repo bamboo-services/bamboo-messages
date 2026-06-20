@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
+	"google.golang.org/genai"
 )
 
 // helper: 将 BambooMessage 的 Content 转为具体类型方便断言
@@ -349,7 +350,7 @@ func TestParseRequest_InvalidJSON(t *testing.T) {
 func TestParseRequest_SafetySettings_Transparent(t *testing.T) {
 	body := `{
 		"contents": [{"role":"user","parts":[{"text":"hi"}]}],
-		"safetySettings": [{"category":"HARM_CATEGORY","threshold":"BLOCK_ONLY_HIGH"}]
+		"safetySettings": [{"category":"HARM_CATEGORY_DANGEROUS_CONTENT","threshold":"BLOCK_ONLY_HIGH"}]
 	}`
 	req, err := parseRequest([]byte(body))
 	if err != nil {
@@ -362,8 +363,14 @@ func TestParseRequest_SafetySettings_Transparent(t *testing.T) {
 	if !ok {
 		t.Fatal("safety_settings not in ProviderExtra")
 	}
-	// safety_settings 应该是原始 JSON 反序列化后的值
-	_ = ss // 类型检查在序列化时完成
+	// safety_settings 现在应该是 []*genai.SafetySetting 类型
+	settings, ok := ss.([]*genai.SafetySetting)
+	if !ok {
+		t.Fatalf("safety_settings type = %T, want []*genai.SafetySetting", ss)
+	}
+	if len(settings) != 1 {
+		t.Fatalf("settings count = %d, want 1", len(settings))
+	}
 }
 
 func TestParseRequest_EmptyContents(t *testing.T) {

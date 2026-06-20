@@ -1,6 +1,8 @@
 package anthropic
 
 import (
+	"log"
+
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -86,6 +88,31 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 			}
 			params.Metadata.SetExtraFields(extra)
 		}
+	}
+
+	// ResponseFormat — Anthropic 不原生支持 ResponseFormat，
+	// 当设置为 "json_object" 时注入系统提示指令作为 best-effort 适配。
+	if config.ResponseFormat == "json_object" {
+		instruction := "Respond with valid JSON only."
+		if systemPrompt != "" {
+			systemPrompt = systemPrompt + "\n\n" + instruction
+		} else {
+			systemPrompt = instruction
+		}
+		// 重新设置系统提示（含注入的 JSON 指令）
+		sysBlock := anthropic.BetaTextBlockParam{Text: systemPrompt}
+		if config.SystemCacheControl != nil {
+			sysBlock.CacheControl = toAnthropicCacheControl(config.SystemCacheControl)
+		}
+		params.System = []anthropic.BetaTextBlockParam{sysBlock}
+		if provider.DebugEnabled {
+			log.Printf("[provider/anthropic] ResponseFormat=%q 不被原生支持，已注入系统提示指令作为替代", config.ResponseFormat)
+		}
+	}
+
+	// ParallelToolCalls — Anthropic 不支持此参数，记录 debug 日志
+	if config.ParallelToolCalls && provider.DebugEnabled {
+		log.Printf("[provider/anthropic] ParallelToolCalls=true 不被 Anthropic 协议支持，已忽略")
 	}
 
 	return params

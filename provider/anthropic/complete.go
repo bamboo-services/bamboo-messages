@@ -53,6 +53,8 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 		switch block.Type {
 		case "text":
 			result.Content += block.AsText().Text
+		case "thinking":
+			result.Thinking += block.AsThinking().Thinking
 		case "tool_use":
 			toolUse := block.AsToolUse()
 			inputBytes, _ := json.Marshal(toolUse.Input)

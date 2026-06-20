@@ -2,6 +2,7 @@ package responses
 
 import (
 	"encoding/json"
+	"log"
 	"strings"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
@@ -83,6 +84,18 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 				Name:      b.Name,
 				Arguments: args,
 			})
+
+		case *bamboo.ImageBlock:
+			// OpenAI Responses 响应中不支持图片内容块，记录警告并跳过
+			log.Printf("[codec/responses] warning: ImageBlock in assistant response is non-standard, skipped")
+
+		case *bamboo.DocumentBlock:
+			// OpenAI Responses 响应中不支持文档内容块，记录警告并跳过
+			log.Printf("[codec/responses] warning: DocumentBlock in assistant response is non-standard, skipped")
+
+		case *bamboo.ToolResultBlock:
+			// ToolResultBlock 不应出现在 assistant 响应中，记录警告并跳过
+			log.Printf("[codec/responses] warning: ToolResultBlock should not appear in assistant response, skipped (tool_use_id=%s)", b.ToolUseID)
 		}
 	}
 
@@ -118,6 +131,8 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 		InputTokens:  resp.Usage.InputTokens,
 		OutputTokens: resp.Usage.OutputTokens,
 	}
+	// Responses 无原生 cache_creation_input_tokens 字段，仅映射 CacheReadInputTokens 到 cached_tokens。
+	// CacheCreationInputTokens 在跨协议转换中会丢失，此为已知限制。
 	if resp.Usage.CacheCreationInputTokens > 0 || resp.Usage.CacheReadInputTokens > 0 {
 		usage.InputTokensDetails = &responsesInputTokensDet{
 			CachedTokens: resp.Usage.CacheReadInputTokens,

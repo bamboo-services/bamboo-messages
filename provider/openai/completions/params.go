@@ -1,6 +1,9 @@
 package completions
 
 import (
+	"encoding/json"
+	"log"
+
 	"github.com/bamboo-services/bamboo-messages/provider"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
@@ -95,6 +98,22 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 	if pred, ok := provider.GetExtraAny(config.ProviderExtra, "prediction"); ok {
 		if prediction, ok := pred.(openai.ChatCompletionPredictionContentParam); ok {
 			params.Prediction = prediction
+		} else {
+			// 类型断言失败时，尝试通过 JSON marshal/unmarshal 做安全转换
+			if provider.DebugEnabled {
+				log.Printf("[provider/openai-completions] Prediction 类型断言失败，尝试 JSON 回退转换")
+			}
+			data, err := json.Marshal(pred)
+			if err == nil {
+				var prediction openai.ChatCompletionPredictionContentParam
+				if err := json.Unmarshal(data, &prediction); err == nil {
+					params.Prediction = prediction
+				} else if provider.DebugEnabled {
+					log.Printf("[provider/openai-completions] Prediction JSON 反序列化失败: %v", err)
+				}
+			} else if provider.DebugEnabled {
+				log.Printf("[provider/openai-completions] Prediction JSON 序列化失败: %v", err)
+			}
 		}
 	}
 
