@@ -17,10 +17,19 @@ bamboo/codec/
 │   ├── request.go          # ParseRequest: Anthropic JSON → RelayRequest
 │   ├── response.go         # SerializeResponse: bamboo.Response → Anthropic JSON
 │   ├── stream.go           # StreamSerializer: StreamEvent → Anthropic SSE 帧
-│   └── error.go            # SerializeError: error → Anthropic 错误 JSON
+│   ├── error.go            # SerializeError: error → Anthropic 错误 JSON
+│   ├── request_test.go     # 请求解析单元测试
+│   └── response_test.go    # 响应序列化单元测试
 ├── openai/                 # OpenAI Chat Completions 协议编解码（结构同 anthropic/）
+│   ├── codec.go / request.go / response.go / stream.go / error.go
+│   ├── request_test.go / response_test.go
+│   └── stream_test.go      # 流式序列化单元测试（SSE 帧生成）
 ├── responses/              # OpenAI Responses 协议编解码（结构同 anthropic/）
+│   ├── codec.go / request.go / response.go / stream.go / error.go
+│   └── request_test.go / response_test.go
 └── gemini/                 # Google Gemini 协议编解码（结构同 anthropic/）
+    ├── codec.go / request.go / response.go / stream.go / error.go
+    └── request_test.go
 ```
 
 ## 导航指南
@@ -36,6 +45,7 @@ bamboo/codec/
 | 修改 OpenAI 编解码 | `openai/` | 结构与 `anthropic/` 完全一致 |
 | 修改 Responses 编解码 | `responses/` | 结构与 `anthropic/` 完全一致 |
 | 修改 Gemini 编解码 | `gemini/` | 结构与 `anthropic/` 完全一致 |
+| 测试 OpenAI 流式序列化 | `openai/stream_test.go` | SSE 帧生成的单元测试 |
 
 ## 约定
 
@@ -59,6 +69,7 @@ bamboo/codec/
 3. 流式 SSE 帧错误 → 检查对应子包的 `stream.go` 的 `Serialize` 和 `Flush` 是否正确生成 SSE 数据帧
 4. `Get(format)` 返回 nil → 检查调用方是否 import 了对应格式的子包（触发 `init()` 注册）
 5. 错误响应格式不匹配 → 检查对应子包的 `error.go` 的 `serializeError` 输出
+6. 缓存字段未透传 → 检查 `request.go` 解析时是否提取了 `cache_control` 字段，`response.go` 序列化时是否输出 `cache_creation_input_tokens` / `cache_read_input_tokens`
 
 ## 引用
 

@@ -8,7 +8,7 @@ OpenAI Chat Completions 协议适配器，将 OpenAI Chat Completions API 转换
 
 ```text
 provider/openai/completions/
-├── provider.go              # Provider 构造函数 + Options 模式 + 类型别名 + legacyCompat 标志
+├── provider.go              # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithLegacyCompat/WithDebug) + legacyCompat 标志
 ├── params.go                # buildParams — 共享参数构建（含 Legacy 分支）
 ├── chat.go                  # 流式对话实现
 ├── complete.go              # 非流式对话实现
@@ -36,6 +36,7 @@ provider/openai/completions/
 | 修改工具定义转换 | `tools.go` | `buildTools` 和 `buildStop` 函数 |
 | 配置特有参数 | `option.go` | `WithFrequencyPenalty` / `WithPresencePenalty` / `WithSeed` / `WithPrediction` |
 | 测试 Legacy 兼容 | `legacy_compat_test.go` | max_tokens / parallel_tool_calls / reasoning_effort 差异测试 |
+| 启用 debug 日志 | `provider.go` | `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` |
 
 ## 约定
 
@@ -47,6 +48,7 @@ provider/openai/completions/
 - **Usage 流式返回** — 通过 `params.StreamOptions.IncludeUsage=true` 启用，在最后一个 chunk 中提取
 - **参数透传** — FrequencyPenalty / PresencePenalty / Seed / Prediction 通过 `OpenaiCompletionsOption` 设置，合并到 ProviderExtra 后透传；ToolChoice / ResponseFormat 通过 `ChatConfig` 类型化字段传递
 - **ReasoningEffort 映射** — `ThinkingConfig.Effort` → `shared.ReasoningEffort`（Legacy 模式跳过）
+- **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 
 ## 反模式
 
@@ -65,6 +67,7 @@ provider/openai/completions/
 5. Legacy 兼容失败 → 检查 `legacyCompat` 标志是否正确设置，max_tokens / parallel_tool_calls / reasoning_effort 行为是否符合预期
 6. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成 `ChatCompletionToolUnionParam`
 7. Usage 统计缺失 → 确认 `StreamOptions.IncludeUsage` 已设置
+8. 请求参数不确定 → 启用 `WithDebug()` 或设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
 
 ## 引用
 

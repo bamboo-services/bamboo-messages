@@ -8,7 +8,7 @@ OpenAI Responses 协议适配器，将 OpenAI Responses API 转换为统一的 `
 
 ```text
 provider/openai/responses/
-├── provider.go       # Provider 构造函数 + Options 模式 + 类型别名
+├── provider.go       # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithDebug) + 类型别名
 ├── params.go         # buildParams — 共享参数构建（Chat/Complete 统一入口）
 ├── chat.go           # 流式对话实现
 ├── complete.go       # 非流式对话实现
@@ -35,6 +35,7 @@ provider/openai/responses/
 | 修改工具定义转换 | `tools.go` | `buildTools` 函数 |
 | 配置特有参数 | `option.go` | `WithStore` / `WithModalities` / `WithPreviousResponseID` / `WithTruncation` |
 | 测试流式事件处理 | `stream_test.go` | reasoning_text.delta 相关测试 |
+| 启用 debug 日志 | `provider.go` | `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` |
 
 ## 约定
 
@@ -46,6 +47,7 @@ provider/openai/responses/
 - **ToolChoice 字符串模式** — 支持 `"auto"` / `"none"` / `"required"` 等值
 - **完成原因推断** — Responses 协议不直接提供 finish_reason，根据 `Status` 和是否有 ToolCalls 推断
 - **输入格式差异** — 使用 `ResponseInputItemUnionParam` 而非 `Message` 数组，支持更丰富的输入类型
+- **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 
 ## 反模式
 
@@ -64,6 +66,7 @@ provider/openai/responses/
 5. 响应格式不生效 → 检查 `ResponseFormat` 字符串值是否为 `"text"` 或 `"json_object"`
 6. 完成原因错误 → 检查 `complete.go` 中根据 `Status` 和 ToolCalls 推断的逻辑
 7. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成 `ToolUnionParam`
+8. 请求参数不确定 → 启用 `WithDebug()` 或设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
 
 ## 引用
 
