@@ -40,11 +40,11 @@ const (
 //   - "url": 远程 URL 地址
 //   - "text": 纯文本内容（仅文档类型使用 Content 字段）
 type ContentSource struct {
-	Type      string `json:"type"`                // 来源类型："base64" | "url" | "text"
+	Type      string `json:"type"`                 // 来源类型："base64" | "url" | "text"
 	MediaType string `json:"media_type,omitempty"` // MIME 类型，如 "image/png"、"application/pdf"
-	Data      string `json:"data,omitempty"`      // base64 编码的数据（Type 为 "base64" 时使用）
-	URL       string `json:"url,omitempty"`       // 远程资源地址（Type 为 "url" 时使用）
-	Content   string `json:"content,omitempty"`   // 纯文本内容（仅 document 类型且 Type 为 "text" 时使用）
+	Data      string `json:"data,omitempty"`       // base64 编码的数据（Type 为 "base64" 时使用）
+	URL       string `json:"url,omitempty"`        // 远程资源地址（Type 为 "url" 时使用）
+	Content   string `json:"content,omitempty"`    // 纯文本内容（仅 document 类型且 Type 为 "text" 时使用）
 }
 
 // ContentBlock 消息内容块接口，支持文本、思考过程、工具调用、图片和文档等多种类型。
@@ -63,8 +63,8 @@ var _ ContentBlock = (*DocumentBlock)(nil)
 
 // TextBlock 纯文本内容块。
 type TextBlock struct {
-	Type         ContentBlockType      `json:"type"`
-	Text         string                `json:"text,omitempty"`
+	Type         ContentBlockType       `json:"type"`
+	Text         string                 `json:"text,omitempty"`
 	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
@@ -72,9 +72,9 @@ func (b TextBlock) BlockType() ContentBlockType { return ContentBlockText }
 
 // ThinkingBlock 思考过程内容块（如 Claude Extended Thinking）。
 type ThinkingBlock struct {
-	Type         ContentBlockType      `json:"type"`
-	Thinking     string                `json:"thinking,omitempty"`
-	Signature    string                `json:"signature,omitempty"`
+	Type         ContentBlockType       `json:"type"`
+	Thinking     string                 `json:"thinking,omitempty"`
+	Signature    string                 `json:"signature,omitempty"`
 	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
@@ -82,10 +82,10 @@ func (b ThinkingBlock) BlockType() ContentBlockType { return ContentBlockThinkin
 
 // ToolUseBlock 工具调用内容块。
 type ToolUseBlock struct {
-	Type         ContentBlockType      `json:"type"`
-	ID           string                `json:"id,omitempty"`
-	Name         string                `json:"name,omitempty"`
-	Input        json.RawMessage       `json:"input,omitempty"`
+	Type         ContentBlockType       `json:"type"`
+	ID           string                 `json:"id,omitempty"`
+	Name         string                 `json:"name,omitempty"`
+	Input        json.RawMessage        `json:"input,omitempty"`
 	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
@@ -93,10 +93,10 @@ func (b ToolUseBlock) BlockType() ContentBlockType { return ContentBlockToolUse 
 
 // ToolResultBlock 工具调用结果内容块。
 type ToolResultBlock struct {
-	Type         ContentBlockType      `json:"type"`
-	ToolUseID    string                `json:"tool_use_id,omitempty"`
-	Content      string                `json:"content,omitempty"`
-	IsError      bool                  `json:"is_error,omitempty"`
+	Type         ContentBlockType       `json:"type"`
+	ToolUseID    string                 `json:"tool_use_id,omitempty"`
+	Content      string                 `json:"content,omitempty"`
+	IsError      bool                   `json:"is_error,omitempty"`
 	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
@@ -104,8 +104,8 @@ func (b ToolResultBlock) BlockType() ContentBlockType { return ContentBlockToolR
 
 // ImageBlock 图片内容块。
 type ImageBlock struct {
-	Type         ContentBlockType      `json:"type"`
-	Source       *ContentSource        `json:"source,omitempty"`
+	Type         ContentBlockType       `json:"type"`
+	Source       *ContentSource         `json:"source,omitempty"`
 	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
@@ -113,8 +113,8 @@ func (b ImageBlock) BlockType() ContentBlockType { return ContentBlockImage }
 
 // DocumentBlock 文档内容块。
 type DocumentBlock struct {
-	Type         ContentBlockType      `json:"type"`
-	Source       *ContentSource        `json:"source,omitempty"`
+	Type         ContentBlockType       `json:"type"`
+	Source       *ContentSource         `json:"source,omitempty"`
 	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
@@ -249,4 +249,20 @@ func NewImageBlock(source ContentSource) ContentBlock {
 // 支持通过 base64 编码、远程 URL 或纯文本传递文档数据。
 func NewDocumentBlock(source ContentSource) ContentBlock {
 	return &DocumentBlock{Type: ContentBlockDocument, Source: &source}
+}
+
+func NewThinkingBlockWithCache(thinking, signature string, cc *provider.CacheControl) ContentBlock {
+	return &ThinkingBlock{Type: ContentBlockThinking, Thinking: thinking, Signature: signature, CacheControl: cc}
+}
+
+func NewToolResultBlockWithCache(toolUseID, content string, isError bool, cc *provider.CacheControl) ContentBlock {
+	return &ToolResultBlock{Type: ContentBlockToolResult, ToolUseID: toolUseID, Content: content, IsError: isError, CacheControl: cc}
+}
+
+func NewImageBlockWithCache(source ContentSource, cc *provider.CacheControl) ContentBlock {
+	return &ImageBlock{Type: ContentBlockImage, Source: &source, CacheControl: cc}
+}
+
+func NewDocumentBlockWithCache(source ContentSource, cc *provider.CacheControl) ContentBlock {
+	return &DocumentBlock{Type: ContentBlockDocument, Source: &source, CacheControl: cc}
 }

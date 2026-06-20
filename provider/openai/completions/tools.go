@@ -1,9 +1,9 @@
 package completions
 
 import (
+	"github.com/bamboo-services/bamboo-messages/provider"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/shared"
-	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // buildTools 将内部工具定义转换为 OpenAI Completions SDK 工具参数格式。

@@ -8,19 +8,21 @@ import (
 
 // anthropicResponse Anthropic Messages 响应 JSON 结构。
 type anthropicResponse struct {
-	ID           string             `json:"id"`
-	Type         string             `json:"type"`
-	Role         string             `json:"role"`
-	Content      []json.RawMessage  `json:"content"`
-	Model        string             `json:"model"`
+	ID           string              `json:"id"`
+	Type         string              `json:"type"`
+	Role         string              `json:"role"`
+	Content      []json.RawMessage   `json:"content"`
+	Model        string              `json:"model"`
 	StopReason   bamboo.FinishReason `json:"stop_reason"`
-	StopSequence *string            `json:"stop_sequence"`
-	Usage        anthropicUsage     `json:"usage"`
+	StopSequence *string             `json:"stop_sequence"`
+	Usage        anthropicUsage      `json:"usage"`
 }
 
 type anthropicUsage struct {
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
 }
 
 // serializeResponse 将 Bamboo Response 序列化为 Anthropic Messages JSON。
@@ -54,8 +56,10 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 		StopReason:   resp.StopReason,
 		StopSequence: stopSeq,
 		Usage: anthropicUsage{
-			InputTokens:  resp.Usage.InputTokens,
-			OutputTokens: resp.Usage.OutputTokens,
+			InputTokens:              resp.Usage.InputTokens,
+			OutputTokens:             resp.Usage.OutputTokens,
+			CacheCreationInputTokens: resp.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     resp.Usage.CacheReadInputTokens,
 		},
 	}
 

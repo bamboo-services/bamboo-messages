@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bamboo-services/bamboo-messages/provider"
 	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
+	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // finishReasonMap provider.FinishReason → bamboo.FinishReason 映射表。
@@ -36,19 +36,18 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		var toolResults []provider.Message
 		var contentBlocks []provider.ContentBlock
 		var msgCacheControl *provider.CacheControl
+		var ccCount int
 
 		for _, block := range msg.Content {
 			switch b := block.(type) {
 			case *TextBlock:
 				textBuilder.WriteString(b.Text)
 				if b.CacheControl != nil {
+					ccCount++
 					msgCacheControl = b.CacheControl
 				}
 			case *ThinkingBlock:
-				// 思考过程不发送给 provider
-				if b.CacheControl != nil {
-					msgCacheControl = b.CacheControl
-				}
+				// 思考过程不发送给 provider，其 CacheControl 也不参与消息级提升
 			case *ToolUseBlock:
 				toolCalls = append(toolCalls, provider.ToolCall{
 					ID:   b.ID,
@@ -59,6 +58,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 					},
 				})
 				if b.CacheControl != nil {
+					ccCount++
 					msgCacheControl = b.CacheControl
 				}
 			case *ToolResultBlock:
@@ -81,6 +81,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 					})
 				}
 				if b.CacheControl != nil {
+					ccCount++
 					msgCacheControl = b.CacheControl
 				}
 			case *DocumentBlock:
@@ -96,12 +97,17 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 					})
 				}
 				if b.CacheControl != nil {
+					ccCount++
 					msgCacheControl = b.CacheControl
 				}
 			default:
 				// 未来未知类型
 				log.Printf("[bamboo] dropped unknown content block type: %s", b.BlockType())
 			}
+		}
+
+		if ccCount > 1 {
+			log.Printf("[bamboo] warning: message has %d cache_control breakpoints, only the last one is kept", ccCount)
 		}
 
 		content := textBuilder.String()
@@ -217,11 +223,11 @@ func resultToResponse(result *provider.CompletionResult, providerType string) *R
 		content = []ContentBlock{}
 	}
 	return &Response{
-		ID:           fmt.Sprintf("bamboo_msg_%d", time.Now().UnixNano()),
-		Type:         "message",
-		Role:         RoleAssistant,
-		Content:      content,
-		StopReason:   mapFinishReason(result.FinishReason),
+		ID:         fmt.Sprintf("bamboo_msg_%d", time.Now().UnixNano()),
+		Type:       "message",
+		Role:       RoleAssistant,
+		Content:    content,
+		StopReason: mapFinishReason(result.FinishReason),
 		Usage: Usage{
 			InputTokens:              result.Usage.InputTokens,
 			OutputTokens:             result.Usage.OutputTokens,
@@ -243,10 +249,10 @@ func mapFinishReason(reason provider.FinishReason) FinishReason {
 
 // StreamConverter 维护流事件转换状态，将 provider.StreamEvent 序列映射为 Anthropic 风格事件序列。
 type StreamConverter struct {
-	blockIndex       int
-	usage            *Usage
-	started          bool
-	textBlockStarted bool
+	blockIndex           int
+	usage                *Usage
+	started              bool
+	textBlockStarted     bool
 	thinkingBlockStarted bool
 }
 
@@ -371,11 +377,11 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 	case provider.StreamDeltaTypeUsage:
 		data := delta.Data.(provider.UsageData)
 		sc.usage = &Usage{
-		InputTokens:              data.InputTokens,
-		OutputTokens:             data.OutputTokens,
-		CacheCreationInputTokens: data.CacheCreationInputTokens,
-		CacheReadInputTokens:     data.CacheReadInputTokens,
-	}
+			InputTokens:              data.InputTokens,
+			OutputTokens:             data.OutputTokens,
+			CacheCreationInputTokens: data.CacheCreationInputTokens,
+			CacheReadInputTokens:     data.CacheReadInputTokens,
+		}
 		return nil
 	default:
 		return nil

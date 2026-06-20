@@ -13,13 +13,13 @@ import (
 
 // responseObj response.created / response.completed 中的 response 对象。
 type responseObj struct {
-	ID        string         `json:"id"`
-	Object    string         `json:"object"`
-	Status    string         `json:"status,omitempty"`
-	Model     string         `json:"model,omitempty"`
-	Output    []outputItem   `json:"output,omitempty"`
-	Usage     *responsesUsage `json:"usage,omitempty"`
-	Error     *responseError  `json:"error,omitempty"`
+	ID     string          `json:"id"`
+	Object string          `json:"object"`
+	Status string          `json:"status,omitempty"`
+	Model  string          `json:"model,omitempty"`
+	Output []outputItem    `json:"output,omitempty"`
+	Usage  *responsesUsage `json:"usage,omitempty"`
+	Error  *responseError  `json:"error,omitempty"`
 }
 
 type responseError struct {
@@ -98,12 +98,12 @@ type responsesStreamSerializer struct {
 	reasoningIndex  int
 
 	// function_call output 项目状态
-	currentCallID    string
-	currentCallName  string
-	currentCallArgs  strings.Builder
-	functionCallItem string // 当前 function_call item ID
-	functionCallIdx  int    // 当前 function_call 的 output_index
-	functionCallCount int   // 已处理的 function_call 总数
+	currentCallID     string
+	currentCallName   string
+	currentCallArgs   strings.Builder
+	functionCallItem  string // 当前 function_call item ID
+	functionCallIdx   int    // 当前 function_call 的 output_index
+	functionCallCount int    // 已处理的 function_call 总数
 
 	// output_index 全局计数器
 	outputIndexCounter int
@@ -351,10 +351,16 @@ func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 
 	var usage *responsesUsage
 	if event.Usage != nil {
-		usage = &responsesUsage{
+		u := &responsesUsage{
 			InputTokens:  event.Usage.InputTokens,
 			OutputTokens: event.Usage.OutputTokens,
 		}
+		if event.Usage.CacheCreationInputTokens > 0 || event.Usage.CacheReadInputTokens > 0 {
+			u.InputTokensDetails = &responsesInputTokensDet{
+				CachedTokens: event.Usage.CacheReadInputTokens,
+			}
+		}
+		usage = u
 	}
 
 	resp := responseObj{

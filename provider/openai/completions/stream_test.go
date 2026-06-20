@@ -3,9 +3,9 @@ package completions
 import (
 	"testing"
 
+	"github.com/bamboo-services/bamboo-messages/provider"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/respjson"
-	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // checkBlockStartType 验证事件列表中包含指定类型的 BlockStart 事件

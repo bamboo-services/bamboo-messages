@@ -15,6 +15,14 @@ type openaiChunk struct {
 	Created int64            `json:"created"`
 	Model   string           `json:"model"`
 	Choices []openaiDelta    `json:"choices"`
+	Usage   *openaiStreamUsage `json:"usage,omitempty"`
+}
+
+type openaiStreamUsage struct {
+	PromptTokens        int64                  `json:"prompt_tokens"`
+	CompletionTokens    int64                  `json:"completion_tokens"`
+	TotalTokens         int64                  `json:"total_tokens"`
+	PromptTokensDetails *openaiPromptTokensDet `json:"prompt_tokens_details,omitempty"`
 }
 
 type openaiDelta struct {
@@ -24,17 +32,17 @@ type openaiDelta struct {
 }
 
 type openaiDeltaMsg struct {
-	Role             string           `json:"role,omitempty"`
-	Content          string           `json:"content,omitempty"`
-	ReasoningContent string           `json:"reasoning_content,omitempty"`
-	ToolCalls        []openaiDeltaTC  `json:"tool_calls,omitempty"`
+	Role             string          `json:"role,omitempty"`
+	Content          string          `json:"content,omitempty"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ToolCalls        []openaiDeltaTC `json:"tool_calls,omitempty"`
 }
 
 type openaiDeltaTC struct {
-	Index    int              `json:"index"`
-	ID       string           `json:"id,omitempty"`
-	Type     string           `json:"type,omitempty"`
-	Function openaiDeltaTCFn  `json:"function"`
+	Index    int             `json:"index"`
+	ID       string          `json:"id,omitempty"`
+	Type     string          `json:"type,omitempty"`
+	Function openaiDeltaTCFn `json:"function"`
 }
 
 type openaiDeltaTCFn struct {
@@ -231,6 +239,21 @@ func (s *openaiStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([
 			FinishReason: &finishReason,
 		}},
 	}
+
+	if event.Usage != nil {
+		usage := &openaiStreamUsage{
+			PromptTokens:     event.Usage.InputTokens,
+			CompletionTokens: event.Usage.OutputTokens,
+			TotalTokens:      event.Usage.InputTokens + event.Usage.OutputTokens,
+		}
+		if event.Usage.CacheCreationInputTokens > 0 || event.Usage.CacheReadInputTokens > 0 {
+			usage.PromptTokensDetails = &openaiPromptTokensDet{
+				CachedTokens: event.Usage.CacheReadInputTokens,
+			}
+		}
+		chunk.Usage = usage
+	}
+
 	return s.marshalChunk(chunk)
 }
 

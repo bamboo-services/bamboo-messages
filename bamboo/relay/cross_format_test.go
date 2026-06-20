@@ -39,10 +39,10 @@ var (
 	geminiBody = []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)
 
 	// openaiStreamBody 流式变体
-	openaiStreamBody       = []byte(`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hello"}]}`)
-	anthropicStreamBody    = []byte(`{"model":"test-model","max_tokens":1024,"stream":true,"messages":[{"role":"user","content":"hello"}]}`)
-	responsesStreamBody    = []byte(`{"model":"test-model","stream":true,"input":"hello"}`)
-	geminiStreamBody       = geminiBody // Gemini 流由 URL 参数决定，body 一致
+	openaiStreamBody    = []byte(`{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hello"}]}`)
+	anthropicStreamBody = []byte(`{"model":"test-model","max_tokens":1024,"stream":true,"messages":[{"role":"user","content":"hello"}]}`)
+	responsesStreamBody = []byte(`{"model":"test-model","stream":true,"input":"hello"}`)
+	geminiStreamBody    = geminiBody // Gemini 流由 URL 参数决定，body 一致
 )
 
 // ── 各格式带工具的请求 JSON（用于工具调用跨格式测试）──
@@ -205,10 +205,10 @@ func testCrossFormatStream(t *testing.T, tt crossFormatCase) {
 // 测试 mock provider 收到的 config.Tools 不为空。
 func TestCrossFormat_ToolCalls(t *testing.T) {
 	toolCases := []struct {
-		name     string
-		inFormat codec.FormatType
+		name      string
+		inFormat  codec.FormatType
 		outFormat codec.FormatType
-		body     []byte
+		body      []byte
 	}{
 		{"OpenAI_to_Anthropic_Tools", codec.FormatOpenAI, codec.FormatAnthropic, openaiToolsBody},
 		{"Anthropic_to_OpenAI_Tools", codec.FormatAnthropic, codec.FormatOpenAI, anthropicToolsBody},

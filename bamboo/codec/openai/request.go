@@ -34,10 +34,10 @@ type openaiRequest struct {
 }
 
 type openaiMessage struct {
-	Role       string            `json:"role"`
-	Content    json.RawMessage   `json:"content,omitempty"`
-	ToolCalls  []openaiToolCall  `json:"tool_calls,omitempty"`
-	ToolCallID string            `json:"tool_call_id,omitempty"`
+	Role       string           `json:"role"`
+	Content    json.RawMessage  `json:"content,omitempty"`
+	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
 }
 
 type openaiToolCall struct {

@@ -1,10 +1,10 @@
 package responses
 
 import (
+	"github.com/bamboo-services/bamboo-messages/provider"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
-	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // buildResponseNewParams 从 ChatConfig 构建 OpenAI Responses API 请求参数。

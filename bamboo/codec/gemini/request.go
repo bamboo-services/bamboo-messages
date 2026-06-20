@@ -15,13 +15,13 @@ import (
 //
 // 参考: https://ai.google.dev/api/rest/v1/models/generateContent
 type geminiRequest struct {
-	Contents           []geminiContent      `json:"contents"`
-	SystemInstruction  *geminiContent       `json:"systemInstruction,omitempty"`
-	GenerationConfig   *geminiGenConfig     `json:"generationConfig,omitempty"`
-	Tools              []geminiTool         `json:"tools,omitempty"`
-	ToolConfig         *geminiToolConfig    `json:"toolConfig,omitempty"`
-	SafetySettings     []geminiSafetySetting `json:"safetySettings,omitempty"`
-	CachedContent      string               `json:"cachedContent,omitempty"`
+	Contents          []geminiContent       `json:"contents"`
+	SystemInstruction *geminiContent        `json:"systemInstruction,omitempty"`
+	GenerationConfig  *geminiGenConfig      `json:"generationConfig,omitempty"`
+	Tools             []geminiTool          `json:"tools,omitempty"`
+	ToolConfig        *geminiToolConfig     `json:"toolConfig,omitempty"`
+	SafetySettings    []geminiSafetySetting `json:"safetySettings,omitempty"`
+	CachedContent     string                `json:"cachedContent,omitempty"`
 }
 
 // geminiContent Gemini Content 结构 (role + parts)。
@@ -40,11 +40,11 @@ type geminiContent struct {
 //   - functionResponse: {"functionResponse": {"id": "...", "name": "...", "response": {...}}}
 //   - executableCode / codeExecutionResult 等扩展类型
 type geminiPart struct {
-	Text             string                `json:"text,omitempty"`
-	InlineData       *geminiInlineData     `json:"inlineData,omitempty"`
-	FileData         *geminiFileData       `json:"fileData,omitempty"`
-	FunctionCall     *geminiFunctionCall   `json:"functionCall,omitempty"`
-	FunctionResponse *geminiFuncResponse   `json:"functionResponse,omitempty"`
+	Text             string              `json:"text,omitempty"`
+	InlineData       *geminiInlineData   `json:"inlineData,omitempty"`
+	FileData         *geminiFileData     `json:"fileData,omitempty"`
+	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
+	FunctionResponse *geminiFuncResponse `json:"functionResponse,omitempty"`
 }
 
 // geminiInlineData 内联二进制数据 (base64 编码)。

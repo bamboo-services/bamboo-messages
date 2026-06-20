@@ -29,8 +29,8 @@ type anthropicRequest struct {
 }
 
 type anthropicMessage struct {
-	Role    string             `json:"role"`
-	Content json.RawMessage    `json:"content,omitempty"` // string 或 []ContentBlock
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content,omitempty"` // string 或 []ContentBlock
 }
 
 type anthropicMetadata struct {

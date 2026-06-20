@@ -1,9 +1,9 @@
 package completions
 
 import (
+	"github.com/bamboo-services/bamboo-messages/provider"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // CompletionsProvider OpenAI Chat Completions 协议适配器实现。

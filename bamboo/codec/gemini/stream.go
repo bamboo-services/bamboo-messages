@@ -51,6 +51,7 @@ type geminiStreamSerializer struct {
 	accumulating    bool
 	inputTokens     int64
 	outputTokens    int64
+	cacheReadTokens int64
 	started         bool
 }
 
@@ -110,6 +111,7 @@ func (s *geminiStreamSerializer) handleMessageStart(event bamboo.StreamEvent) ([
 	}
 	if event.Usage != nil {
 		s.inputTokens = event.Usage.InputTokens
+		s.cacheReadTokens = event.Usage.CacheReadInputTokens
 	}
 	return nil, nil
 }
@@ -258,6 +260,9 @@ func (s *geminiStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([
 		if event.Usage.InputTokens > 0 {
 			s.inputTokens = event.Usage.InputTokens
 		}
+		if event.Usage.CacheReadInputTokens > 0 {
+			s.cacheReadTokens = event.Usage.CacheReadInputTokens
+		}
 	}
 
 	chunk := geminiStreamChunk{
@@ -266,9 +271,10 @@ func (s *geminiStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([
 			FinishReason: finishReason,
 		}},
 		UsageMetadata: &geminiUsageMeta{
-			PromptTokenCount:     s.inputTokens,
-			CandidatesTokenCount: s.outputTokens,
-			TotalTokenCount:      s.inputTokens + s.outputTokens,
+			PromptTokenCount:        s.inputTokens,
+			CandidatesTokenCount:    s.outputTokens,
+			TotalTokenCount:         s.inputTokens + s.outputTokens,
+			CachedContentTokenCount: s.cacheReadTokens,
 		},
 	}
 	return s.marshalChunk(chunk)

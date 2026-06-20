@@ -389,7 +389,7 @@ func TestCompleteWithConfig(t *testing.T) {
 			{
 				Name:        "get_weather",
 				Description: "Get weather info",
-			InputSchema: json.RawMessage(`{
+				InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
 					"city": {"type": "string", "description": "City name"}

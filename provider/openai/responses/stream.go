@@ -4,8 +4,8 @@ import (
 	"context"
 
 	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
-	"github.com/openai/openai-go/v3/responses"
 	"github.com/bamboo-services/bamboo-messages/provider"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 // ==============================

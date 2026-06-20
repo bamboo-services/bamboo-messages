@@ -18,9 +18,9 @@ type openaiResponse struct {
 }
 
 type openaiChoice struct {
-	Index        int           `json:"index"`
-	Message      openaiMsgOut  `json:"message"`
-	FinishReason string        `json:"finish_reason"`
+	Index        int          `json:"index"`
+	Message      openaiMsgOut `json:"message"`
+	FinishReason string       `json:"finish_reason"`
 }
 
 type openaiMsgOut struct {
@@ -31,9 +31,9 @@ type openaiMsgOut struct {
 }
 
 type openaiToolOut struct {
-	ID       string           `json:"id"`
-	Type     string           `json:"type"`
-	Function openaiToolOutFn  `json:"function"`
+	ID       string          `json:"id"`
+	Type     string          `json:"type"`
+	Function openaiToolOutFn `json:"function"`
 }
 
 type openaiToolOutFn struct {
@@ -42,9 +42,14 @@ type openaiToolOutFn struct {
 }
 
 type openaiUsage struct {
-	PromptTokens     int64 `json:"prompt_tokens"`
-	CompletionTokens int64 `json:"completion_tokens"`
-	TotalTokens      int64 `json:"total_tokens"`
+	PromptTokens        int64                  `json:"prompt_tokens"`
+	CompletionTokens    int64                  `json:"completion_tokens"`
+	TotalTokens         int64                  `json:"total_tokens"`
+	PromptTokensDetails *openaiPromptTokensDet `json:"prompt_tokens_details,omitempty"`
+}
+
+type openaiPromptTokensDet struct {
+	CachedTokens int64 `json:"cached_tokens,omitempty"`
 }
 
 // serializeResponse 将 Bamboo Response 序列化为 OpenAI Chat Completions JSON。
@@ -104,17 +109,24 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 	promptTokens := resp.Usage.InputTokens
 	completionTokens := resp.Usage.OutputTokens
 
+	usage := openaiUsage{
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		TotalTokens:      promptTokens + completionTokens,
+	}
+	if resp.Usage.CacheCreationInputTokens > 0 || resp.Usage.CacheReadInputTokens > 0 {
+		usage.PromptTokensDetails = &openaiPromptTokensDet{
+			CachedTokens: resp.Usage.CacheReadInputTokens,
+		}
+	}
+
 	out := openaiResponse{
 		ID:      resp.ID,
 		Object:  "chat.completion",
 		Created: resp.CreatedAt,
 		Model:   resp.Model,
 		Choices: []openaiChoice{choice},
-		Usage: openaiUsage{
-			PromptTokens:     promptTokens,
-			CompletionTokens: completionTokens,
-			TotalTokens:      promptTokens + completionTokens,
-		},
+		Usage:   usage,
 	}
 
 	return json.Marshal(out)

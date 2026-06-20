@@ -10,10 +10,10 @@ import (
 
 // geminiResponse Gemini GenerateContentResponse 完整结构。
 type geminiResponse struct {
-	Candidates     []geminiCandidate   `json:"candidates"`
-	UsageMetadata  *geminiUsageMeta    `json:"usageMetadata,omitempty"`
-	ModelVersion   string              `json:"modelVersion,omitempty"`
-	ResponseID     string              `json:"responseId,omitempty"`
+	Candidates    []geminiCandidate `json:"candidates"`
+	UsageMetadata *geminiUsageMeta  `json:"usageMetadata,omitempty"`
+	ModelVersion  string            `json:"modelVersion,omitempty"`
+	ResponseID    string            `json:"responseId,omitempty"`
 }
 
 // geminiCandidate Gemini 候选响应。
@@ -32,8 +32,8 @@ type geminiContentOut struct {
 
 // geminiPartOut 输出方向的 Part（支持 text / functionCall / thought 标记）。
 type geminiPartOut struct {
-	Text         string            `json:"text,omitempty"`
-	Thought      bool              `json:"thought,omitempty"`
+	Text         string             `json:"text,omitempty"`
+	Thought      bool               `json:"thought,omitempty"`
 	FunctionCall *geminiFuncCallOut `json:"functionCall,omitempty"`
 }
 
@@ -67,9 +67,10 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 	out := geminiResponse{
 		Candidates: []geminiCandidate{candidate},
 		UsageMetadata: &geminiUsageMeta{
-			PromptTokenCount:     resp.Usage.InputTokens,
-			CandidatesTokenCount: resp.Usage.OutputTokens,
-			TotalTokenCount:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
+			PromptTokenCount:        resp.Usage.InputTokens,
+			CandidatesTokenCount:    resp.Usage.OutputTokens,
+			TotalTokenCount:         resp.Usage.InputTokens + resp.Usage.OutputTokens,
+			CachedContentTokenCount: resp.Usage.CacheReadInputTokens,
 		},
 	}
 

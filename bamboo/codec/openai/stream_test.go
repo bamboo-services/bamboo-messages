@@ -280,11 +280,13 @@ func TestStreamSerializer_MultipleToolCalls(t *testing.T) {
 // "Expected 'id' to be a string."。
 //
 // 场景一：模型直接调用工具（无前置 text block）
-//   StreamConverter 行为: stopIdx=0, blockIndex++→1, block_start Index=1, delta Index=1
+//
+//	StreamConverter 行为: stopIdx=0, blockIndex++→1, block_start Index=1, delta Index=1
 //
 // 场景二：模型先输出 text 再调用工具
-//   StreamConverter 行为: text block Index=0; tool: stopIdx=0, blockIndex++→1,
-//   block_start Index=1, delta Index=1
+//
+//	StreamConverter 行为: text block Index=0; tool: stopIdx=0, blockIndex++→1,
+//	block_start Index=1, delta Index=1
 func TestStreamSerializer_ToolCallIndexConsistency_NoPrecedingText(t *testing.T) {
 	s := newStreamSerializer()
 

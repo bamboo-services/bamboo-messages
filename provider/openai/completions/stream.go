@@ -3,8 +3,8 @@ package completions
 import (
 	"encoding/json"
 
-	"github.com/openai/openai-go/v3"
 	"github.com/bamboo-services/bamboo-messages/provider"
+	"github.com/openai/openai-go/v3"
 )
 
 // handleChunk 处理单个 ChatCompletionChunk，提取 delta 数据转换为统一事件。

@@ -148,10 +148,15 @@ func applyMsgCacheControl(blocks []anthropic.BetaContentBlockParamUnion, cc *pro
 	}
 }
 
-// toAnthropicCacheControl 将 provider.CacheControl 转换为 Anthropic SDK 的 BetaCacheControlEphemeralParam。
 func toAnthropicCacheControl(cc *provider.CacheControl) anthropic.BetaCacheControlEphemeralParam {
 	param := anthropic.NewBetaCacheControlEphemeralParam()
-	if cc != nil && cc.TTL == provider.CacheTTL1h {
+	if cc == nil {
+		return param
+	}
+	if cc.Type != "" && cc.Type != "ephemeral" {
+		return param
+	}
+	if cc.TTL == provider.CacheTTL1h {
 		param.TTL = anthropic.BetaCacheControlEphemeralTTLTTL1h
 	}
 	return param

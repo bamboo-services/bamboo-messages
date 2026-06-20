@@ -9,10 +9,10 @@ import (
 
 func TestSerializeResponse_TextOnly(t *testing.T) {
 	resp := &bamboo.Response{
-		ID:          "resp_001",
-		Model:       "gpt-4o",
-		StopReason:  bamboo.FinishReasonEndTurn,
-		CreatedAt:   1700000000,
+		ID:         "resp_001",
+		Model:      "gpt-4o",
+		StopReason: bamboo.FinishReasonEndTurn,
+		CreatedAt:  1700000000,
 		Content: []bamboo.ContentBlock{
 			bamboo.NewTextBlock("Hello!"),
 		},

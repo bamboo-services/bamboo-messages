@@ -11,18 +11,18 @@ import (
 
 // responsesOutput OpenAI Responses API 响应 JSON 结构。
 type responsesOutput struct {
-	ID           string          `json:"id"`
-	Object       string          `json:"object"`
-	CreatedAt    int64           `json:"created_at"`
-	Model        string          `json:"model"`
-	Status       string          `json:"status"`
-	Output       []outputItem    `json:"output"`
-	Usage        responsesUsage  `json:"usage"`
+	ID        string         `json:"id"`
+	Object    string         `json:"object"`
+	CreatedAt int64          `json:"created_at"`
+	Model     string         `json:"model"`
+	Status    string         `json:"status"`
+	Output    []outputItem   `json:"output"`
+	Usage     responsesUsage `json:"usage"`
 }
 
 // outputItem output 数组元素，通过 type 区分 message / reasoning / function_call。
 type outputItem struct {
-	Type    string          `json:"type"`
+	Type string `json:"type"`
 	// message 专用
 	ID      string          `json:"id,omitempty"`
 	Role    string          `json:"role,omitempty"`
@@ -42,8 +42,13 @@ type outputContent struct {
 
 // responsesUsage Responses 格式的 Token 用量。
 type responsesUsage struct {
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
+	InputTokens        int64                    `json:"input_tokens"`
+	OutputTokens       int64                    `json:"output_tokens"`
+	InputTokensDetails *responsesInputTokensDet `json:"input_tokens_details,omitempty"`
+}
+
+type responsesInputTokensDet struct {
+	CachedTokens int64 `json:"cached_tokens,omitempty"`
 }
 
 // serializeResponse 将 Bamboo Response 序列化为 OpenAI Responses JSON。
@@ -109,6 +114,16 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 		})
 	}
 
+	usage := responsesUsage{
+		InputTokens:  resp.Usage.InputTokens,
+		OutputTokens: resp.Usage.OutputTokens,
+	}
+	if resp.Usage.CacheCreationInputTokens > 0 || resp.Usage.CacheReadInputTokens > 0 {
+		usage.InputTokensDetails = &responsesInputTokensDet{
+			CachedTokens: resp.Usage.CacheReadInputTokens,
+		}
+	}
+
 	out := responsesOutput{
 		ID:        resp.ID,
 		Object:    "response",
@@ -116,10 +131,7 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 		Model:     resp.Model,
 		Status:    mapStatus(resp.StopReason),
 		Output:    output,
-		Usage: responsesUsage{
-			InputTokens:  resp.Usage.InputTokens,
-			OutputTokens: resp.Usage.OutputTokens,
-		},
+		Usage:     usage,
 	}
 
 	return json.Marshal(out)

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bamboo-services/bamboo-messages/provider"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/shared"
-	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // newLegacyProvider 创建 Legacy 兼容模式的 Provider 实例。

@@ -78,9 +78,23 @@ func (s *anthropicStreamSerializer) handleMessageStart(event bamboo.StreamEvent)
 	}
 
 	var inputTokens, outputTokens int64
+	var cacheCreation, cacheRead int64
 	if event.Usage != nil {
 		inputTokens = event.Usage.InputTokens
 		outputTokens = event.Usage.OutputTokens
+		cacheCreation = event.Usage.CacheCreationInputTokens
+		cacheRead = event.Usage.CacheReadInputTokens
+	}
+
+	usageMap := map[string]any{
+		"input_tokens":  inputTokens,
+		"output_tokens": outputTokens,
+	}
+	if cacheCreation > 0 {
+		usageMap["cache_creation_input_tokens"] = cacheCreation
+	}
+	if cacheRead > 0 {
+		usageMap["cache_read_input_tokens"] = cacheRead
 	}
 
 	payload := map[string]any{
@@ -93,10 +107,7 @@ func (s *anthropicStreamSerializer) handleMessageStart(event bamboo.StreamEvent)
 			"model":         s.model,
 			"stop_reason":   nil,
 			"stop_sequence": nil,
-			"usage": map[string]any{
-				"input_tokens":  inputTokens,
-				"output_tokens": outputTokens,
-			},
+			"usage":         usageMap,
 		},
 	}
 
@@ -202,10 +213,17 @@ func (s *anthropicStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 	}
 
 	if event.Usage != nil {
-		payload["usage"] = map[string]any{
+		usageMap := map[string]any{
 			"input_tokens":  event.Usage.InputTokens,
 			"output_tokens": event.Usage.OutputTokens,
 		}
+		if event.Usage.CacheCreationInputTokens > 0 {
+			usageMap["cache_creation_input_tokens"] = event.Usage.CacheCreationInputTokens
+		}
+		if event.Usage.CacheReadInputTokens > 0 {
+			usageMap["cache_read_input_tokens"] = event.Usage.CacheReadInputTokens
+		}
+		payload["usage"] = usageMap
 	}
 
 	return s.marshalEvent("message_delta", payload)
