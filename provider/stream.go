@@ -80,8 +80,8 @@ type ToolCallDeltaData string
 // 记录本次对话的输入和输出 Token 数量，用于计费和用量分析。
 // CacheCreationInputTokens 和 CacheReadInputTokens 用于追踪 prompt caching 的命中情况。
 type UsageData struct {
-	InputTokens              int64 `json:"input_tokens"`                        // 输入 Token 数量
-	OutputTokens             int64 `json:"output_tokens"`                       // 输出 Token 数量
+	InputTokens              int64 `json:"input_tokens"`                          // 输入 Token 数量
+	OutputTokens             int64 `json:"output_tokens"`                         // 输出 Token 数量
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"` // 缓存创建消耗的输入 token 数量（Anthropic）
 	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`     // 缓存命中读取的输入 token 数量（Anthropic/OpenAI/Gemini）
 }
@@ -91,9 +91,9 @@ type UsageData struct {
 // 标记新内容块（text/thinking/tool_use）的起始，包含类型、
 // ID 和名称信息，用于内容块的边界识别。
 type BlockStartData struct {
-	BlockType string `json:"block_type"`      // 内容块类型: "text" | "thinking" | "tool_use"
-	ID        string `json:"id,omitempty"`    // 内容块 ID（tool_use 时使用）
-	Name      string `json:"name,omitempty"`  // 工具名称（tool_use 时使用）
+	BlockType string `json:"block_type"`     // 内容块类型: "text" | "thinking" | "tool_use"
+	ID        string `json:"id,omitempty"`   // 内容块 ID（tool_use 时使用）
+	Name      string `json:"name,omitempty"` // 工具名称（tool_use 时使用）
 }
 
 // ============================================

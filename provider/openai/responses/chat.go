@@ -45,23 +45,23 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			params,
 		)
 
-	stream := p.Client.Responses.NewStreaming(ctx, params)
-	defer stream.Close()
+		stream := p.Client.Responses.NewStreaming(ctx, params)
+		defer stream.Close()
 
-	textBlockStarted := false
-	thinkingBlockStarted := false
+		textBlockStarted := false
+		thinkingBlockStarted := false
 
-	for stream.Next() {
-		event := stream.Current()
-		events := p.handleStreamEvent(ctx, event, &textBlockStarted, &thinkingBlockStarted)
-		for _, e := range events {
-			select {
-			case eventCh <- e:
-			case <-ctx.Done():
-				return
+		for stream.Next() {
+			event := stream.Current()
+			events := p.handleStreamEvent(ctx, event, &textBlockStarted, &thinkingBlockStarted)
+			for _, e := range events {
+				select {
+				case eventCh <- e:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
-	}
 
 		if err := stream.Err(); err != nil {
 			select {

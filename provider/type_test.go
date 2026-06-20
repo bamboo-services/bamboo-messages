@@ -5,11 +5,11 @@ import "testing"
 // TestGetExtraFloat64 测试从 ProviderExtra 中安全获取 float64 值
 func TestGetExtraFloat64(t *testing.T) {
 	tests := []struct {
-		name     string
-		extra    map[string]any
-		key      string
-		want     float64
-		wantOk   bool
+		name   string
+		extra  map[string]any
+		key    string
+		want   float64
+		wantOk bool
 	}{
 		{
 			name:   "正常值 - float64 类型",
@@ -68,11 +68,11 @@ func TestGetExtraFloat64(t *testing.T) {
 // TestGetExtraInt64 测试从 ProviderExtra 中安全获取 int64 值
 func TestGetExtraInt64(t *testing.T) {
 	tests := []struct {
-		name     string
-		extra    map[string]any
-		key      string
-		want     int64
-		wantOk   bool
+		name   string
+		extra  map[string]any
+		key    string
+		want   int64
+		wantOk bool
 	}{
 		{
 			name:   "正常值 - int64 类型",
@@ -138,11 +138,11 @@ func TestGetExtraInt64(t *testing.T) {
 // TestGetExtraString 测试从 ProviderExtra 中安全获取 string 值
 func TestGetExtraString(t *testing.T) {
 	tests := []struct {
-		name     string
-		extra    map[string]any
-		key      string
-		want     string
-		wantOk   bool
+		name   string
+		extra  map[string]any
+		key    string
+		want   string
+		wantOk bool
 	}{
 		{
 			name:   "正常值 - 字符串",
@@ -208,11 +208,11 @@ func TestGetExtraString(t *testing.T) {
 // TestGetExtraAny 测试从 ProviderExtra 中获取任意类型值
 func TestGetExtraAny(t *testing.T) {
 	tests := []struct {
-		name     string
-		extra    map[string]any
-		key      string
-		want     any
-		wantOk   bool
+		name   string
+		extra  map[string]any
+		key    string
+		want   any
+		wantOk bool
 	}{
 		{
 			name:   "正常值 - 字符串",

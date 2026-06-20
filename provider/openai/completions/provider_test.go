@@ -3,10 +3,10 @@ package completions
 import (
 	"testing"
 
+	"github.com/bamboo-services/bamboo-messages/provider"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/shared"
-	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // ==============================
@@ -422,8 +422,6 @@ func TestNewCompletionsProviderWithOptions(t *testing.T) {
 	})
 }
 
-
-
 func TestNewCompletionsProviderWithOptions_EmptyOptions(t *testing.T) {
 	p := NewCompletionsProviderWithOptions()
 	if p == nil {
@@ -440,16 +438,16 @@ func TestNewCompletionsProviderWithOptions_EmptyOptions(t *testing.T) {
 // 回归测试：确保 map 形式的 ResponseFormat 能正确转换为 SDK 类型。
 func TestBuildResponseFormat_MapInput(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      any
-		wantText   bool // 期望 OfText 非空
-		wantJSON   bool // 期望 OfJSONObject 非空
-		wantEmpty  bool // 期望空联合类型
+		name      string
+		input     any
+		wantText  bool // 期望 OfText 非空
+		wantJSON  bool // 期望 OfJSONObject 非空
+		wantEmpty bool // 期望空联合类型
 	}{
 		{
-			name:      "json_object map",
-			input:     map[string]any{"type": "json_object"},
-			wantJSON:  true,
+			name:     "json_object map",
+			input:    map[string]any{"type": "json_object"},
+			wantJSON: true,
 		},
 		{
 			name:     "text map",
@@ -568,8 +566,8 @@ func TestBuildResponseFormat_SdkTypePassthrough(t *testing.T) {
 // ChatCompletionToolChoiceOptionUnionParam 的 OfAuto 字段。
 func TestToolChoiceStringMapping(t *testing.T) {
 	tests := []struct {
-		name   string
-		input  string
+		name  string
+		input string
 	}{
 		{name: "auto", input: "auto"},
 		{name: "none", input: "none"},
@@ -738,8 +736,8 @@ func TestProviderExtraParallelToolCallsMapping(t *testing.T) {
 func TestMetadataMapping(t *testing.T) {
 	config := &provider.ChatConfig{
 		Metadata: map[string]string{
-			"key":  "val",
-			"foo":  "bar",
+			"key": "val",
+			"foo": "bar",
 		},
 	}
 
@@ -857,14 +855,14 @@ func TestBuildTools(t *testing.T) {
 				{
 					Type: "function",
 					Function: provider.FunctionDef{
-						Name: "get_weather",
+						Name:       "get_weather",
 						Parameters: map[string]any{"type": "object"},
 					},
 				},
 				{
 					Type: "function",
 					Function: provider.FunctionDef{
-						Name: "search",
+						Name:       "search",
 						Parameters: map[string]any{"type": "object"},
 					},
 				},

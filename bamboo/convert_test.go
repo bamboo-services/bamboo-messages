@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bamboo-services/bamboo-messages/provider"
 	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
+	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // ---- messagesToProvider 测试 ----
@@ -188,7 +188,7 @@ func TestConvertConfig(t *testing.T) {
 			{
 				Name:        "get_weather",
 				Description: "Get weather",
-			InputSchema: json.RawMessage(`{
+				InputSchema: json.RawMessage(`{
 				"type": "object",
 				"properties": {
 					"city": {"type": "string", "description": "City name"}
@@ -264,7 +264,7 @@ func TestConvertTools(t *testing.T) {
 		{
 			Name:        "search",
 			Description: "Search the web",
-		InputSchema: json.RawMessage(`{
+			InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"query": {"type": "string", "description": "Search query"},
@@ -829,7 +829,7 @@ func TestConvertToolWithEnumAndItems(t *testing.T) {
 		{
 			Name:        "search",
 			Description: "Search",
-		InputSchema: json.RawMessage(`{
+			InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"sort": {"type": "string", "description": "Sort order", "enum": ["asc", "desc"]},
@@ -1220,12 +1220,12 @@ func TestStreamConverter_TextOnly(t *testing.T) {
 	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})...)
 
 	expectedTypes := []StreamEventType{
-		EventMessageStart,       // start → message_start
-		EventContentBlockStart,  // block_start(text)
-		EventContentBlockDelta,  // text_delta
-		EventContentBlockStop,   // stop → content_block_stop
-		EventMessageDelta,       // stop → message_delta
-		EventMessageStop,        // stop → message_stop
+		EventMessageStart,      // start → message_start
+		EventContentBlockStart, // block_start(text)
+		EventContentBlockDelta, // text_delta
+		EventContentBlockStop,  // stop → content_block_stop
+		EventMessageDelta,      // stop → message_delta
+		EventMessageStop,       // stop → message_stop
 	}
 
 	if len(allEvents) != len(expectedTypes) {
@@ -1286,14 +1286,14 @@ func TestStreamConverter_ThinkingAndText(t *testing.T) {
 	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})...)
 
 	expectedTypes := []StreamEventType{
-		EventMessageStart,       // start
-		EventContentBlockStart,  // block_start(thinking)
-		EventContentBlockDelta,  // thinking_delta
-		EventContentBlockStart,  // block_start(text)
-		EventContentBlockDelta,  // text_delta
-		EventContentBlockStop,   // stop
-		EventMessageDelta,       // stop
-		EventMessageStop,        // stop
+		EventMessageStart,      // start
+		EventContentBlockStart, // block_start(thinking)
+		EventContentBlockDelta, // thinking_delta
+		EventContentBlockStart, // block_start(text)
+		EventContentBlockDelta, // text_delta
+		EventContentBlockStop,  // stop
+		EventMessageDelta,      // stop
+		EventMessageStop,       // stop
 	}
 
 	if len(allEvents) != len(expectedTypes) {
@@ -1359,15 +1359,15 @@ func TestStreamConverter_ToolCall(t *testing.T) {
 	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})...)
 
 	expectedTypes := []StreamEventType{
-		EventMessageStart,       // start
-		EventContentBlockStart,  // 防御性自动补发 block_start (text_delta without prior block_start)
-		EventContentBlockDelta,  // text_delta
-		EventContentBlockStop,   // tool_call → close previous
-		EventContentBlockStart,  // tool_call → open tool_use
-		EventContentBlockDelta,  // tool_call_delta
-		EventContentBlockStop,   // stop
-		EventMessageDelta,       // stop
-		EventMessageStop,        // stop
+		EventMessageStart,      // start
+		EventContentBlockStart, // 防御性自动补发 block_start (text_delta without prior block_start)
+		EventContentBlockDelta, // text_delta
+		EventContentBlockStop,  // tool_call → close previous
+		EventContentBlockStart, // tool_call → open tool_use
+		EventContentBlockDelta, // tool_call_delta
+		EventContentBlockStop,  // stop
+		EventMessageDelta,      // stop
+		EventMessageStop,       // stop
 	}
 
 	if len(allEvents) != len(expectedTypes) {

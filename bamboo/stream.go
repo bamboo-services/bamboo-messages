@@ -55,10 +55,10 @@ const (
 // 不同增量类型对应不同字段：文本增量使用 Text 字段、思考过程增量使用 Thinking 字段、
 // 工具调用参数增量使用 PartialJSON 字段、思考签名增量使用 Signature 字段。
 type StreamDelta struct {
-	Type        StreamDeltaType `json:"type"`                 // 增量类型
-	Text        string          `json:"text,omitempty"`       // 文本增量内容（Type 为 DeltaTextDelta 时使用）
-	Thinking    string          `json:"thinking,omitempty"`   // 思考过程增量内容（Type 为 DeltaThinkingDelta 时使用）
-	Signature   string          `json:"signature,omitempty"`  // 思考签名增量（Type 为 DeltaSignature 时使用）
+	Type        StreamDeltaType `json:"type"`                   // 增量类型
+	Text        string          `json:"text,omitempty"`         // 文本增量内容（Type 为 DeltaTextDelta 时使用）
+	Thinking    string          `json:"thinking,omitempty"`     // 思考过程增量内容（Type 为 DeltaThinkingDelta 时使用）
+	Signature   string          `json:"signature,omitempty"`    // 思考签名增量（Type 为 DeltaSignature 时使用）
 	PartialJSON string          `json:"partial_json,omitempty"` // 工具调用参数增量（Type 为 DeltaInputJSON 时使用）
 }
 
@@ -67,7 +67,7 @@ type StreamDelta struct {
 // 在消息传输结束时触发，提供完整的停止原因（如正常结束、达到最大 token 数、工具调用等）
 // 和最终的 Token 用量统计。
 type MessageDelta struct {
-	StopReason   FinishReason `json:"stop_reason"`          // 停止原因
+	StopReason   FinishReason `json:"stop_reason"`             // 停止原因
 	StopSequence string       `json:"stop_sequence,omitempty"` // 触发停止的序列（可选）
 }
 

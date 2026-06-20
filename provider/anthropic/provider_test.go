@@ -447,8 +447,6 @@ func TestNewProviderWithOptions(t *testing.T) {
 	})
 }
 
-
-
 func TestNewProviderWithOptions_EmptyOptions(t *testing.T) {
 	p := NewProviderWithOptions()
 	if p == nil {

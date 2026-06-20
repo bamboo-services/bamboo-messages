@@ -58,8 +58,8 @@ type CacheControlEphemeralTTL string
 // OpenAI 自动缓存，PromptCacheKey 仅作为路由粘性键；
 // Gemini 通过外部 CachedContent 资源引用。
 type CacheControl struct {
-	Type string                    `json:"type"`     // 缓存类型，目前仅支持 "ephemeral"
-	TTL  CacheControlEphemeralTTL  `json:"ttl,omitempty"` // 缓存过期时间，仅 Anthropic 支持
+	Type string                   `json:"type"`          // 缓存类型，目前仅支持 "ephemeral"
+	TTL  CacheControlEphemeralTTL `json:"ttl,omitempty"` // 缓存过期时间，仅 Anthropic 支持
 }
 
 // NewEphemeralCacheControl 创建一个 ephemeral 类型的缓存控制标记。
@@ -78,10 +78,10 @@ func NewEphemeralCacheControl(ttl ...CacheControlEphemeralTTL) *CacheControl {
 // 包含 AI 模型返回的文本内容、工具调用列表、结束原因
 // 和 Token 用量统计。适用于不需要流式输出的同步请求场景。
 type CompletionResult struct {
-	Content      string        `json:"content"`                // 文本响应内容
-	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`   // 工具调用列表
-	FinishReason FinishReason  `json:"finish_reason"`          // 结束原因
-	Usage        UsageData     `json:"usage"`                  // Token 用量统计
+	Content      string       `json:"content"`              // 文本响应内容
+	ToolCalls    []ToolCall   `json:"tool_calls,omitempty"` // 工具调用列表
+	FinishReason FinishReason `json:"finish_reason"`        // 结束原因
+	Usage        UsageData    `json:"usage"`                // Token 用量统计
 }
 
 // ============================================
@@ -130,9 +130,9 @@ type FunctionCall struct {
 //
 // 定义了可用工具的类型和函数规格，供 AI 模型在对话中调用。
 type Tool struct {
-	Type         string         `json:"type"`                    // 类型，通常为 "function"
-	Function     FunctionDef    `json:"function"`                // 函数定义
-	CacheControl *CacheControl  `json:"cache_control,omitempty"` // 缓存控制标记（Anthropic prompt caching）
+	Type         string        `json:"type"`                    // 类型，通常为 "function"
+	Function     FunctionDef   `json:"function"`                // 函数定义
+	CacheControl *CacheControl `json:"cache_control,omitempty"` // 缓存控制标记（Anthropic prompt caching）
 }
 
 // FunctionDef 函数定义。
@@ -219,21 +219,21 @@ type ThinkingConfig struct {
 // 用户标识、工具选择策略、响应格式、并行工具调用、
 // 思考配置和 Provider 特有参数等完整请求配置。
 type ChatConfig struct {
-	Model             string            `json:"model,omitempty"`             // 模型名称
-	Temperature       *float64          `json:"temperature,omitempty"`       // 温度参数 (0-2)
-	TopP              *float64          `json:"top_p,omitempty"`             // Top-p 采样
-	MaxTokens         int64             `json:"max_tokens,omitempty"`        // 最大生成 token 数
-	Stop              []string          `json:"stop,omitempty"`              // 停止词
-	Tools             []Tool            `json:"tools,omitempty"`             // 可用工具列表
-	Metadata          map[string]string `json:"metadata,omitempty"`          // 附加元数据
-	UserID            string            `json:"user_id,omitempty"`           // 用户标识
-	ToolChoice        string            `json:"tool_choice,omitempty"`       // 工具选择策略
-	ResponseFormat    string            `json:"response_format,omitempty"`   // 响应格式
-	ParallelToolCalls bool              `json:"parallel_tool_calls,omitempty"` // 并行工具调用
-	ThinkingConfig    *ThinkingConfig   `json:"thinking_config,omitempty"`   // 思考/推理配置
-	SystemCacheControl *CacheControl    `json:"system_cache_control,omitempty"` // system prompt 的缓存标记
-	PromptCacheKey    string            `json:"prompt_cache_key,omitempty"`  // OpenAI prompt cache 路由键
-	ProviderExtra     map[string]any    `json:"provider_extra,omitempty"`    // Provider 特有参数
+	Model              string            `json:"model,omitempty"`                // 模型名称
+	Temperature        *float64          `json:"temperature,omitempty"`          // 温度参数 (0-2)
+	TopP               *float64          `json:"top_p,omitempty"`                // Top-p 采样
+	MaxTokens          int64             `json:"max_tokens,omitempty"`           // 最大生成 token 数
+	Stop               []string          `json:"stop,omitempty"`                 // 停止词
+	Tools              []Tool            `json:"tools,omitempty"`                // 可用工具列表
+	Metadata           map[string]string `json:"metadata,omitempty"`             // 附加元数据
+	UserID             string            `json:"user_id,omitempty"`              // 用户标识
+	ToolChoice         string            `json:"tool_choice,omitempty"`          // 工具选择策略
+	ResponseFormat     string            `json:"response_format,omitempty"`      // 响应格式
+	ParallelToolCalls  bool              `json:"parallel_tool_calls,omitempty"`  // 并行工具调用
+	ThinkingConfig     *ThinkingConfig   `json:"thinking_config,omitempty"`      // 思考/推理配置
+	SystemCacheControl *CacheControl     `json:"system_cache_control,omitempty"` // system prompt 的缓存标记
+	PromptCacheKey     string            `json:"prompt_cache_key,omitempty"`     // OpenAI prompt cache 路由键
+	ProviderExtra      map[string]any    `json:"provider_extra,omitempty"`       // Provider 特有参数
 }
 
 // GetExtraFloat64 从 ProviderExtra 中安全获取 float64 值。

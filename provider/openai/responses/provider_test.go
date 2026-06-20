@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/bamboo-services/bamboo-messages/provider"
 	openaisdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
-	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // unmarshalResponseEvent 将 JSON 字符串反序列化为 OpenAI Responses 流事件 Union 类型。
@@ -305,8 +305,6 @@ func TestNewResponsesProviderWithOptions(t *testing.T) {
 	})
 }
 
-
-
 func TestNewResponsesProviderWithOptions_EmptyOptions(t *testing.T) {
 	p := NewResponsesProviderWithOptions()
 	if p == nil {
@@ -440,8 +438,8 @@ func TestResponsesProvider_buildAssistantItem(t *testing.T) {
 		{
 			name: "empty assistant message (no text, no tool calls)",
 			msg: provider.Message{
-				Role:    provider.RoleAssistant,
-				Content: "",
+				Role:      provider.RoleAssistant,
+				Content:   "",
 				ToolCalls: []provider.ToolCall{},
 			},
 			wantCount: 0,
@@ -449,9 +447,9 @@ func TestResponsesProvider_buildAssistantItem(t *testing.T) {
 		{
 			name: "empty tool calls slice",
 			msg: provider.Message{
-				Role:       provider.RoleAssistant,
-				Content:    "Hello",
-				ToolCalls:  []provider.ToolCall{},
+				Role:      provider.RoleAssistant,
+				Content:   "Hello",
+				ToolCalls: []provider.ToolCall{},
 			},
 			wantCount: 1,
 			check: func(t *testing.T, items []responses.ResponseInputItemUnionParam) {
