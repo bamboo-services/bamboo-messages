@@ -2,6 +2,8 @@ package completions
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -35,7 +37,9 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 
 	// 检查响应
 	if len(response.Choices) == 0 {
-		return nil, xError.NewError(ctx, nil, "OpenAI Completions 返回空响应", false, nil)
+		return nil, xError.NewError(ctx, nil,
+			fmt.Sprintf("OpenAI Completions 返回空响应 (choices=0), resp=%s", truncateResponseJSON(response)),
+			false, nil)
 	}
 
 	choice := response.Choices[0]
@@ -79,4 +83,22 @@ func mapFinishReason(reason string) provider.FinishReason {
 	default:
 		return provider.FinishReasonStop
 	}
+}
+
+// maxResponseLogLen 响应体日志最大长度（字符数），超过截断。
+const maxResponseLogLen = 500
+
+// truncateResponseJSON 将 OpenAI 响应序列化为 JSON 并截断，用于错误日志。
+//
+// 仅在错误路径调用，帮助诊断 GLM 等第三方端点返回空响应的原因。
+func truncateResponseJSON[T any](resp T) string {
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		return "<marshal error>"
+	}
+	s := string(raw)
+	if len(s) <= maxResponseLogLen {
+		return s
+	}
+	return s[:maxResponseLogLen] + "...(truncated)"
 }
