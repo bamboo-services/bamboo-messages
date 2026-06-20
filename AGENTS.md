@@ -1,7 +1,7 @@
 # 项目知识库
 
 **生成日期:** 2026-06-21
-**提交:** c4fe737
+**提交:** 3737eb5
 **分支:** master
 
 ## 概述
@@ -20,12 +20,17 @@ bamboo-messages/
 │   ├── version.go                 # SDKName + GetUserAgent() + GetSDKVersion()
 │   ├── stream_test.go             # 流模型单元测试
 │   ├── type_test.go               # 类型单元测试
-│   │
 │   ├── anthropic/                 # Anthropic Messages 协议适配器
+│   │   └── params_audit_test.go   # 参数映射审计测试
 │   ├── openai/
 │   │   ├── completions/           # OpenAI Chat Completions 协议适配器
+│   │   │   ├── message_test.go    # 消息转换单元测试
+│   │   │   └── params_audit_test.go # 参数映射审计测试
 │   │   └── responses/             # OpenAI Responses 协议适配器
+│   │       └── params_audit_test.go # 参数映射审计测试
 │   └── gemini/                    # Google Gemini 协议适配器
+│       ├── audit_test.go          # 流事件审计测试
+│       └── params_audit_test.go   # 参数映射审计测试
 │
 ├── bamboo/                        # 公共 SDK 层 — 面向上层业务的统一 API
 │   ├── bamboo.go                  # BambooClient 接口 + Chat/Complete 实现
@@ -86,7 +91,7 @@ bamboo-messages/
 |------|------|------|------|
 | `BaseProvider[T]` | 泛型结构体 | provider.go:14 | 适配器基座，嵌入底层 SDK Client |
 | `Provider` | 接口 | provider.go:23 | 6 方法：Chat, ChatWithSystem, Complete, CompleteWithSystem, GetProviderType, GetAvailableModels |
-| `Message` | 结构体 | type.go:96 | 统一消息模型 (Role + Content + ContentBlocks + ToolCalls + ToolCallID + IsError + CacheControl) |
+| `Message` | 结构体 | type.go:96 | 统一消息模型 (Role + Content + ContentBlocks + ToolCalls + ToolCallID + ToolName + IsError + CacheControl + ThinkingContent + ThinkingSignature) |
 | `ChatConfig` | 结构体 | type.go:221 | 请求配置 (Model, Temperature, MaxTokens, Tools, Metadata, UserID, ToolChoice, ResponseFormat, ParallelToolCalls, ThinkingConfig, SystemCacheControl, PromptCacheKey, ProviderExtra) |
 | `ThinkingConfig` | 结构体 | type.go:212 | 思考/推理配置 (Effort: none/low/medium/high) |
 | `CacheControl` | 结构体 | type.go:60 | 缓存控制标记 (Type + TTL)，Anthropic prompt caching 使用 |
@@ -96,10 +101,10 @@ bamboo-messages/
 | `ContentBlock` | 接口 | type.go:155 | 多媒体内容块接口 (BlockType() string) |
 | `ImageContentBlock` | 结构体 | type.go:162 | 图片内容块 (Source: ImageSource) |
 | `DocumentContentBlock` | 结构体 | type.go:183 | 文档内容块 (Source: DocumentSource) |
-| `StreamEvent` | 结构体 | stream.go:10 | 流事件 (Type + Delta + Err)，值类型，Err 为 `*xerr.Error` |
+| `StreamEvent` | 结构体 | stream.go:10 | 流事件 (Type + Delta + Err + FinishReason)，值类型，Err 为 `*xerr.Error` |
 | `StreamDelta[E]` | 泛型结构体 | stream.go:17 | 流增量 (Type + Data)，泛型确保类型安全 |
 | `UsageData` | 结构体 | stream.go:82 | Token 用量（含 CacheCreationInputTokens / CacheReadInputTokens） |
-| `CompletionResult` | 结构体 | type.go:80 | 非流式完整响应 |
+| `CompletionResult` | 结构体 | type.go:80 | 非流式完整响应 (Content + ToolCalls + FinishReason + Usage + Thinking) |
 | `BlockStartData` | 结构体 | stream.go:93 | 内容块开始数据 (BlockType + ID + Name) |
 | `DebugEnabled` | 变量 | debug.go:17 | Debug 全局开关，通过 `BAMBOO_DEBUG` 环境变量初始化 |
 | `SetDebug` | 函数 | debug.go:23 | 全局开启/关闭 Provider 层 debug 日志 |
@@ -134,6 +139,13 @@ bamboo-messages/
 | `WithToolChoice/WithResponseFormat/WithUserID/WithParallelToolCalls` | 函数 | option.go | 类型化请求配置函数 |
 | `WithSystemCacheControl/WithPromptCacheKey` | 函数 | option.go | Prompt Caching 请求配置函数 |
 | `WithExtra` | 函数 | option.go | 兜底扩展参数传递 |
+| `ContentBlock` | 接口 | content.go | 内容块接口 (`BlockType() ContentBlockType`) |
+| `TextBlock` | 结构体 | content.go | 文本内容块 |
+| `ThinkingBlock` | 结构体 | content.go | 思考过程内容块 (Thinking + Signature) |
+| `ToolUseBlock` | 结构体 | content.go | 工具调用内容块 (ID + Name + Input) |
+| `ToolResultBlock` | 结构体 | content.go | 工具结果内容块 (ToolUseID + ToolName + Content + IsError + CacheControl) |
+| `ImageBlock` | 结构体 | content.go | 图片内容块 (Source: ContentSource) |
+| `DocumentBlock` | 结构体 | content.go | 文档内容块 (Source: ContentSource) |
 | `StreamConverter` | 结构体 | convert.go | 将 provider.StreamEvent 序列转换为 Anthropic 风格事件序列 |
 | `NewStreamConverter` | 构造函数 | convert.go | StreamConverter 实例化 |
 
@@ -226,6 +238,11 @@ bamboo-messages/
 18. **Debug 脱敏与截断** — 敏感 header（Authorization/X-API-Key/API-Key/X-Goog-API-Key）自动脱敏（保留前 4 后 4）；长文本字段（content/text/system/thinking/reasoning_content/arguments）超过 500 字符自动截断
 19. **Prompt Caching 三层方案** — Layer 1: Anthropic 显式 CacheControl 断点（system/messages/tools）；Layer 2: OpenAI PromptCacheKey 路由粘性键；Layer 3: Gemini 通过 ProviderExtra 的 `cached_content` 引用外部资源
 20. **Usage 缓存统计透传** — `UsageData` / `Usage` 结构体包含 `CacheCreationInputTokens` / `CacheReadInputTokens`，从 Provider → convert → codec 完整透传
+21. **Thinking 内容全链路保留** — `BambooMessage.ThinkingBlock` → `provider.Message.ThinkingContent/ThinkingSignature` → 适配器 → `provider.CompletionResult.Thinking` → `bamboo.Response.ThinkingBlock` 双向透传
+22. **FinishReason 流式透传** — `provider.StreamEvent.FinishReason` 由适配器填充，`StreamConverter.handleStop` 使用实际完成原因，不再硬编码 `FinishReasonEndTurn`
+23. **ToolName/ToolCallID 分离** — `ToolResultBlock` 和 `provider.Message` 同时保存 `ToolName`（函数名）和 `ToolCallID`（调用 ID），Gemini `FunctionResponse` 需要两者同时存在
+24. **StreamConverter 类型安全** — `handleDelta` 中对 `delta.Data` 的断言使用 `ok` 模式，避免自定义 Provider 触发 panic
+25. **未知角色降级** — `messagesToProvider` 对 `system` 角色显式 warning 并降级为 `RoleUser`
 
 ## 反模式
 
@@ -237,6 +254,8 @@ bamboo-messages/
 - **禁止** 将 `textBlockStarted` 和 `thinkingBlockStarted` 混用 — OpenAI/Gemini 适配器中两者必须独立追踪
 - **禁止** 在 Codec 层直接调用 Provider — Codec 只做格式转换，Provider 调用由 relay 层负责
 - **禁止** 在 `chat.go` 和 `complete.go` 中重复构建参数逻辑 — 必须统一调用 `params.go` 的 `buildParams`（Gemini 为 `buildContentConfig`）
+- **禁止** StreamConverter 中裸类型断言 `delta.Data` — 必须使用 `ok` 模式安全断言
+- **禁止** 在 `messagesToProvider` 中静默丢弃 ThinkingBlock — 必须保留到 `provider.Message.ThinkingContent/ThinkingSignature`
 
 ## 独特风格
 
@@ -252,6 +271,8 @@ bamboo-messages/
 - Debug 双层实现 — `provider/debug.go`（适配器层，打印请求参数）+ `bamboo/relay/debug.go`（relay 层，打印原始 body 和解析后的 RelayRequest），两者通过同一环境变量 `BAMBOO_DEBUG` 联动
 - Prompt Caching 统一抽象 — `CacheControl` 结构体 + `NewEphemeralCacheControl()` 工厂函数，跨 Provider 表达缓存语义；Anthropic 显式断点、OpenAI 路由粘性、Gemini 外部资源引用，三种模型统一为一套 API
 - Usage 缓存字段全链路透传 — `UsageData.CacheCreationInputTokens` / `CacheReadInputTokens` 从 Provider 适配器 → `convert.go` → `codec` 序列化，完整传递到上层
+- Thinking 内容全链路保留 — `BambooMessage.ThinkingBlock` ↔ `provider.Message.ThinkingContent/ThinkingSignature` ↔ `provider.CompletionResult.Thinking` ↔ `bamboo.Response.ThinkingBlock` 双向透传
+- FinishReason 流式透传 — 适配器在 `StreamTypeStop` 事件中填充 `FinishReason`，`StreamConverter` 使用实际停止原因而非硬编码
 
 ## 常用命令
 
@@ -295,6 +316,8 @@ BAMBOO_DEBUG=true go test ./provider/anthropic/...
 - Debug 日志的敏感字段脱敏列表：`Authorization` / `X-API-Key` / `API-Key` / `X-Goog-API-Key`，脱敏策略为保留前 4 后 4 字符
 - Debug 日志的长文本截断字段：`content` / `text` / `system` / `thinking` / `reasoning_content` / `arguments`，截断阈值 `MaxDebugBodyLen` = 500 字符
 - Gemini 适配器使用独立的 `params.go` 文件（`buildContentConfig`），与其他适配器的 `buildParams` 命名不同但职责一致
+- 新增 11 个 `*_audit_test.go` 文件用于回归审计：codec 请求解析、provider 参数映射、Gemini 流事件等
+- `CacheCreationInputTokens` 在跨协议到 OpenAI/Responses/Gemini 时无原生字段，当前按目标协议最佳实践透传或记录限制
 
 ## 引用
 

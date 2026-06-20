@@ -37,6 +37,9 @@ provider/
 | 添加 ProviderExtra 键 | `type.go` | 添加常量 + 在适配器中使用 GetExtra* 提取 |
 | 添加缓存控制 | `type.go` | `CacheControl` / `NewEphemeralCacheControl()` + Message/Tool/SystemCacheControl 字段 |
 | 理解 BlockStart 事件 | `stream.go` | BlockStartData + NewBlockStartDelta / NewBlockStartDeltaWithID |
+| 理解 Thinking 内容 | `type.go` | `Message.ThinkingContent` / `Message.ThinkingSignature` / `CompletionResult.Thinking` |
+| 理解 FinishReason 流式传递 | `stream.go` | `StreamEvent.FinishReason` — 仅在 `StreamTypeStop` 事件中填充 |
+| 理解 ToolName 字段 | `type.go` | `Message.ToolName` — Gemini FunctionResponse 需要函数名与 ToolCallID 分离 |
 
 ## 代码地图
 
@@ -44,8 +47,9 @@ provider/
 |------|------|------|------|
 | `BaseProvider[T]` | 泛型结构体 | provider.go:14 | 适配器基座，嵌入底层 SDK Client |
 | `Provider` | 接口 | provider.go:23 | 6 方法统一接口（GetProviderType 返回 `ProviderType` 类型） |
-| `Message` | 结构体 | type.go:96 | 统一消息模型 (Role + Content + ContentBlocks + ToolCalls + ToolCallID + IsError + CacheControl) |
+| `Message` | 结构体 | type.go:97 | 统一消息模型 (Role + Content + ContentBlocks + ThinkingContent + ThinkingSignature + ToolCalls + ToolCallID + ToolName + IsError + CacheControl) |
 | `ChatConfig` | 结构体 | type.go:221 | 请求配置 (Model, Temperature, MaxTokens, Tools, Metadata, UserID, ToolChoice, ResponseFormat, ParallelToolCalls, ThinkingConfig, SystemCacheControl, PromptCacheKey, ProviderExtra) |
+| `CompletionResult` | 结构体 | type.go:80 | 非流式完整响应 (Content + Thinking + ToolCalls + FinishReason + Usage) |
 | `ThinkingConfig` | 结构体 | type.go:212 | 思考/推理配置 (Effort: none/low/medium/high) |
 | `CacheControl` | 结构体 | type.go:60 | 缓存控制标记 (Type + TTL)，用于 Anthropic prompt caching |
 | `CacheControlEphemeralTTL` | 类型 | type.go:52 | TTL 类型 (`CacheTTL5m` / `CacheTTL1h`) |
@@ -55,11 +59,11 @@ provider/
 | `ContentBlock` | 接口 | type.go:155 | 多媒体内容块接口 (BlockType() string) |
 | `ImageContentBlock` | 结构体 | type.go:162 | 图片内容块 (Source: ImageSource) |
 | `DocumentContentBlock` | 结构体 | type.go:183 | 文档内容块 (Source: DocumentSource) |
-| `StreamEvent` | 结构体 | stream.go:10 | 流事件 (Type + Delta + Err)，值类型，Err 为 `*xerr.Error` |
-| `StreamDelta[E]` | 泛型结构体 | stream.go:17 | 流增量 (Type + Data) |
-| `UsageData` | 结构体 | stream.go:82 | Token 用量（含 CacheCreationInputTokens / CacheReadInputTokens） |
-| `BlockStartData` | 结构体 | stream.go:93 | 内容块开始数据 |
-| `NewUsageDeltaWithCache` | 构造函数 | stream.go:176 | 带缓存统计的 Usage Delta 工厂函数 |
+| `StreamEvent` | 结构体 | stream.go:10 | 流事件 (Type + Delta + Err + FinishReason)，值类型，Err 为 `*xerr.Error`，FinishReason 仅在 StreamTypeStop 中填充 |
+| `StreamDelta[E]` | 泛型结构体 | stream.go:18 | 流增量 (Type + Data) |
+| `UsageData` | 结构体 | stream.go:83 | Token 用量（含 CacheCreationInputTokens / CacheReadInputTokens） |
+| `BlockStartData` | 结构体 | stream.go:94 | 内容块开始数据 |
+| `NewUsageDeltaWithCache` | 构造函数 | stream.go:177 | 带缓存统计的 Usage Delta 工厂函数 |
 | `DebugEnabled` | 变量 | debug.go:17 | Debug 全局开关，通过环境变量 `BAMBOO_DEBUG` 初始化 |
 | `SetDebug` | 函数 | debug.go:23 | 全局开启/关闭 Provider 层 debug 日志 |
 | `DebugRequest` | 函数 | debug.go:50 | 输出请求 debug 日志（providerType/endpoint/headers/body） |
@@ -78,6 +82,9 @@ provider/
 - **版本读取策略** — `GetSDKVersion()` 优先 `info.Main.Version`，回退到依赖列表查找，最终 `"dev"`
 - **sync.Once 并发安全** — `GetUserAgent()` 和 `GetSDKVersion()` 使用 sync.Once 保证只初始化一次
 - **ContentBlock 接口** — 多媒体内容块统一实现 `BlockType() string` 方法，`ContentBlocks` 字段优先于 `Content` 字符串字段
+- **Thinking 内容双向支持** — `Message.ThinkingContent` / `ThinkingSignature` 用于多轮对话中保留 thinking block（Anthropic extended thinking 验证签名）；`CompletionResult.Thinking` 用于非流式响应中的思考过程内容
+- **ToolName/ToolCallID 分离** — `Message.ToolName` 存储函数名（Gemini FunctionResponse 需要），`Message.ToolCallID` 存储调用 ID；其他 Provider 通常只需 ToolCallID
+- **FinishReason 流式透传** — `StreamEvent.FinishReason` 仅在 `StreamTypeStop` 事件中由适配器填充，标识流结束的具体原因（stop/tool_calls/length/content_filter 等），上层可通过此字段判断流结束状态
 - **Debug 三入口** — 环境变量 `BAMBOO_DEBUG=1/true/on` / `provider.SetDebug(true)` / 适配器 `WithDebug()` Option；三者任一启用即生效，适配器在发起请求前调用 `DebugRequest()` 输出实际参数
 - **Debug 敏感字段脱敏** — `Authorization` / `X-API-Key` / `API-Key` / `X-Goog-API-Key` 等敏感 header 自动脱敏（仅保留前 4 和后 4 字符）
 - **Debug 长文本截断** — `content` / `text` / `system` / `thinking` / `reasoning_content` / `arguments` 等长文本字段超过 `MaxDebugBodyLen` (500) 时自动截断
@@ -90,6 +97,7 @@ provider/
 - **禁止** 裸类型断言访问 ProviderExtra — 必须使用 GetExtra* helpers
 - **禁止** 在 stream.go 中不关闭 channel — 必须在 goroutine 结束时 close
 - **禁止** 适配器之间互相引用 — 每个适配器独立，零耦合
+- **禁止** 将 `ThinkingContent` 与 `Content` 混淆 — 前者是 thinking block 的内容，后者是 text block 的内容
 
 ## 调试路径
 
@@ -100,6 +108,8 @@ provider/
 5. ProviderExtra 取值失败 → 检查 key 常量是否正确，类型断言是否匹配
 6. 请求参数不确定 → 启用 Debug（`BAMBOO_DEBUG=1` 或 `WithDebug()`），查看实际发送的 headers 和 body
 7. Prompt caching 不生效 → 检查 `CacheControl` 标记位置（system / messages / tools）和 TTL 值
+8. FinishReason 缺失 → 检查适配器是否在 `StreamTypeStop` 事件中正确填充 `StreamEvent.FinishReason`
+9. Thinking 内容丢失 → 检查适配器是否正确提取 thinking/reasoning content 并填充到 `CompletionResult.Thinking` 或 `Message.ThinkingContent`
 
 ## 引用
 

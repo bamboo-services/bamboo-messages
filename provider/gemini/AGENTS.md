@@ -9,15 +9,16 @@ Google Gemini 协议适配器，将 Google Gemini API（`google.golang.org/genai
 ```text
 provider/gemini/
 ├── provider.go      # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithDebug) + 类型别名
-├── params.go        # buildContentConfig — 共享参数构建（Chat/Complete 统一入口）+ mapThinkingConfig/mapToolChoice
+├── params.go        # buildContentConfig — 共享参数构建（Chat/Complete 统一入口）+ mapThinkingConfig/mapToolChoice + MaxTokens 溢出保护 + UserID→Labels
 ├── chat.go          # 流式对话实现 (Chat/ChatWithSystem) — GenerateContentStream
-├── complete.go      # 非流式对话实现 (Complete/CompleteWithSystem) — GenerateContent
-├── stream.go        # 流式响应 → StreamEvent 转换 + handleStreamEvent
-├── message.go       # 消息格式双向转换 (buildMessages)
+├── complete.go      # 非流式对话实现 (Complete/CompleteWithSystem) — 含 thinking parts 提取
+├── stream.go        # 流式响应 → StreamEvent 转换 + handleStreamEvent + FinishReason 携带
+├── message.go       # 消息格式双向转换 (buildMessages) — ToolName/ToolCallID 分离映射
 ├── models.go        # 模型常量 (gemini-2.5 系列等)
 ├── option.go        # GeminiOption + WithAPIKey/WithBaseURL/WithHeader
 ├── tools.go         # 工具定义转换 (buildTools)
-└── (provider_test.go 待补充)
+├── audit_test.go    # 工具调用 BlockStart + Thinking BlockStart 审计测试
+└── params_audit_test.go  # MaxTokens 溢出 + SafetySettings + UserID + ParallelToolCalls + ResponseFormat 审计测试
 ```
 
 ## 导航指南
@@ -36,11 +37,30 @@ provider/gemini/
 | 修改工具定义转换 | `tools.go` | `buildTools` → `genai.Tool` (FunctionDeclaration) |
 | 启用 debug 日志 | `provider.go` | `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` |
 
+## 代码地图
+
+| 符号 | 类型 | 位置 | 作用 |
+|------|------|------|------|
+| `Provider` | 类型别名 | provider.go | `BaseProvider[genai.Client]` |
+| `buildContentConfig` | 方法 | params.go | Chat/Complete 共享参数构建入口（含 MaxTokens 溢出保护） |
+| `mapThinkingConfig` | 函数 | params.go | Effort → genai.ThinkingConfig + ThinkingLevel 映射 |
+| `mapToolChoice` | 函数 | params.go | 字符串 → genai.FunctionCallingConfig 映射 |
+| `handlePart` | 方法 | stream.go | 处理单个 Part（text/thinking/function_call）— 工具调用不再发 BlockStart |
+| `handleCandidate` | 方法 | stream.go | 处理 Candidate + FinishReason |
+| `mapFinishReason` | 函数 | stream.go | genai.FinishReason → provider.FinishReason 映射 |
+| `buildToolMessage` | 方法 | message.go | 构建工具响应 — 优先使用 ToolName，回退到 ToolCallID |
+
 ## 约定
 
 - **参数构建集中化** — `params.go` 的 `buildContentConfig` 是 Chat 和 Complete 的共享参数构建入口（与其他适配器的 `buildParams` 规则一致），确保流式和非流式路径参数一致
+- **MaxTokens 溢出保护** — `config.MaxTokens`（int64）转 `gc.MaxOutputTokens`（int32）时，超过 `math.MaxInt32` 的值被截断为 `math.MaxInt32`，避免静默溢出导致负数或截断值
+- **UserID → Labels 映射** — Gemini 无原生 UserID 字段，`config.UserID` 存入 `gc.Labels["user_id"]`，并在 debug 模式下输出日志
 - **BlockStart 合成** — Gemini 没有原生 `content_block_start` 事件，通过 `textBlockStarted` / `thinkingBlockStarted` 两个独立布尔标志在首个文本/推理增量前合成
+- **工具调用不发 BlockStart** — `handlePart` 为 FunctionCall 仅发出 `ToolCallDelta` + `ToolCallDeltaData`，不再发出 `BlockStartDeltaWithID("tool_use")`。block 生命周期由 StreamConverter 统一管理，与 Anthropic/OpenAI 适配器保持一致
 - **双 Block 状态追踪** — `textBlockStarted` 和 `thinkingBlockStarted` 独立追踪，互不干扰（与 OpenAI 适配器模式一致）
+- **Thinking 非流式提取** — `complete.go` 遍历 `candidate.Content.Parts`，`part.Thought == true` 的内容收集到 `CompletionResult.Thinking`
+- **ToolName/ToolCallID 分离** — `buildToolMessage` 优先使用 `msg.ToolName`（函数名），回退到 `msg.ToolCallID`；构建 `genai.FunctionResponse` 时同时设置 `ID`（= ToolCallID）和 `Name`（= ToolName/ToolCallID），不再使用 `genai.NewContentFromFunctionResponse` 以保留 ID 信息
+- **FinishReason 流式携带** — `handleCandidate` 在 `FinishReason` 非空且非 Unspecified 时，通过 `mapFinishReason` 映射并填充到 `StreamEvent.FinishReason`
 - **genai SDK** — 使用 `google.golang.org/genai` (v1.60+)，`genai.Client` 支持 Gemini API (`BackendGeminiAPI`) 和 Vertex AI (`BackendVertexAI`) 两种后端
 - **Options 模式** — `WithAPIKey` / `WithBaseURL` / `WithHeader`，与其他适配器保持一致的 Functional Options 接口
 - **UserAgent 统一** — 构造函数中通过 `clientCfg.HTTPOptions.Headers.Set("User-Agent", provider.GetUserAgent())` 设置
@@ -49,6 +69,7 @@ provider/gemini/
 - **ToolChoice 映射** — `auto→ModeAuto`、`none→ModeNone`、`required/forced/any→ModeAny`
 - **ResponseFormat 映射** — `"json_object"` → `ResponseMIMEType: "application/json"`
 - **TopK / SafetySettings / CachedContent** — 通过 ProviderExtra 提取（Gemini 特有参数）
+- **ParallelToolCalls 不支持** — Gemini 不支持此参数，当设置时仅输出 debug 日志，不报错
 - **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 
 ## 反模式
@@ -57,17 +78,25 @@ provider/gemini/
 - **禁止** 裸类型断言访问 `ProviderExtra` — 必须使用 `provider.GetExtra*` helper
 - **禁止** 在 `genai.NewClient` 返回 error 时 panic — 构造函数做防御性处理，返回零值 Client
 - **禁止** 在 `chat.go` 和 `complete.go` 中重复构建参数逻辑 — 必须统一调用 `params.go` 的 `buildContentConfig`
+- **禁止** 在 `handlePart` 中为 FunctionCall 发送 BlockStartDelta — block 生命周期由 StreamConverter 统一管理
+- **禁止** 使用 `genai.NewContentFromFunctionResponse` — 该辅助函数不支持设置 FunctionResponse.ID，必须手动构建 `genai.Content` 以保留 ToolCallID
 
 ## 调试路径
 
 1. 参数构建错误 → 检查 `params.go` 的 `buildContentConfig` 是否正确映射所有字段
-2. 流式输出异常 → 检查 `stream.go` 的 `handleStreamEvent` 是否正确提取 `candidates[0].content.parts`
-3. BlockStart 重复或缺失 → 检查 `textBlockStarted` / `thinkingBlockStarted` 状态管理
-4. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成 `genai.Tool`
-5. 认证失败 → 确认 API Key 有效，或检查 `WithBaseURL` 是否指向正确的 Gemini 兼容端点
-6. 模型不可用 → 检查 `models.go` 的模型常量是否与 Gemini API 当前支持的版本匹配
-7. Thinking 配置不生效 → 检查 `mapThinkingConfig` 中 effort 到 `ThinkingLevel` 的映射
-8. 请求参数不确定 → 启用 `WithDebug()` 或设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
+2. MaxTokens 异常 → 检查 `buildContentConfig` 中 int64→int32 溢出保护是否生效（值超过 MaxInt32 时应截断）
+3. 流式输出异常 → 检查 `stream.go` 的 `handleStreamEvent` 是否正确提取 `candidates[0].content.parts`
+4. BlockStart 重复或缺失 → 检查 `textBlockStarted` / `thinkingBlockStarted` 状态管理
+5. 工具调用 BlockStart 多余 → 确认 `handlePart` 不再为 FunctionCall 发送 BlockStart（由 StreamConverter 处理）
+6. FinishReason 缺失 → 检查 `handleCandidate` 是否在 FinishReason 非空时正确映射
+7. 工具响应 name 错误 → 检查 `buildToolMessage` 是否正确使用 `msg.ToolName`（优先）和 `msg.ToolCallID`（回退）
+8. Thinking 内容丢失 → 非流式：检查 `complete.go` 是否正确处理 `part.Thought == true`
+9. UserID 丢失 → 检查 `buildContentConfig` 中 UserID → Labels 映射
+10. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成 `genai.Tool`
+11. 认证失败 → 确认 API Key 有效，或检查 `WithBaseURL` 是否指向正确的 Gemini 兼容端点
+12. 模型不可用 → 检查 `models.go` 的模型常量是否与 Gemini API 当前支持的版本匹配
+13. Thinking 配置不生效 → 检查 `mapThinkingConfig` 中 effort 到 `ThinkingLevel` 的映射
+14. 请求参数不确定 → 启用 `WithDebug()` 或设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
 
 ## 引用
 

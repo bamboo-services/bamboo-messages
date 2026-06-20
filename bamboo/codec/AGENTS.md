@@ -14,22 +14,27 @@ bamboo/codec/
 ├── errors.go               # CodecError 错误类型 + ErrorType 常量
 ├── anthropic/              # Anthropic Messages 协议编解码
 │   ├── codec.go            # 全局 Codec 实例 + init() 注册
-│   ├── request.go          # ParseRequest: Anthropic JSON → RelayRequest
-│   ├── response.go         # SerializeResponse: bamboo.Response → Anthropic JSON
+│   ├── request.go          # ParseRequest: Anthropic JSON → RelayRequest（含 document 块解析、tool_choice forced_tool_name）
+│   ├── response.go         # SerializeResponse: bamboo.Response → Anthropic JSON（含 DocumentBlock 序列化）
 │   ├── stream.go           # StreamSerializer: StreamEvent → Anthropic SSE 帧
 │   ├── error.go            # SerializeError: error → Anthropic 错误 JSON
 │   ├── request_test.go     # 请求解析单元测试
+│   ├── request_audit_test.go  # N-to-N 转换安全性审计测试
 │   └── response_test.go    # 响应序列化单元测试
 ├── openai/                 # OpenAI Chat Completions 协议编解码（结构同 anthropic/）
 │   ├── codec.go / request.go / response.go / stream.go / error.go
 │   ├── request_test.go / response_test.go
+│   ├── request_audit_test.go  # N-to-N 转换安全性审计测试
 │   └── stream_test.go      # 流式序列化单元测试（SSE 帧生成）
 ├── responses/              # OpenAI Responses 协议编解码（结构同 anthropic/）
 │   ├── codec.go / request.go / response.go / stream.go / error.go
-│   └── request_test.go / response_test.go
+│   ├── request_test.go / response_test.go
+│   └── request_audit_test.go  # N-to-N 转换安全性审计测试（含 input_image/input_file、metadata 测试）
 └── gemini/                 # Google Gemini 协议编解码（结构同 anthropic/）
     ├── codec.go / request.go / response.go / stream.go / error.go
-    └── request_test.go
+    ├── request_test.go / response_test.go
+    ├── request_audit_test.go  # N-to-N 转换安全性审计测试（含 thinkingConfig、model、IsStream 测试）
+    └── safety_settings_audit_test.go  # safety_settings 类型转换审计测试
 ```
 
 ## 导航指南
@@ -46,6 +51,8 @@ bamboo/codec/
 | 修改 Responses 编解码 | `responses/` | 结构与 `anthropic/` 完全一致 |
 | 修改 Gemini 编解码 | `gemini/` | 结构与 `anthropic/` 完全一致 |
 | 测试 OpenAI 流式序列化 | `openai/stream_test.go` | SSE 帧生成的单元测试 |
+| 查看安全性审计测试 | `*/request_audit_test.go` | N-to-N 转换安全性审计（P1/P2 级问题回归测试） |
+| 查看 Gemini safety_settings 审计 | `gemini/safety_settings_audit_test.go` | safety_settings 类型转换验证 |
 
 ## 约定
 
@@ -54,6 +61,20 @@ bamboo/codec/
 - **RelayRequest 中间表示** — 所有外部协议的请求体先解析为 `RelayRequest`（包含 `Messages`/`System`/`Config`/`IsStream`），再由 relay 层交给 Provider 处理
 - **错误分类标准化** — 使用 `CodecError` + `ErrorType` 分类错误（invalid_request / provider_error / authentication_error / rate_limit_exceeded / internal_error），每个子包的 `SerializeError` 负责将错误映射为对应协议的错误响应格式
 - **子包结构一致** — 四个格式子包（anthropic / openai / responses / gemini）内部文件分工完全一致：`codec.go` + `request.go` + `response.go` + `stream.go` + `error.go`
+- **cache_creation_input_tokens 已知限制** — OpenAI / Responses / Gemini 协议无原生 `cache_creation_input_tokens` 字段，仅映射 `CacheReadInputTokens`；`CacheCreationInputTokens` 在跨协议转换（Anthropic→其他）中会丢失，此为已知限制
+- **DeltaSignature 跨协议丢弃** — `signature_delta` 为 Anthropic Extended Thinking 特有的签名增量，OpenAI / Responses / Gemini 协议无对应字段，在流式序列化中静默丢弃（返回 nil）
+- **ToolResultBlock 不应出现在响应中** — 所有协议的 `serializeResponse` 对 assistant 响应中的 `ToolResultBlock` 记录警告并跳过；同理 `ImageBlock` / `DocumentBlock` 在不支持的协议响应中也记录警告并跳过
+- **Anthropic tool_choice "tool" 类型保留** — `parseToolChoice` 解析 `{type:"tool", name:"xxx"}` 时返回 `"forced"` + `name`，forced tool name 存入 `ProviderExtra["forced_tool_name"]`，避免跨协议转换时丢失
+- **Anthropic document 块解析** — `convertContentBlock` 支持 `"document"` 类型，解析为 `DocumentBlock`（含 source 的 type/mediaType/data/url）
+- **Responses input_image / input_file 解析** — `parseInputMessage` 支持 `input_image`（→ `ImageBlock`）和 `input_file`（→ `DocumentBlock`，支持 file_id 和 file_data 两种模式）
+- **Responses metadata 智能存储** — 当 `metadata` 的所有值都是 string 类型时存入 `config.Metadata`（`map[string]string`）；混合类型回退到 `ProviderExtra["metadata"]`
+- **Gemini safety_settings 类型转换** — `convertSafetySettings` 将 `[]geminiSafetySetting` 转换为 `[]*genai.SafetySetting`，确保 codec 层输出与 provider 期望的类型一致，避免 relay 路径上类型断言失败
+- **Gemini thinkingConfig 解析** — `generationConfig.thinkingConfig.thinkingBudget` 通过 `mapThinkingBudgetToEffort` 映射为 `ThinkingConfig`（budget≤2048→low、≤8192→medium、>8192→high）
+- **Gemini model 在 URL 路径中** — Gemini 的 model 名称在 URL 路径中（如 `/v1beta/models/gemini-2.5-pro:generateContent`），不在请求 body 中，因此 `config.Model` 为空；relay 层需从 URL 路径提取
+- **Gemini IsStream 硬编码 false** — Gemini 的流式标识不在 body 中，由 URL 参数 `?alt=sse` 决定，`IsStream` 硬编码为 false；relay 层应根据实际 URL 覆盖
+- **Gemini ThinkingBlock 序列化** — `buildResponseParts` 将 `ThinkingBlock` 序列化为 `{text: "...", thought: true}`（此前被忽略）
+- **Gemini inlineData / fileData 映射** — `buildInlineDataPart` 将 `ContentSource` 映射为 Gemini part：base64→`{inlineData}`、url→`{fileData}`
+- **Gemini ToolResultBlock.ToolName** — 解析 `functionResponse` 时将 `Name` 写入 `ToolResultBlock.ToolName`
 
 ## 反模式
 
@@ -61,6 +82,9 @@ bamboo/codec/
 - **禁止** 在 `Codec` 接口方法中保存状态 — 有状态逻辑必须通过 `NewSerializer()` 返回的 `StreamSerializer` 实例处理
 - **禁止** 忘记在子包 `init()` 中注册全局变量 — 否则 `registry.Get()` 返回 nil Codec
 - **禁止** 裸返回 error — 内部错误应包装为 `CodecError` 以保留错误分类信息
+- **禁止** 在 Gemini codec 中将 safety_settings 存为原始 JSON 结构 — 必须转换为 `[]*genai.SafetySetting`，否则 relay→provider 路径类型断言失败导致静默丢弃
+- **禁止** 在非 Anthropic 协议中输出 DeltaSignature — 应返回 nil 静默丢弃，避免生成协议不支持的 SSE 帧
+- **禁止** 在响应序列化中遗漏 ToolResultBlock/ImageBlock/DocumentBlock 的警告日志 — 不支持的 block 类型必须记录 warning 后跳过，不得静默丢弃
 
 ## 调试路径
 
@@ -70,6 +94,13 @@ bamboo/codec/
 4. `Get(format)` 返回 nil → 检查调用方是否 import 了对应格式的子包（触发 `init()` 注册）
 5. 错误响应格式不匹配 → 检查对应子包的 `error.go` 的 `serializeError` 输出
 6. 缓存字段未透传 → 检查 `request.go` 解析时是否提取了 `cache_control` 字段，`response.go` 序列化时是否输出 `cache_creation_input_tokens` / `cache_read_input_tokens`
+7. cache_creation_input_tokens 丢失 → OpenAI / Responses / Gemini 无原生 cache_creation 字段，Anthropic→其他转换时此字段丢失为已知限制
+8. forced tool name 丢失 → Anthropic `tool_choice:{type:"tool", name:"xxx"}` 的 name 已存入 `ProviderExtra["forced_tool_name"]`，适配器需从此处读取
+9. Gemini safety_settings 不生效 → 检查 `ProviderExtra["safety_settings"]` 的类型是否为 `[]*genai.SafetySetting`（而非原始 JSON 结构体）
+10. Gemini thinkingConfig 未解析 → 检查 `generationConfig.thinkingConfig.thinkingBudget` 是否存在，`mapThinkingBudgetToEffort` 会根据 budget 大小映射 effort
+11. Gemini model 为空 → model 在 URL 路径中，codec 层无法获取，relay 层需从 URL 提取
+12. Responses metadata 丢失 → 全 string metadata 现存入 `config.Metadata`；混合类型存入 `ProviderExtra["metadata"]`；检查是否读取了正确的字段
+13. input_image / input_file 未解析 → Responses codec 现支持 `input_image`（→ ImageBlock）和 `input_file`（→ DocumentBlock），检查 content part 的 type 字段
 
 ## 引用
 
