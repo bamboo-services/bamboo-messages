@@ -2,6 +2,7 @@ package provider
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -51,37 +52,48 @@ func DebugRequest(providerType, endpoint string, headers map[string]string, para
 		return
 	}
 
-	// 序列化 params 为 JSON
-	var bodyJSON string
-	if params != nil {
-		raw, err := json.Marshal(params)
-		if err != nil {
-			bodyJSON = "<marshal error: " + err.Error() + ">"
-		} else {
-			bodyJSON = truncateContent(string(raw))
-		}
-	}
-
-	// 构建 headers 字符串
-	var headerStr string
-	if len(headers) > 0 {
-		parts := make([]string, 0, len(headers))
-		for k, v := range headers {
-			// API Key 脱敏处理
-			if isSensitiveHeader(k) {
-				v = maskSensitive(v)
-			}
-			parts = append(parts, k+": "+v)
-		}
-		headerStr = strings.Join(parts, ", ")
-	} else {
-		headerStr = "(none)"
-	}
-
 	log.Printf(
 		"[bamboo/debug] provider=%s endpoint=%s | headers: {%s} | body: %s",
-		providerType, endpoint, headerStr, bodyJSON,
+		providerType, endpoint, formatHeaders(headers), formatParams(params),
 	)
+}
+
+// FormatDebugRequest 格式化请求的 debug 信息并返回字符串。
+//
+// 与 DebugRequest 功能相同，但返回字符串而非打日志。
+// 不受 DebugEnabled 开关影响，调用即返回。
+//
+// 适用于上层业务需要自定义日志格式、写入文件、或通过 HTTP 接口暴露 debug 信息的场景。
+func FormatDebugRequest(providerType, endpoint string, headers map[string]string, params any) string {
+	return fmt.Sprintf(
+		"[bamboo/debug] provider=%s endpoint=%s | headers: {%s} | body: %s",
+		providerType, endpoint, formatHeaders(headers), formatParams(params),
+	)
+}
+
+func formatHeaders(headers map[string]string) string {
+	if len(headers) == 0 {
+		return "(none)"
+	}
+	parts := make([]string, 0, len(headers))
+	for k, v := range headers {
+		if isSensitiveHeader(k) {
+			v = maskSensitive(v)
+		}
+		parts = append(parts, k+": "+v)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatParams(params any) string {
+	if params == nil {
+		return "(none)"
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return "<marshal error: " + err.Error() + ">"
+	}
+	return truncateContent(string(raw))
 }
 
 // truncateContent 截断 JSON 字符串中的 content 字段值，避免日志过长。

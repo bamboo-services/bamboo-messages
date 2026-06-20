@@ -2,6 +2,7 @@ package relay
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -53,6 +54,19 @@ func debugRelayInput(enabled bool, fn string, inFormat, outFormat any, body []by
 	)
 }
 
+// FormatRelayInput 格式化 relay 输入的 debug 信息并返回字符串。
+//
+// 与 debugRelayInput 功能相同，但返回字符串而非打日志。
+// 不受 debug 开关影响，调用即返回。
+//
+// 适用于上层业务需要自定义日志格式、写入文件、或通过 HTTP 接口暴露 debug 信息的场景。
+func FormatRelayInput(fn string, inFormat, outFormat any, body []byte) string {
+	return fmt.Sprintf(
+		"[bamboo/debug] relay input | fn=%s in=%v out=%v | raw body: %s",
+		fn, inFormat, outFormat, truncateContent(string(body)),
+	)
+}
+
 // debugRelayParsed 输出 relay 层 codec 解析后的统一请求 debug 日志。
 //
 // 在 codec.ParseRequest 之后调用，打印解析得到的 RelayRequest 中间表示，
@@ -77,6 +91,26 @@ func debugRelayParsed(enabled bool, fn string, inFormat any, req any) {
 		}
 	}
 	log.Printf(
+		"[bamboo/debug] relay parsed | fn=%s in=%v | RelayRequest: %s",
+		fn, inFormat, reqJSON,
+	)
+}
+
+// FormatRelayParsed 格式化 relay 解析结果的 debug 信息并返回字符串。
+//
+// 与 debugRelayParsed 功能相同，但返回字符串而非打日志。
+// 不受 debug 开关影响，调用即返回。
+func FormatRelayParsed(fn string, inFormat any, req any) string {
+	var reqJSON string
+	if req != nil {
+		raw, err := json.Marshal(req)
+		if err != nil {
+			reqJSON = "<marshal error: " + err.Error() + ">"
+		} else {
+			reqJSON = truncateContent(string(raw))
+		}
+	}
+	return fmt.Sprintf(
 		"[bamboo/debug] relay parsed | fn=%s in=%v | RelayRequest: %s",
 		fn, inFormat, reqJSON,
 	)
