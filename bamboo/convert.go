@@ -35,13 +35,20 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		var toolCalls []provider.ToolCall
 		var toolResults []provider.Message
 		var contentBlocks []provider.ContentBlock
+		var msgCacheControl *provider.CacheControl
 
 		for _, block := range msg.Content {
 			switch b := block.(type) {
 			case *TextBlock:
 				textBuilder.WriteString(b.Text)
+				if b.CacheControl != nil {
+					msgCacheControl = b.CacheControl
+				}
 			case *ThinkingBlock:
 				// 思考过程不发送给 provider
+				if b.CacheControl != nil {
+					msgCacheControl = b.CacheControl
+				}
 			case *ToolUseBlock:
 				toolCalls = append(toolCalls, provider.ToolCall{
 					ID:   b.ID,
@@ -51,11 +58,15 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 						Arguments: string(b.Input),
 					},
 				})
+				if b.CacheControl != nil {
+					msgCacheControl = b.CacheControl
+				}
 			case *ToolResultBlock:
 				toolResults = append(toolResults, provider.Message{
-					Role:       provider.RoleTool,
-					Content:    b.Content,
-					ToolCallID: b.ToolUseID,
+					Role:         provider.RoleTool,
+					Content:      b.Content,
+					ToolCallID:   b.ToolUseID,
+					CacheControl: b.CacheControl,
 				})
 			case *ImageBlock:
 				// 仅用户消息支持图片内容块
@@ -69,6 +80,9 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 						},
 					})
 				}
+				if b.CacheControl != nil {
+					msgCacheControl = b.CacheControl
+				}
 			case *DocumentBlock:
 				// 仅用户消息支持文档内容块
 				if msg.Role == RoleUser && b.Source != nil {
@@ -80,6 +94,9 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 							URL:       b.Source.URL,
 						},
 					})
+				}
+				if b.CacheControl != nil {
+					msgCacheControl = b.CacheControl
 				}
 			default:
 				// 未来未知类型
@@ -94,6 +111,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 				Content:       content,
 				ContentBlocks: contentBlocks,
 				ToolCalls:     toolCalls,
+				CacheControl:  msgCacheControl,
 			})
 		}
 		result = append(result, toolResults...)
@@ -121,19 +139,21 @@ func configToProvider(cfg *RequestConfig) *provider.ChatConfig {
 		return nil
 	}
 	return &provider.ChatConfig{
-		Model:             cfg.Model,
-		MaxTokens:         cfg.MaxTokens,
-		Temperature:       cfg.Temperature,
-		TopP:              cfg.TopP,
-		Stop:              cfg.StopSequences,
-		Tools:             toolsToProvider(cfg.Tools),
-		Metadata:          cfg.Metadata,
-		UserID:            cfg.UserID,
-		ToolChoice:        cfg.ToolChoice,
-		ResponseFormat:    cfg.ResponseFormat,
-		ParallelToolCalls: cfg.ParallelToolCalls,
-		ThinkingConfig:    cfg.ThinkingConfig,
-		ProviderExtra:     cfg.ProviderExtra,
+		Model:              cfg.Model,
+		MaxTokens:          cfg.MaxTokens,
+		Temperature:        cfg.Temperature,
+		TopP:               cfg.TopP,
+		Stop:               cfg.StopSequences,
+		Tools:              toolsToProvider(cfg.Tools),
+		Metadata:           cfg.Metadata,
+		UserID:             cfg.UserID,
+		ToolChoice:         cfg.ToolChoice,
+		ResponseFormat:     cfg.ResponseFormat,
+		ParallelToolCalls:  cfg.ParallelToolCalls,
+		ThinkingConfig:     cfg.ThinkingConfig,
+		SystemCacheControl: cfg.SystemCacheControl,
+		PromptCacheKey:     cfg.PromptCacheKey,
+		ProviderExtra:      cfg.ProviderExtra,
 	}
 }
 
@@ -155,6 +175,7 @@ func toolsToProvider(tools []Tool) []provider.Tool {
 				Description: t.Description,
 				Parameters:  buildParameters(t.InputSchema),
 			},
+			CacheControl: t.CacheControl,
 		})
 	}
 	return result

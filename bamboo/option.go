@@ -84,3 +84,17 @@ func WithUserID(userID string) RequestOption {
 func WithParallelToolCalls(enabled bool) RequestOption {
 	return func(cfg *RequestConfig) { cfg.ParallelToolCalls = enabled }
 }
+
+// WithSystemCacheControl 设置 system prompt 的缓存控制标记。
+//
+// 用于 Anthropic prompt caching，在 system prompt 上设置缓存断点。
+func WithSystemCacheControl(cc *provider.CacheControl) RequestOption {
+	return func(cfg *RequestConfig) { cfg.SystemCacheControl = cc }
+}
+
+// WithPromptCacheKey 设置 OpenAI prompt cache 路由粘性键。
+//
+// 相同 key 的请求会尽量复用同一缓存路径，提升缓存命中率。
+func WithPromptCacheKey(key string) RequestOption {
+	return func(cfg *RequestConfig) { cfg.PromptCacheKey = key }
+}

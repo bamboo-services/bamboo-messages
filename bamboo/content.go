@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+
+	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // ContentBlockType 内容块类型标识。
@@ -61,53 +63,59 @@ var _ ContentBlock = (*DocumentBlock)(nil)
 
 // TextBlock 纯文本内容块。
 type TextBlock struct {
-	Type ContentBlockType `json:"type"`
-	Text string          `json:"text,omitempty"`
+	Type         ContentBlockType      `json:"type"`
+	Text         string                `json:"text,omitempty"`
+	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
 func (b TextBlock) BlockType() ContentBlockType { return ContentBlockText }
 
 // ThinkingBlock 思考过程内容块（如 Claude Extended Thinking）。
 type ThinkingBlock struct {
-	Type      ContentBlockType `json:"type"`
-	Thinking  string           `json:"thinking,omitempty"`
-	Signature string           `json:"signature,omitempty"`
+	Type         ContentBlockType      `json:"type"`
+	Thinking     string                `json:"thinking,omitempty"`
+	Signature    string                `json:"signature,omitempty"`
+	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
 func (b ThinkingBlock) BlockType() ContentBlockType { return ContentBlockThinking }
 
 // ToolUseBlock 工具调用内容块。
 type ToolUseBlock struct {
-	Type  ContentBlockType `json:"type"`
-	ID    string           `json:"id,omitempty"`
-	Name  string           `json:"name,omitempty"`
-	Input json.RawMessage  `json:"input,omitempty"`
+	Type         ContentBlockType      `json:"type"`
+	ID           string                `json:"id,omitempty"`
+	Name         string                `json:"name,omitempty"`
+	Input        json.RawMessage       `json:"input,omitempty"`
+	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
 func (b ToolUseBlock) BlockType() ContentBlockType { return ContentBlockToolUse }
 
 // ToolResultBlock 工具调用结果内容块。
 type ToolResultBlock struct {
-	Type      ContentBlockType `json:"type"`
-	ToolUseID string           `json:"tool_use_id,omitempty"`
-	Content   string           `json:"content,omitempty"`
-	IsError   bool             `json:"is_error,omitempty"`
+	Type         ContentBlockType      `json:"type"`
+	ToolUseID    string                `json:"tool_use_id,omitempty"`
+	Content      string                `json:"content,omitempty"`
+	IsError      bool                  `json:"is_error,omitempty"`
+	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
 func (b ToolResultBlock) BlockType() ContentBlockType { return ContentBlockToolResult }
 
 // ImageBlock 图片内容块。
 type ImageBlock struct {
-	Type   ContentBlockType `json:"type"`
-	Source *ContentSource  `json:"source,omitempty"`
+	Type         ContentBlockType      `json:"type"`
+	Source       *ContentSource        `json:"source,omitempty"`
+	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
 func (b ImageBlock) BlockType() ContentBlockType { return ContentBlockImage }
 
 // DocumentBlock 文档内容块。
 type DocumentBlock struct {
-	Type   ContentBlockType `json:"type"`
-	Source *ContentSource  `json:"source,omitempty"`
+	Type         ContentBlockType      `json:"type"`
+	Source       *ContentSource        `json:"source,omitempty"`
+	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
 func (b DocumentBlock) BlockType() ContentBlockType { return ContentBlockDocument }
@@ -181,6 +189,11 @@ func NewTextBlock(text string) ContentBlock {
 	return &TextBlock{Type: ContentBlockText, Text: text}
 }
 
+// NewTextBlockWithCache 创建带缓存标记的文本内容块。
+func NewTextBlockWithCache(text string, cc *provider.CacheControl) ContentBlock {
+	return &TextBlock{Type: ContentBlockText, Text: text, CacheControl: cc}
+}
+
 // NewThinkingBlock 创建思考过程内容块。
 //
 // thinking 为思考过程文本，signature 为用于验证的签名。
@@ -205,6 +218,16 @@ func NewToolUseBlock(id, name string, input any) ContentBlock {
 	}
 
 	return &ToolUseBlock{Type: ContentBlockToolUse, ID: id, Name: name, Input: raw}
+}
+
+// NewToolUseBlockWithCache 创建带缓存标记的工具调用内容块。
+func NewToolUseBlockWithCache(id, name string, input any, cc *provider.CacheControl) ContentBlock {
+	block := NewToolUseBlock(id, name, input)
+	if tub, ok := block.(*ToolUseBlock); ok {
+		tub.CacheControl = cc
+		return tub
+	}
+	return block
 }
 
 // NewToolResultBlock 创建工具调用结果内容块。

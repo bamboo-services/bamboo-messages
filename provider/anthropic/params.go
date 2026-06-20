@@ -29,9 +29,11 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 
 	// 设置系统提示
 	if systemPrompt != "" {
-		params.System = []anthropic.BetaTextBlockParam{
-			{Text: systemPrompt},
+		sysBlock := anthropic.BetaTextBlockParam{Text: systemPrompt}
+		if config.SystemCacheControl != nil {
+			sysBlock.CacheControl = toAnthropicCacheControl(config.SystemCacheControl)
 		}
+		params.System = []anthropic.BetaTextBlockParam{sysBlock}
 	}
 
 	// 设置可选参数（检查 nil 避免空指针解引用）

@@ -78,12 +78,17 @@ func (p *Provider) buildMessages(messages []provider.Message) []anthropic.BetaMe
 						}
 					}
 				}
+				applyMsgCacheControl(blocks, msg.CacheControl)
 				result = append(result, anthropic.BetaMessageParam{
 					Role:    anthropic.BetaMessageParamRoleUser,
 					Content: blocks,
 				})
 			} else {
-				result = append(result, anthropic.NewBetaUserMessage(anthropic.NewBetaTextBlock(msg.Content)))
+				block := anthropic.NewBetaTextBlock(msg.Content)
+				if msg.CacheControl != nil && block.OfText != nil {
+					block.OfText.CacheControl = toAnthropicCacheControl(msg.CacheControl)
+				}
+				result = append(result, anthropic.NewBetaUserMessage(block))
 			}
 		case provider.RoleAssistant:
 			if len(msg.ToolCalls) > 0 {
@@ -94,21 +99,60 @@ func (p *Provider) buildMessages(messages []provider.Message) []anthropic.BetaMe
 				for _, tc := range msg.ToolCalls {
 					blocks = append(blocks, anthropic.NewBetaToolUseBlock(tc.ID, tc.Function.Arguments, tc.Function.Name))
 				}
+				applyMsgCacheControl(blocks, msg.CacheControl)
 				result = append(result, anthropic.BetaMessageParam{
 					Role:    anthropic.BetaMessageParamRoleAssistant,
 					Content: blocks,
 				})
 			} else {
+				block := anthropic.NewBetaTextBlock(msg.Content)
+				if msg.CacheControl != nil && block.OfText != nil {
+					block.OfText.CacheControl = toAnthropicCacheControl(msg.CacheControl)
+				}
 				result = append(result, anthropic.BetaMessageParam{
 					Role:    anthropic.BetaMessageParamRoleAssistant,
-					Content: []anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock(msg.Content)},
+					Content: []anthropic.BetaContentBlockParamUnion{block},
 				})
 			}
 		case provider.RoleTool:
-			result = append(result, anthropic.NewBetaUserMessage(
-				anthropic.NewBetaToolResultBlock(msg.ToolCallID, msg.Content, msg.IsError),
-			))
+			block := anthropic.NewBetaToolResultBlock(msg.ToolCallID, msg.Content, msg.IsError)
+			if msg.CacheControl != nil && block.OfToolResult != nil {
+				block.OfToolResult.CacheControl = toAnthropicCacheControl(msg.CacheControl)
+			}
+			result = append(result, anthropic.NewBetaUserMessage(block))
 		}
 	}
 	return result
+}
+
+// applyMsgCacheControl 将消息级别的 CacheControl 标记应用到最后一个 content block。
+//
+// Anthropic 的 cache_control 是块级断点，provider.Message.CacheControl 表示
+// "这条消息的最后一个块需要缓存"，因此将标记设置到最后一个 block 上。
+func applyMsgCacheControl(blocks []anthropic.BetaContentBlockParamUnion, cc *provider.CacheControl) {
+	if cc == nil || len(blocks) == 0 {
+		return
+	}
+	last := &blocks[len(blocks)-1]
+	anthropicCC := toAnthropicCacheControl(cc)
+	if last.OfText != nil {
+		last.OfText.CacheControl = anthropicCC
+	} else if last.OfToolUse != nil {
+		last.OfToolUse.CacheControl = anthropicCC
+	} else if last.OfImage != nil {
+		last.OfImage.CacheControl = anthropicCC
+	} else if last.OfDocument != nil {
+		last.OfDocument.CacheControl = anthropicCC
+	} else if last.OfToolResult != nil {
+		last.OfToolResult.CacheControl = anthropicCC
+	}
+}
+
+// toAnthropicCacheControl 将 provider.CacheControl 转换为 Anthropic SDK 的 BetaCacheControlEphemeralParam。
+func toAnthropicCacheControl(cc *provider.CacheControl) anthropic.BetaCacheControlEphemeralParam {
+	param := anthropic.NewBetaCacheControlEphemeralParam()
+	if cc != nil && cc.TTL == provider.CacheTTL1h {
+		param.TTL = anthropic.BetaCacheControlEphemeralTTLTTL1h
+	}
+	return param
 }

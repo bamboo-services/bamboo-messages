@@ -84,6 +84,13 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 		params.User = openai.String(config.UserID)
 	}
 
+	// PromptCacheKey — OpenAI prompt cache 路由粘性键
+	if config.PromptCacheKey != "" {
+		params.PromptCacheKey = openai.String(config.PromptCacheKey)
+	} else if key, ok := provider.GetExtraString(config.ProviderExtra, "prompt_cache_key"); ok && key != "" {
+		params.PromptCacheKey = openai.String(key)
+	}
+
 	// 预测内容（用于加速已知内容的生成）
 	if pred, ok := provider.GetExtraAny(config.ProviderExtra, "prediction"); ok {
 		if prediction, ok := pred.(openai.ChatCompletionPredictionContentParam); ok {

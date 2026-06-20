@@ -30,6 +30,7 @@ type openaiRequest struct {
 	FrequencyPenalty  *float64        `json:"frequency_penalty,omitempty"`
 	PresencePenalty   *float64        `json:"presence_penalty,omitempty"`
 	Seed              *int64          `json:"seed,omitempty"`
+	PromptCacheKey    string          `json:"prompt_cache_key,omitempty"`
 }
 
 type openaiMessage struct {
@@ -162,6 +163,10 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 
 	if req.User != "" {
 		config.UserID = req.User
+	}
+
+	if req.PromptCacheKey != "" {
+		config.PromptCacheKey = req.PromptCacheKey
 	}
 
 	// ProviderExtra

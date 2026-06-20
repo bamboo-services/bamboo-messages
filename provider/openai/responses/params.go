@@ -48,6 +48,13 @@ func (p *ResponsesProvider) buildResponseNewParams(model string, input responses
 		params.User = openai.Opt(config.UserID)
 	}
 
+	// PromptCacheKey — OpenAI prompt cache 路由粘性键
+	if config.PromptCacheKey != "" {
+		params.PromptCacheKey = openai.Opt(config.PromptCacheKey)
+	} else if key, ok := provider.GetExtraString(config.ProviderExtra, "prompt_cache_key"); ok && key != "" {
+		params.PromptCacheKey = openai.Opt(key)
+	}
+
 	// ParallelToolCalls — 是否允许并行工具调用，通过 ExtraFields 传递
 	if config.ParallelToolCalls {
 		params.SetExtraFields(map[string]any{"parallel_tool_calls": true})

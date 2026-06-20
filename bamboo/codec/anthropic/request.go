@@ -6,6 +6,7 @@ import (
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
+	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // ── Anthropic Messages 请求 JSON 结构体 ──
@@ -37,25 +38,27 @@ type anthropicMetadata struct {
 }
 
 type anthropicTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	InputSchema json.RawMessage `json:"input_schema,omitempty"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  json.RawMessage `json:"input_schema,omitempty"`
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
 }
 
 // ── content block 原始 JSON 结构 ──
 
 type rawContentBlock struct {
-	Type       string          `json:"type"`
-	Text       string          `json:"text,omitempty"`
-	Source     *rawSource      `json:"source,omitempty"`
-	ID         string          `json:"id,omitempty"`
-	Name       string          `json:"name,omitempty"`
-	Input      json.RawMessage `json:"input,omitempty"`
-	ToolUseID  string          `json:"tool_use_id,omitempty"`
-	Content    json.RawMessage `json:"content,omitempty"` // string 或 []{type,text}
-	IsError    bool            `json:"is_error,omitempty"`
-	Thinking   string          `json:"thinking,omitempty"`
-	Signature  string          `json:"signature,omitempty"`
+	Type         string          `json:"type"`
+	Text         string          `json:"text,omitempty"`
+	Source       *rawSource      `json:"source,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	ToolUseID    string          `json:"tool_use_id,omitempty"`
+	Content      json.RawMessage `json:"content,omitempty"` // string 或 []{type,text}
+	IsError      bool            `json:"is_error,omitempty"`
+	Thinking     string          `json:"thinking,omitempty"`
+	Signature    string          `json:"signature,omitempty"`
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
 }
 
 type rawSource struct {
@@ -75,6 +78,9 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	// 解析 system 提示词
 	system := parseSystem(req.System)
 
+	// 解析 system 上的 cache_control（放在 system 数组最后一个 block 上）
+	systemCacheControl := parseSystemCacheControl(req.System)
+
 	// 解析消息列表
 	messages := make([]bamboo.BambooMessage, 0, len(req.Messages))
 	for _, msg := range req.Messages {
@@ -88,6 +94,10 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	// 构建配置
 	config := &bamboo.RequestConfig{
 		Model: req.Model,
+	}
+
+	if systemCacheControl != nil {
+		config.SystemCacheControl = systemCacheControl
 	}
 
 	// max_tokens 缺省给 4096
@@ -168,6 +178,45 @@ func parseSystem(raw json.RawMessage) string {
 	return ""
 }
 
+// parseSystemCacheControl 从 system 数组中提取最后一个 text block 的 cache_control。
+func parseSystemCacheControl(raw json.RawMessage) *provider.CacheControl {
+	if len(raw) == 0 {
+		return nil
+	}
+	var parts []rawContentBlock
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return nil
+	}
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i].Type == "text" && len(parts[i].CacheControl) > 0 {
+			return parseCacheControlRaw(parts[i].CacheControl)
+		}
+	}
+	return nil
+}
+
+// parseCacheControlRaw 将 Anthropic cache_control JSON 解析为 provider.CacheControl。
+func parseCacheControlRaw(raw json.RawMessage) *provider.CacheControl {
+	if len(raw) == 0 {
+		return nil
+	}
+	var obj struct {
+		Type string `json:"type"`
+		TTL  string `json:"ttl,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	if obj.Type == "" {
+		return nil
+	}
+	cc := &provider.CacheControl{Type: obj.Type}
+	if obj.TTL != "" {
+		cc.TTL = provider.CacheControlEphemeralTTL(obj.TTL)
+	}
+	return cc
+}
+
 // parseMessage 解析单条消息，将 Anthropic content 格式转换为 bamboo.BambooMessage。
 func parseMessage(msg anthropicMessage) (bamboo.BambooMessage, error) {
 	role := bamboo.RoleUser
@@ -211,9 +260,14 @@ func parseMessage(msg anthropicMessage) (bamboo.BambooMessage, error) {
 
 // convertContentBlock 将 Anthropic content block JSON 转为 bamboo.ContentBlock。
 func convertContentBlock(rb rawContentBlock) bamboo.ContentBlock {
+	cc := parseCacheControlRaw(rb.CacheControl)
 	switch rb.Type {
 	case "text":
-		return bamboo.NewTextBlock(rb.Text)
+		return &bamboo.TextBlock{
+			Type:         bamboo.ContentBlockText,
+			Text:         rb.Text,
+			CacheControl: cc,
+		}
 
 	case "image":
 		if rb.Source == nil {
@@ -225,7 +279,11 @@ func convertContentBlock(rb rawContentBlock) bamboo.ContentBlock {
 			Data:      rb.Source.Data,
 			URL:       rb.Source.URL,
 		}
-		return bamboo.NewImageBlock(source)
+		return &bamboo.ImageBlock{
+			Type:         bamboo.ContentBlockImage,
+			Source:       &source,
+			CacheControl: cc,
+		}
 
 	case "tool_use":
 		input := rb.Input
@@ -233,18 +291,30 @@ func convertContentBlock(rb rawContentBlock) bamboo.ContentBlock {
 			input = json.RawMessage(`{}`)
 		}
 		return &bamboo.ToolUseBlock{
-			Type:  bamboo.ContentBlockToolUse,
-			ID:    rb.ID,
-			Name:  rb.Name,
-			Input: input,
+			Type:         bamboo.ContentBlockToolUse,
+			ID:           rb.ID,
+			Name:         rb.Name,
+			Input:        input,
+			CacheControl: cc,
 		}
 
 	case "tool_result":
 		content := extractToolResultContent(rb.Content)
-		return bamboo.NewToolResultBlock(rb.ToolUseID, content, rb.IsError)
+		return &bamboo.ToolResultBlock{
+			Type:         bamboo.ContentBlockToolResult,
+			ToolUseID:    rb.ToolUseID,
+			Content:      content,
+			IsError:      rb.IsError,
+			CacheControl: cc,
+		}
 
 	case "thinking":
-		return bamboo.NewThinkingBlock(rb.Thinking, rb.Signature)
+		return &bamboo.ThinkingBlock{
+			Type:         bamboo.ContentBlockThinking,
+			Thinking:     rb.Thinking,
+			Signature:    rb.Signature,
+			CacheControl: cc,
+		}
 	}
 	return nil
 }
@@ -279,10 +349,10 @@ func parseTools(tools []anthropicTool) []bamboo.Tool {
 	result := make([]bamboo.Tool, 0, len(tools))
 	for _, t := range tools {
 		tool := bamboo.Tool{
-			Name:        t.Name,
-			Description: t.Description,
+			Name:         t.Name,
+			Description:  t.Description,
+			CacheControl: parseCacheControlRaw(t.CacheControl),
 		}
-		// input_schema 原样保留为 json.RawMessage，确保完整透传所有 JSON Schema 字段
 		tool.InputSchema = t.InputSchema
 		result = append(result, tool)
 	}

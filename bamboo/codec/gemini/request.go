@@ -21,6 +21,7 @@ type geminiRequest struct {
 	Tools              []geminiTool         `json:"tools,omitempty"`
 	ToolConfig         *geminiToolConfig    `json:"toolConfig,omitempty"`
 	SafetySettings     []geminiSafetySetting `json:"safetySettings,omitempty"`
+	CachedContent      string               `json:"cachedContent,omitempty"`
 }
 
 // geminiContent Gemini Content 结构 (role + parts)。
@@ -149,6 +150,14 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 			config.ProviderExtra = make(map[string]any)
 		}
 		config.ProviderExtra["safety_settings"] = req.SafetySettings
+	}
+
+	// ── 7. cachedContent 透传到 ProviderExtra ──
+	if req.CachedContent != "" {
+		if config.ProviderExtra == nil {
+			config.ProviderExtra = make(map[string]any)
+		}
+		config.ProviderExtra["cached_content"] = req.CachedContent
 	}
 
 	return &codec.RelayRequest{

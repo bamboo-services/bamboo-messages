@@ -37,6 +37,10 @@ type RequestConfig struct {
 
 	ThinkingConfig *ThinkingConfig `json:"thinking_config,omitempty"` // 思考/推理配置
 
+	SystemCacheControl *provider.CacheControl `json:"system_cache_control,omitempty"` // system prompt 的缓存标记（Anthropic prompt caching）
+
+	PromptCacheKey string `json:"prompt_cache_key,omitempty"` // OpenAI prompt cache 路由粘性键
+
 	ProviderExtra map[string]any `json:"provider_extra,omitempty"` // Provider 特有参数，用于传递各 Provider 独有的扩展配置
 }
 
