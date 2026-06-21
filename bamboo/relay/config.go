@@ -33,6 +33,11 @@ type Config struct {
 	// Debug 是否输出 relay 层 debug 日志（传入的原始 body、codec 解析后的 RelayRequest）。
 	// 通过 WithDebug(true) 启用，或通过环境变量 BAMBOO_DEBUG=1 全局启用。
 	Debug bool
+
+	// Smooth 平滑缓冲器配置。
+	// 非 nil 时启用流式输出平滑缓冲，nil 时直接透传上游事件。
+	// 通过 WithSmoothBuffer(level) 或 WithSmoothBufferCustom(params) 启用。
+	Smooth *SmoothConfig
 }
 
 // Option relay 配置选项函数。

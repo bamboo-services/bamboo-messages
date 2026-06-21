@@ -174,6 +174,13 @@ func RelayStream(
 	go func() {
 		defer close(out)
 
+		// ── 平滑缓冲器（可选）──
+		var pacer *SmoothPacer
+		if cfg.Smooth != nil && cfg.Smooth.Level != SmoothLevelOff {
+			pacer = NewSmoothPacer(outFormat, cfg.Smooth.Params, out, ctx)
+			defer pacer.Wait()
+		}
+
 		for event := range eventCh {
 			// 处理错误事件
 			if event.Type == bamboo.EventError && event.Error != nil {
@@ -192,10 +199,14 @@ func RelayStream(
 				continue
 			}
 			if data != nil {
-				select {
-				case out <- data:
-				case <-ctx.Done():
-					return
+				if pacer != nil {
+					pacer.Push(data)
+				} else {
+					select {
+					case out <- data:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		}
@@ -204,13 +215,26 @@ func RelayStream(
 		flushData, fErr := serializer.Flush()
 		if fErr != nil {
 			cfg.triggerError(fmt.Errorf("relay: flush error: %w", fErr))
+			// 即使 flush 失败，也要让 pacer 排空已入队的数据
+			if pacer != nil {
+				pacer.SignalEnd()
+			}
 			return
 		}
 		if flushData != nil {
-			select {
-			case out <- flushData:
-			case <-ctx.Done():
+			if pacer != nil {
+				pacer.Push(flushData)
+			} else {
+				select {
+				case out <- flushData:
+				case <-ctx.Done():
+				}
 			}
+		}
+
+		// ── 通知 pacer 上游结束 ──
+		if pacer != nil {
+			pacer.SignalEnd()
 		}
 	}()
 
