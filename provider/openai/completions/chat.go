@@ -65,7 +65,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, "OpenAI Completions 流式对话失败", false, err),
+				Err:  xError.NewError(ctx, nil, formatUpstreamError(err), false, err),
 			}:
 			case <-ctx.Done():
 			}

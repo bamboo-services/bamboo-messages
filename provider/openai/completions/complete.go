@@ -3,10 +3,13 @@ package completions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 
 	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
 	"github.com/bamboo-services/bamboo-messages/provider"
+	"github.com/openai/openai-go/v3"
 )
 
 // Complete 非流式对话。
@@ -32,11 +35,14 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 
 	response, err := p.Client.Chat.Completions.New(ctx, params)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, "OpenAI Completions 非流式对话失败", false, err)
+		return nil, xError.NewError(ctx, nil, formatUpstreamError(err), false, err)
 	}
 
 	// 检查响应
 	if len(response.Choices) == 0 {
+		if provider.DebugEnabled {
+			log.Printf("[provider/openai-completions] 上游返回空响应, raw=%s", truncateResponseJSON(response))
+		}
 		diag := fmt.Sprintf(
 			"OpenAI Completions 返回空响应 (choices=0), model=%s, legacyCompat=%v, tools=%d, maxTokens=%d, resp=%s",
 			config.Model, p.legacyCompat, len(config.Tools), config.MaxTokens, truncateResponseJSON(response),
@@ -112,4 +118,24 @@ func truncateResponseJSON[T any](resp T) string {
 		return s
 	}
 	return s[:maxResponseLogLen] + "...(truncated)"
+}
+
+// maxUpstreamDumpLen openai.Error DumpResponse 快照最大长度。
+const maxUpstreamDumpLen = 1000
+
+// formatUpstreamError 从 openai-go SDK 错误中提取 HTTP 状态码和响应快照，
+// 生成包含完整诊断信息的错误消息。
+//
+// openai-go v3 SDK 在非 200 时返回 *openai.Error，包含 StatusCode、Request、Response。
+// 若不是该类型，退化为原始错误消息。
+func formatUpstreamError(err error) string {
+	var apierr *openai.Error
+	if errors.As(err, &apierr) {
+		dump := string(apierr.DumpResponse(true))
+		if len(dump) > maxUpstreamDumpLen {
+			dump = dump[:maxUpstreamDumpLen] + "...(truncated)"
+		}
+		return fmt.Sprintf("OpenAI Completions 上游错误 (HTTP %d): %s", apierr.StatusCode, dump)
+	}
+	return "OpenAI Completions 非流式对话失败"
 }

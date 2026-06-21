@@ -136,13 +136,24 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	}
 
 	// thinking
-	if tc := parseThinking(req.Thinking); tc != nil {
-		config.ThinkingConfig = tc
+	// 将原始 thinking JSON 存入 ProviderExtra，供 OpenAI Completions Legacy 模式
+	// 通过 SetExtraFields 透传到上游端点（如 GLM/Kimi 等支持 thinking 参数的第三方端点）。
+	// 同时解析为 ThinkingConfig，供非 Legacy 适配器映射为 ReasoningEffort。
+	if len(req.Thinking) > 0 {
+		if config.ProviderExtra == nil {
+			config.ProviderExtra = make(map[string]any)
+		}
+		config.ProviderExtra["thinking"] = req.Thinking
+		if tc := parseThinking(req.Thinking); tc != nil {
+			config.ThinkingConfig = tc
+		}
 	}
 
 	// metadata.user_id
+	// OpenAI user 字段规范限制最长 128 字符，部分第三方端点（如 GLM）对超长 user
+	// 值会返回 200 空响应而非标准 4xx，因此做防御性截断。
 	if req.Metadata != nil && req.Metadata.UserID != "" {
-		config.UserID = req.Metadata.UserID
+		config.UserID = truncateUserID(req.Metadata.UserID)
 	}
 
 	// top_k → ProviderExtra
@@ -413,6 +424,17 @@ func parseToolChoice(raw json.RawMessage) (string, string) {
 		return "forced", obj.Name
 	}
 	return "", ""
+}
+
+// maxUserIDLen OpenAI user 字段最大长度限制。
+const maxUserIDLen = 128
+
+// truncateUserID 防御性截断 user_id，避免超长值触发第三方端点空响应。
+func truncateUserID(uid string) string {
+	if len(uid) <= maxUserIDLen {
+		return uid
+	}
+	return uid[:maxUserIDLen]
 }
 
 // parseThinking 解析 thinking 字段。
