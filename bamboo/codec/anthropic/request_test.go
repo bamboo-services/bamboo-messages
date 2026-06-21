@@ -464,3 +464,70 @@ func TestParseRequest_InvalidJSON(t *testing.T) {
 		t.Errorf("Type = %q, want %q", codecErr.Type, codec.ErrInvalidRequest)
 	}
 }
+
+// TestParseRequest_OutputConfigEffort 验证 output_config.effort 字段解析为 ThinkingConfig.Effort。
+func TestParseRequest_OutputConfigEffort(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"max_tokens": 1024,
+		"output_config": {"effort": "max"},
+		"messages": [{"role": "user", "content": "Think"}]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if req.Config.ThinkingConfig == nil {
+		t.Fatal("ThinkingConfig is nil")
+	}
+	if req.Config.ThinkingConfig.Effort != "max" {
+		t.Errorf("Effort = %q, want %q", req.Config.ThinkingConfig.Effort, "max")
+	}
+}
+
+// TestParseRequest_OutputConfigOverridesThinking 验证 output_config.effort 覆盖 thinking 字段解析出的 Effort。
+//
+// 当请求同时含 thinking:{type:"adaptive"} 和 output_config:{effort:"max"} 时，
+// parseThinking 会把 adaptive→high，但 output_config.effort 是优先字段，应覆盖为 "max"。
+func TestParseRequest_OutputConfigOverridesThinking(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"max_tokens": 1024,
+		"thinking": {"type": "adaptive"},
+		"output_config": {"effort": "max"},
+		"messages": [{"role": "user", "content": "Think"}]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if req.Config.ThinkingConfig == nil {
+		t.Fatal("ThinkingConfig is nil")
+	}
+	if req.Config.ThinkingConfig.Effort != "max" {
+		t.Errorf("Effort = %q, want %q (output_config overrides thinking)", req.Config.ThinkingConfig.Effort, "max")
+	}
+}
+
+// TestParseRequest_NoOutputConfig 验证无 output_config 时 thinking 解析行为不变。
+func TestParseRequest_NoOutputConfig(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"max_tokens": 1024,
+		"thinking": {"type": "adaptive"},
+		"messages": [{"role": "user", "content": "Think"}]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if req.Config.ThinkingConfig == nil {
+		t.Fatal("ThinkingConfig is nil")
+	}
+	if req.Config.ThinkingConfig.Effort != "high" {
+		t.Errorf("Effort = %q, want %q (parseThinking behavior unchanged)", req.Config.ThinkingConfig.Effort, "high")
+	}
+}

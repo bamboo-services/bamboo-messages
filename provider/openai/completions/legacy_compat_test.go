@@ -171,6 +171,133 @@ func TestBuildParams_LegacyThinkingPassthrough(t *testing.T) {
 	}
 }
 
+// TestBuildParams_LegacyThinkingPassthroughAdaptive 验证 Legacy 模式下 adaptive thinking 被归一化为 enabled。
+//
+// 跨协议场景（如 Anthropic 入口）传入 thinking.type="adaptive"，但 legacy 端点（GLM/Kimi）
+// 仅识别 "enabled"/"disabled"。normalizeLegacyThinking 应将 adaptive 映射为 enabled。
+func TestBuildParams_LegacyThinkingPassthroughAdaptive(t *testing.T) {
+	p := newLegacyProvider(t)
+	thinkingValue := map[string]any{"type": "adaptive"}
+	config := &provider.ChatConfig{
+		ProviderExtra: map[string]any{"thinking": thinkingValue},
+	}
+	params := p.buildParams("", nil, config)
+
+	extraFields := params.ExtraFields()
+	if extraFields == nil {
+		t.Fatal("Legacy: ExtraFields() should not be nil")
+	}
+	thinking, ok := extraFields["thinking"]
+	if !ok {
+		t.Fatal("Legacy: expected 'thinking' in ExtraFields")
+	}
+	thinkingMap, ok := thinking.(map[string]any)
+	if !ok {
+		t.Fatalf("Legacy: thinking type = %T, want map[string]any", thinking)
+	}
+	if thinkingMap["type"] != "enabled" {
+		t.Errorf("Legacy: thinking.type = %v, want 'enabled' (normalized from adaptive)", thinkingMap["type"])
+	}
+}
+
+// TestBuildParams_LegacyThinkingPassthroughAdaptiveJSONRawMessage 验证 json.RawMessage 输入的
+// adaptive thinking 也能正确归一化。跨协议 JSON 解析后可能残留 json.RawMessage 类型。
+func TestBuildParams_LegacyThinkingPassthroughAdaptiveJSONRawMessage(t *testing.T) {
+	p := newLegacyProvider(t)
+	thinkingValue := json.RawMessage(`{"type":"adaptive"}`)
+	config := &provider.ChatConfig{
+		ProviderExtra: map[string]any{"thinking": thinkingValue},
+	}
+	params := p.buildParams("", nil, config)
+
+	extraFields := params.ExtraFields()
+	if extraFields == nil {
+		t.Fatal("Legacy: ExtraFields() should not be nil")
+	}
+	thinking, ok := extraFields["thinking"]
+	if !ok {
+		t.Fatal("Legacy: expected 'thinking' in ExtraFields")
+	}
+	thinkingMap, ok := thinking.(map[string]any)
+	if !ok {
+		t.Fatalf("Legacy: thinking type = %T, want map[string]any (json.RawMessage should be unwrapped)", thinking)
+	}
+	if thinkingMap["type"] != "enabled" {
+		t.Errorf("Legacy: thinking.type = %v, want 'enabled' (normalized from adaptive via json.RawMessage)", thinkingMap["type"])
+	}
+}
+
+// TestBuildParams_LegacyThinkingPassthroughDisabled 验证 Legacy 模式下 disabled thinking 保持不变。
+func TestBuildParams_LegacyThinkingPassthroughDisabled(t *testing.T) {
+	p := newLegacyProvider(t)
+	thinkingValue := map[string]any{"type": "disabled"}
+	config := &provider.ChatConfig{
+		ProviderExtra: map[string]any{"thinking": thinkingValue},
+	}
+	params := p.buildParams("", nil, config)
+
+	extraFields := params.ExtraFields()
+	if extraFields == nil {
+		t.Fatal("Legacy: ExtraFields() should not be nil")
+	}
+	thinking, ok := extraFields["thinking"]
+	if !ok {
+		t.Fatal("Legacy: expected 'thinking' in ExtraFields")
+	}
+	thinkingMap, ok := thinking.(map[string]any)
+	if !ok {
+		t.Fatalf("Legacy: thinking type = %T, want map[string]any", thinking)
+	}
+	if thinkingMap["type"] != "disabled" {
+		t.Errorf("Legacy: thinking.type = %v, want 'disabled' (unchanged)", thinkingMap["type"])
+	}
+}
+
+// TestBuildParams_LegacyThinkingPassthroughUnknownType 验证 Legacy 模式下未知 type 值原样保留。
+func TestBuildParams_LegacyThinkingPassthroughUnknownType(t *testing.T) {
+	p := newLegacyProvider(t)
+	thinkingValue := map[string]any{"type": "custom_type", "extra": "data"}
+	config := &provider.ChatConfig{
+		ProviderExtra: map[string]any{"thinking": thinkingValue},
+	}
+	params := p.buildParams("", nil, config)
+
+	extraFields := params.ExtraFields()
+	if extraFields == nil {
+		t.Fatal("Legacy: ExtraFields() should not be nil")
+	}
+	thinking, ok := extraFields["thinking"]
+	if !ok {
+		t.Fatal("Legacy: expected 'thinking' in ExtraFields")
+	}
+	thinkingMap, ok := thinking.(map[string]any)
+	if !ok {
+		t.Fatalf("Legacy: thinking type = %T, want map[string]any", thinking)
+	}
+	if thinkingMap["type"] != "custom_type" {
+		t.Errorf("Legacy: thinking.type = %v, want 'custom_type' (unchanged)", thinkingMap["type"])
+	}
+	if thinkingMap["extra"] != "data" {
+		t.Errorf("Legacy: thinking.extra = %v, want 'data' (preserved)", thinkingMap["extra"])
+	}
+}
+
+// TestBuildParams_LegacyThinkingPassthroughNil 验证 Legacy 模式下无 thinking 时不 panic 且不设置 thinking 字段。
+func TestBuildParams_LegacyThinkingPassthroughNil(t *testing.T) {
+	p := newLegacyProvider(t)
+	// ProviderExtra 为 nil
+	params := p.buildParams("", nil, &provider.ChatConfig{})
+
+	extraFields := params.ExtraFields()
+	if extraFields == nil {
+		// ExtraFields() 为 nil 也是可接受的（无 ExtraFields 设置）
+		return
+	}
+	if _, ok := extraFields["thinking"]; ok {
+		t.Error("Legacy: 'thinking' should not be present in ExtraFields when ProviderExtra is nil")
+	}
+}
+
 // TestBuildParams_DefaultReasoningEffort 验证默认模式正常映射 reasoning_effort。
 func TestBuildParams_DefaultReasoningEffort(t *testing.T) {
 	p := newDefaultProvider(t)
