@@ -26,6 +26,7 @@ type anthropicRequest struct {
 	ToolChoice    json.RawMessage    `json:"tool_choice,omitempty"`
 	Metadata      *anthropicMetadata `json:"metadata,omitempty"`
 	Thinking      json.RawMessage    `json:"thinking,omitempty"`
+	OutputConfig  json.RawMessage    `json:"output_config,omitempty"` // Anthropic 新 API: {effort:"max"|"high"|...}
 }
 
 type anthropicMessage struct {
@@ -146,6 +147,19 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 		config.ProviderExtra["thinking"] = req.Thinking
 		if tc := parseThinking(req.Thinking); tc != nil {
 			config.ThinkingConfig = tc
+		}
+	}
+
+	// output_config.effort — Anthropic 新 API 的优先级字段
+	// 如果存在，覆盖 thinking 字段解析出的 ThinkingConfig.Effort
+	// （output_config 是优先字段，语义上高于 thinking）
+	if len(req.OutputConfig) > 0 {
+		if effort := parseOutputConfigEffort(req.OutputConfig); effort != "" {
+			if config.ThinkingConfig == nil {
+				config.ThinkingConfig = &bamboo.ThinkingConfig{Effort: effort}
+			} else {
+				config.ThinkingConfig.Effort = effort
+			}
 		}
 	}
 
@@ -437,7 +451,22 @@ func truncateUserID(uid string) string {
 	return uid[:maxUserIDLen]
 }
 
-// parseThinking 解析 thinking 字段。
+// parseOutputConfigEffort 解析 output_config.effort 字段。
+//
+// 返回 effort 字符串（如 "max"、"high"），无效或缺失时返回空字符串。
+func parseOutputConfigEffort(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var obj struct {
+		Effort string `json:"effort"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return ""
+	}
+	return obj.Effort
+}
+
 //
 // 映射规则:
 //   - {type:"adaptive"}             → ThinkingConfig{Effort:"high"}

@@ -63,10 +63,14 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 		}
 	}
 
-	// === thinking 透传 — Legacy only，从 ProviderExtra 提取并注入 JSON extra fields ===
+	// === thinking 透传 — Legacy only ===
+	// 从 ProviderExtra 提取原始 thinking JSON 并归一化后注入 ExtraFields。
+	// 跨协议场景（如 Anthropic 入口 → OpenAI Completions legacyCompat 出口）时，
+	// 原始 thinking 可能是 Anthropic 格式（type:"adaptive"），需归一化为
+	// legacy 端点可识别的格式（type:"enabled"），避免 GLM/Kimi 等静默返回空响应。
 	if p.legacyCompat {
 		if thinking, ok := provider.GetExtraAny(config.ProviderExtra, "thinking"); ok {
-			params.SetExtraFields(map[string]any{"thinking": thinking})
+			params.SetExtraFields(map[string]any{"thinking": normalizeLegacyThinking(thinking)})
 		}
 	}
 
@@ -160,6 +164,40 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 	}
 
 	return params
+}
+
+// normalizeLegacyThinking 将原始 thinking 配置归一化为 legacy 端点可识别的格式。
+//
+// 跨协议场景下（如 Anthropic 入口），原始 thinking JSON 是 Anthropic 语义（type:"adaptive"），
+// 但 legacy 端点（GLM/Kimi 等）仅识别 type:"enabled"/"disabled"，adaptive 会被静默忽略。
+// 此函数将 adaptive 映射为 enabled（保留 budget_tokens 等其他字段），其他值原样返回。
+//
+// 保守策略：任何类型断言或 JSON 解析失败时，均原样返回原始值。
+func normalizeLegacyThinking(thinking any) any {
+	switch v := thinking.(type) {
+	case map[string]any:
+		typeVal, _ := v["type"].(string)
+		if typeVal != "adaptive" {
+			return v
+		}
+		// 复制 map 以避免修改原始数据
+		normalized := make(map[string]any, len(v))
+		for k, val := range v {
+			normalized[k] = val
+		}
+		normalized["type"] = "enabled"
+		return normalized
+
+	case json.RawMessage:
+		var m map[string]any
+		if err := json.Unmarshal(v, &m); err != nil {
+			return thinking
+		}
+		return normalizeLegacyThinking(m)
+
+	default:
+		return thinking
+	}
 }
 
 // buildStreamOptions 构建流式请求的 StreamOptions。
