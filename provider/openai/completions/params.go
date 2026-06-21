@@ -87,11 +87,14 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 		params.User = openai.String(config.UserID)
 	}
 
-	// PromptCacheKey — OpenAI prompt cache 路由粘性键
-	if config.PromptCacheKey != "" {
-		params.PromptCacheKey = openai.String(config.PromptCacheKey)
-	} else if key, ok := provider.GetExtraString(config.ProviderExtra, "prompt_cache_key"); ok && key != "" {
-		params.PromptCacheKey = openai.String(key)
+	// PromptCacheKey — OpenAI prompt cache 路由粘性键。
+	// Legacy 模式跳过 prompt_cache_key（第三方端点可能不支持）。
+	if !p.legacyCompat {
+		if config.PromptCacheKey != "" {
+			params.PromptCacheKey = openai.String(config.PromptCacheKey)
+		} else if key, ok := provider.GetExtraString(config.ProviderExtra, "prompt_cache_key"); ok && key != "" {
+			params.PromptCacheKey = openai.String(key)
+		}
 	}
 
 	// 预测内容（用于加速已知内容的生成）

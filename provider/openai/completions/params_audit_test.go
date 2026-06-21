@@ -1,6 +1,8 @@
 package completions
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -53,6 +55,70 @@ func TestAudit_Prediction_TypeAssertion(t *testing.T) {
 
 	if params.Prediction.Type == "" {
 		t.Errorf("Prediction with correct type was silently dropped")
+	}
+}
+
+// TestBuildParams_LegacyCompat_FieldFiltering 验证 Legacy 模式过滤 SystemCacheControl 与 PromptCacheKey 字段泄漏。
+//
+// 智谱 GLM / Kimi 等第三方 OpenAI 兼容端点不支持 system_cache_control 和 prompt_cache_key 字段，
+// 发送这些字段会导致请求被拒绝或返回异常结果。Legacy 模式应过滤这些字段。
+//
+// 断言：
+//  1. Legacy 模式下 JSON 不含 "system_cache_control" key
+//  2. Legacy 模式下 JSON 不含 "prompt_cache_key" key
+//  3. Legacy 模式下 ProviderExtra["thinking"] 透传的 "thinking" 字段正常出现（设计行为，不应被过滤）
+//  4. 默认模式下 "prompt_cache_key" 正常出现（回归保护）
+func TestBuildParams_LegacyCompat_FieldFiltering(t *testing.T) {
+	// === 场景 1-3: Legacy 模式 ===
+	legacyP := newLegacyProvider(t)
+	legacyConfig := &provider.ChatConfig{
+		Model:           "glm-4",
+		MaxTokens:       1024,
+		PromptCacheKey:  "session-abc-123",
+		SystemCacheControl: provider.NewEphemeralCacheControl(),
+		ProviderExtra: map[string]any{
+			"thinking": map[string]any{"type": "enabled"},
+		},
+	}
+	legacyParams := legacyP.buildParams("", nil, legacyConfig)
+	legacyJSON, err := json.Marshal(legacyParams)
+	if err != nil {
+		t.Fatalf("Legacy: json.Marshal failed: %v", err)
+	}
+	legacyStr := string(legacyJSON)
+
+	// 断言 1: system_cache_control 不应出现
+	if strings.Contains(legacyStr, "system_cache_control") {
+		t.Errorf("Legacy JSON should NOT contain 'system_cache_control' key, got:\n%s", legacyStr)
+	}
+
+	// 断言 2: prompt_cache_key 不应出现
+	if strings.Contains(legacyStr, "prompt_cache_key") {
+		t.Errorf("Legacy JSON should NOT contain 'prompt_cache_key' key, got:\n%s", legacyStr)
+	}
+
+	// 断言 3: thinking 字段应正常出现（设计行为，不应被过滤）
+	if !strings.Contains(legacyStr, `"thinking"`) {
+		t.Errorf("Legacy JSON should contain 'thinking' extra field (design behavior), got:\n%s", legacyStr)
+	}
+
+	// === 场景 4: 默认模式（回归保护）===
+	defaultP := newDefaultProvider(t)
+	defaultConfig := &provider.ChatConfig{
+		Model:          "gpt-4o",
+		MaxTokens:      1024,
+		PromptCacheKey: "session-xyz-789",
+	}
+	defaultParams := defaultP.buildParams("", nil, defaultConfig)
+	defaultJSON, err := json.Marshal(defaultParams)
+	if err != nil {
+		t.Fatalf("Default: json.Marshal failed: %v", err)
+	}
+	defaultStr := string(defaultJSON)
+
+	// 断言 4: 默认模式下 prompt_cache_key 正常出现
+	if !strings.Contains(defaultStr, "prompt_cache_key") {
+		t.Errorf("Default JSON should contain 'prompt_cache_key' key, got:\n%s", defaultStr)
 	}
 }
 
