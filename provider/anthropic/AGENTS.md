@@ -89,6 +89,26 @@ provider/anthropic/
 9. 缓存未命中 → 检查 `CacheControl` 标记是否正确设置在 system/messages/tools 上，确认 TTL 值
 10. 请求参数不确定 → 启用 `WithDebug()` 或设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
 
+## BaseURL 配置说明
+
+Anthropic 适配器使用 anthropic-sdk-go SDK，SDK 会在 BaseURL 后自动拼接 `/v1/messages`。
+
+### 路径要求
+
+BaseURL 应到 API 根路径级别（不含 `/v1`），SDK 自动补全版本路径。
+
+### 正确示例
+
+| 端点 | BaseURL | SDK 实际请求路径 |
+|------|---------|-----------------|
+| Anthropic 官方 | `https://api.anthropic.com` | `https://api.anthropic.com/v1/messages` |
+| 智谱 GLM Anthropic 兼容 | `https://open.bigmodel.cn/api/anthropic` | `.../api/anthropic/v1/messages` |
+| Kimi Anthropic 兼容 | `https://api.kimi.com/coding/` | `.../coding/v1/messages` |
+
+### ⚠️ 尾斜杠注意
+
+部分第三方端点（如 Kimi）要求 BaseURL 以 `/` 结尾，否则 SDK 拼接路径可能出现问题。如遇 404 错误，请尝试添加尾斜杠。
+
 ## 引用
 
 无子级 AGENTS.md

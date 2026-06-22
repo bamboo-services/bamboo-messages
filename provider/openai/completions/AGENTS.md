@@ -89,6 +89,32 @@ provider/openai/completions/
 10. Usage 统计缺失 → 确认 `StreamOptions.IncludeUsage` 已设置
 11. 请求参数不确定 → 启用 `WithDebug()` 或设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
 
+## BaseURL 配置说明
+
+OpenAI Completions 适配器使用 openai-go SDK，SDK 会在 BaseURL 后自动拼接 `/chat/completions`。
+
+### 版本路径要求
+
+BaseURL **必须包含 `/v1` 版本路径**（或 `/v4`、`/v3` 等其他版本号），否则 SDK 拼出的路径会缺少版本前缀，导致上游返回错误。
+
+### 正确示例
+
+| 端点 | BaseURL | SDK 实际请求路径 |
+|------|---------|-----------------|
+| OpenAI 官方 | `https://api.openai.com/v1` | `https://api.openai.com/v1/chat/completions` |
+| 智谱 GLM Coding | `https://open.bigmodel.cn/api/coding/paas/v4` | `.../paas/v4/chat/completions` |
+| Kimi Coding | `https://api.kimi.com/coding/v1` | `.../coding/v1/chat/completions` |
+| 豆包 Coding | `https://ark.cn-beijing.volces.com/api/coding/v3` | `.../coding/v3/chat/completions` |
+
+### ⚠️ 常见错误
+
+```
+❌ https://ai.akass.cn         → SDK 请求 https://ai.akass.cn/chat/completions（缺少 /v1）
+✅ https://ai.akass.cn/v1      → SDK 请求 https://ai.akass.cn/v1/chat/completions
+```
+
+> **注意**: newapi bridge 层会自动检测并补全 `/v1`，但直接使用 SDK 时需手动确保 BaseURL 包含版本路径。
+
 ## 引用
 
 无子级 AGENTS.md
