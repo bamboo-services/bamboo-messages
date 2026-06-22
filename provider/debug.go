@@ -100,12 +100,7 @@ func formatParams(params any) string {
 //
 // 遍历 JSON 顶层键，对 "content" / "text" 等长文本字段做截断。
 func truncateContent(jsonStr string) string {
-	// 如果整体 JSON 不长，直接返回
-	if len(jsonStr) <= MaxDebugBodyLen*2 {
-		return jsonStr
-	}
-
-	// 尝试解析为 map 做 content 截断
+	// 尝试解析为 map 做 tools 简化 + content 截断
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
 		// 解析失败，直接截断整体
@@ -115,7 +110,9 @@ func truncateContent(jsonStr string) string {
 		return jsonStr
 	}
 
-	// 截断长文本字段
+	// 先简化 tools 数组（减少 debug 输出中的工具噪音）
+	summarizeTools(raw)
+	// 再截断长文本字段
 	truncateLongFields(raw, MaxDebugBodyLen)
 
 	out, err := json.Marshal(raw)
@@ -153,6 +150,79 @@ func truncateLongFields(data map[string]any, maxLen int) {
 func isContentField(key string) bool {
 	switch strings.ToLower(key) {
 	case "content", "text", "system", "thinking", "reasoning_content", "arguments":
+		return true
+	}
+	return false
+}
+
+// summarizeTools 简化 tools 数组的 debug 输出。
+//
+// 当 tools 包含 2 个或以上元素时，保留第一个元素完整不变，
+// 对后续元素调用 summarizeToolElement 生成字段级摘要。
+// 非数组、空数组、单元素、无 tools 键时均为 no-op。
+func summarizeTools(raw map[string]any) {
+	tools, ok := raw["tools"].([]any)
+	if !ok || len(tools) <= 1 {
+		return
+	}
+	for i := 1; i < len(tools); i++ {
+		tool, ok := tools[i].(map[string]any)
+		if !ok {
+			continue
+		}
+		summarizeToolElement(tool)
+		tools[i] = tool
+	}
+}
+
+// summarizeToolElement 就地简化单个 tool 元素的内容字段。
+//
+// 遍历 tool 的所有键值对：
+//   - 标识字段（name / type）保留原值
+//   - 其他字段按 summarizeValue 规则替换为长度摘要
+//
+// 嵌套感知：若存在 "function" 键且其值为 map，则递归处理 function 内部
+// 字段（保留 function.name / function.type，简化 function.description 等）。
+func summarizeToolElement(tool map[string]any) {
+	for key, val := range tool {
+		if key == "function" {
+			if functionMap, ok := val.(map[string]any); ok {
+				summarizeToolElement(functionMap)
+			}
+			continue
+		}
+		tool[key] = summarizeValue(key, val)
+	}
+}
+
+// summarizeValue 根据字段名和值类型生成摘要。
+//
+// 规则：
+//   - 标识字段（name / type）→ 返回原值
+//   - string   → "(N chars)"，N = len(bytes)
+//   - map[string]any → "(N keys)"
+//   - []any    → "(N items)"
+//   - 其他（number/bool/nil）→ 返回原值
+func summarizeValue(key string, val any) any {
+	if isIdentifierField(key) {
+		return val
+	}
+	switch v := val.(type) {
+	case string:
+		return fmt.Sprintf("(%d chars)", len(v))
+	case map[string]any:
+		return fmt.Sprintf("(%d keys)", len(v))
+	case []any:
+		return fmt.Sprintf("(%d items)", len(v))
+	default:
+		return val
+	}
+}
+
+// isIdentifierField 判断字段是否为 tool 标识字段（应保留原值不简化）。
+func isIdentifierField(key string) bool {
+	switch strings.ToLower(key) {
+	case "name", "type":
 		return true
 	}
 	return false
