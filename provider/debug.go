@@ -155,6 +155,17 @@ func isContentField(key string) bool {
 	return false
 }
 
+// SummarizeTools 简化 tools 数组的 debug 输出。
+//
+// 当 tools 包含 2 个或以上元素时，保留第一个元素完整不变，
+// 对后续元素调用 summarizeToolElement 生成字段级摘要。
+// 非数组、空数组、单元素、无 tools 键时均为 no-op。
+//
+// 导出供 bamboo/relay 层的 debug 日志复用，避免逻辑重复。
+func SummarizeTools(raw map[string]any) {
+	summarizeTools(raw)
+}
+
 // summarizeTools 简化 tools 数组的 debug 输出。
 //
 // 当 tools 包含 2 个或以上元素时，保留第一个元素完整不变，

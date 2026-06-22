@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"strings"
+
+	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // envDebugEnabled 通过环境变量 BAMBOO_DEBUG 控制的 relay 层 debug 开关。
@@ -118,12 +120,9 @@ func FormatRelayParsed(fn string, inFormat any, req any) string {
 
 // truncateContent 截断 JSON 字符串中已知长文本字段的值，避免 debug 日志过长。
 //
-// 当整体 JSON 不超过 maxDebugBodyLen*2 时直接返回原值；
-// 否则解析为 map，递归截断 content / text / system 等字段后重新序列化。
+// 解析 JSON 后先调用 provider.SummarizeTools 简化 tools 数组（保留首个完整、后续摘要），
+// 再截断 content / text / system 等长文本字段，最后重新序列化。
 func truncateContent(jsonStr string) string {
-	if len(jsonStr) <= maxDebugBodyLen*2 {
-		return jsonStr
-	}
 	var raw map[string]any
 	if err := json.Unmarshal([]byte(jsonStr), &raw); err != nil {
 		if len(jsonStr) > maxDebugBodyLen {
@@ -131,6 +130,7 @@ func truncateContent(jsonStr string) string {
 		}
 		return jsonStr
 	}
+	provider.SummarizeTools(raw)
 	truncateLongFields(raw, maxDebugBodyLen)
 	out, err := json.Marshal(raw)
 	if err != nil {
