@@ -205,6 +205,8 @@ func NewThinkingBlock(thinking, signature string) ContentBlock {
 // NewToolUseBlock 创建工具调用内容块。
 //
 // input 参数会被序列化为 JSON RawMessage。若序列化失败，Input 会被设为空的 JSON 对象。
+// 注意：如果 input 已经是 string 类型的 JSON（如 OpenAI tool_call.Arguments），
+// 请使用 NewToolUseBlockWithRawInput 避免双重编码。
 func NewToolUseBlock(id, name string, input any) ContentBlock {
 	var raw json.RawMessage
 	if input != nil {
@@ -218,6 +220,18 @@ func NewToolUseBlock(id, name string, input any) ContentBlock {
 		raw = json.RawMessage(`{}`)
 	}
 
+	return &ToolUseBlock{Type: ContentBlockToolUse, ID: id, Name: name, Input: raw}
+}
+
+// NewToolUseBlockWithRawInput 创建工具调用内容块，input 参数为原始 JSON 字符串。
+//
+// 用于 provider 返回的 tool_call.Arguments（string 类型 JSON）直接转为 Input 字段，
+// 避免 NewToolUseBlock 对 string 类型二次 json.Marshal 导致的双重编码。
+func NewToolUseBlockWithRawInput(id, name string, input string) ContentBlock {
+	raw := json.RawMessage(input)
+	if len(raw) == 0 {
+		raw = json.RawMessage(`{}`)
+	}
 	return &ToolUseBlock{Type: ContentBlockToolUse, ID: id, Name: name, Input: raw}
 }
 

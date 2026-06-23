@@ -249,7 +249,7 @@ func resultToResponse(result *provider.CompletionResult, providerType string) *R
 		content = append(content, NewTextBlock(result.Content))
 	}
 	for _, tc := range result.ToolCalls {
-		content = append(content, NewToolUseBlock(tc.ID, tc.Function.Name, tc.Function.Arguments))
+		content = append(content, NewToolUseBlockWithRawInput(tc.ID, tc.Function.Name, tc.Function.Arguments))
 	}
 	if len(content) == 0 {
 		content = []ContentBlock{}
