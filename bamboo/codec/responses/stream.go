@@ -112,6 +112,9 @@ type responsesStreamSerializer struct {
 	// 是否已发送 response.created
 	created bool
 
+	// 是否已发送 response.completed（防止重复发送）
+	completedSent bool
+
 	// 最后一次 content_block_start 的 block 类型，用于 content_block_stop 分发
 	lastBlockTypeStr string
 }
@@ -220,8 +223,9 @@ func (s *responsesStreamSerializer) handleContentBlockStart(event bamboo.StreamE
 		s.reasoningItemID = fmt.Sprintf("rs-%d", time.Now().UnixNano())
 
 		item := outputItem{
-			Type: "reasoning",
-			ID:   s.reasoningItemID,
+			Type:    "reasoning",
+			ID:      s.reasoningItemID,
+			Summary: []outputReasoningSummary{},
 		}
 		added := outputItemAdded{OutputIndex: s.reasoningIndex, Item: item}
 		return s.marshalSSE("response.output_item.added", added)
@@ -372,6 +376,7 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 			Content: []outputContent{
 				{Type: "reasoning_text", Text: s.reasoningText.String()},
 			},
+			Summary: []outputReasoningSummary{},
 		}
 		done := outputItemAdded{OutputIndex: s.reasoningIndex, Item: item}
 		outputItemDoneBytes, err := s.marshalSSE("response.output_item.done", done)
@@ -415,6 +420,11 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 
 // handleMessageDelta 处理 message_delta 事件 → response.completed。
 func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([]byte, error) {
+	if s.completedSent {
+		return nil, nil
+	}
+	s.completedSent = true
+
 	msgDelta, ok := event.Delta.(*bamboo.MessageDelta)
 	if !ok {
 		// 仍然发送 response.completed

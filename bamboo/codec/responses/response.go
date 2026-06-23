@@ -29,6 +29,8 @@ type outputItem struct {
 	Role    string          `json:"role,omitempty"`
 	Status  string          `json:"status,omitempty"`
 	Content []outputContent `json:"content,omitempty"`
+	// reasoning 专用 — OpenAI SDK ResponseReasoningItem.Summary 标记 api:"required"
+	Summary []outputReasoningSummary `json:"summary"`
 	// function_call 专用
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
@@ -37,6 +39,12 @@ type outputItem struct {
 
 // outputContent message 项目中的 content 元素。
 type outputContent struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+// outputReasoningSummary reasoning item 的 summary 元素（type 固定为 "summary_text"）。
+type outputReasoningSummary struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
 }
@@ -71,6 +79,7 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 				Type:    "reasoning",
 				ID:      "rs_" + b.Signature,
 				Content: []outputContent{{Type: "reasoning_text", Text: b.Thinking}},
+				Summary: []outputReasoningSummary{},
 			})
 
 		case *bamboo.ToolUseBlock:
