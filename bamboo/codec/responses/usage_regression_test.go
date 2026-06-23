@@ -162,14 +162,14 @@ func setupReasoningStream(t *testing.T) []byte {
 
 	// 两次 thinking delta — 内容应累积为 "Hello World"
 	s.Serialize(bamboo.StreamEvent{
-		Type:   bamboo.EventContentBlockDelta,
-		Index:  0,
-		Delta:  &bamboo.StreamDelta{Type: bamboo.DeltaThinkingDelta, Thinking: "Hello "},
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 0,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaThinkingDelta, Thinking: "Hello "},
 	})
 	s.Serialize(bamboo.StreamEvent{
-		Type:   bamboo.EventContentBlockDelta,
-		Index:  0,
-		Delta:  &bamboo.StreamDelta{Type: bamboo.DeltaThinkingDelta, Thinking: "World"},
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 0,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaThinkingDelta, Thinking: "World"},
 	})
 
 	// content_block_stop → 2 帧: reasoning_text.done + output_item.done
@@ -242,15 +242,15 @@ func TestResponsesStream_ReasoningOutputItemContent(t *testing.T) {
 		if item.Type != "reasoning" {
 			t.Errorf("item.type = %q, want %q", item.Type, "reasoning")
 		}
-		if len(item.Content) != 1 {
-			t.Fatalf("item.content len = %d, want 1", len(item.Content))
+		// thinking 内容在 summary 中（明文），content 为空
+		if len(item.Summary) != 1 {
+			t.Fatalf("item.summary len = %d, want 1", len(item.Summary))
 		}
-		c := item.Content[0]
-		if c.Type != "reasoning_text" {
-			t.Errorf("content[0].type = %q, want %q", c.Type, "reasoning_text")
+		if item.Summary[0].Type != "summary_text" {
+			t.Errorf("summary[0].type = %q, want %q", item.Summary[0].Type, "summary_text")
 		}
-		if c.Text != "Hello World" {
-			t.Errorf("content[0].text = %q, want %q", c.Text, "Hello World")
+		if item.Summary[0].Text != "Hello World" {
+			t.Errorf("summary[0].text = %q, want %q", item.Summary[0].Text, "Hello World")
 		}
 	}
 	if !found {
@@ -264,8 +264,8 @@ func TestResponsesStream_ReasoningOutputItemContent(t *testing.T) {
 // 解析 JSON 断言 total_tokens = 20。
 func TestResponsesNonStream_TotalTokens(t *testing.T) {
 	resp := &bamboo.Response{
-		ID:        "resp_test_001",
-		Model:     "gpt-4",
+		ID:         "resp_test_001",
+		Model:      "gpt-4",
 		StopReason: bamboo.FinishReasonEndTurn,
 		Usage: bamboo.Usage{
 			InputTokens:  5,

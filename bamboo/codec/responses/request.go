@@ -65,6 +65,8 @@ type inputItem struct {
 	Content json.RawMessage `json:"content,omitempty"`
 	ID      string          `json:"id,omitempty"`
 	Name    string          `json:"name,omitempty"`
+	// reasoning 专用
+	Summary []outputReasoningSummary `json:"summary,omitempty"`
 	// function_call 专用
 	CallID    string `json:"call_id,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
@@ -245,8 +247,10 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 				bamboo.NewToolResultBlock(item.CallID, item.Output, false),
 			))
 		case "reasoning":
-			// assistant 推理内容
-			text := extractReasoningText(item.Content)
+			text := extractSummaryText(item.Summary)
+			if text == "" {
+				text = extractReasoningText(item.Content)
+			}
 			if text != "" {
 				messages = append(messages, bamboo.NewAssistantMessageBlocks(
 					bamboo.NewThinkingBlock(text, ""),
@@ -372,6 +376,17 @@ func extractReasoningText(contentRaw json.RawMessage) string {
 	for _, p := range parts {
 		if p.Text != "" {
 			texts = append(texts, p.Text)
+		}
+	}
+	return strings.Join(texts, "\n")
+}
+
+// extractSummaryText 从 reasoning item 的 summary 数组中提取摘要文本。
+func extractSummaryText(summary []outputReasoningSummary) string {
+	var texts []string
+	for _, s := range summary {
+		if s.Text != "" {
+			texts = append(texts, s.Text)
 		}
 	}
 	return strings.Join(texts, "\n")

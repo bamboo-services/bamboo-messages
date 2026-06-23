@@ -173,14 +173,18 @@ func TestSerializeResponse_Reasoning(t *testing.T) {
 	if reasoningItem == nil {
 		t.Fatal("no reasoning item in output")
 	}
-	if len(reasoningItem.Content) != 1 {
-		t.Fatalf("reasoning Content len = %d", len(reasoningItem.Content))
+	// thinking 内容应在 summary 中（明文），content 为空
+	if len(reasoningItem.Summary) != 1 {
+		t.Fatalf("reasoning Summary len = %d, want 1", len(reasoningItem.Summary))
 	}
-	if reasoningItem.Content[0].Type != "reasoning_text" {
-		t.Errorf("reasoning Content Type = %q", reasoningItem.Content[0].Type)
+	if reasoningItem.Summary[0].Type != "summary_text" {
+		t.Errorf("reasoning Summary Type = %q, want %q", reasoningItem.Summary[0].Type, "summary_text")
 	}
-	if reasoningItem.Content[0].Text != "Let me think..." {
-		t.Errorf("reasoning Text = %q", reasoningItem.Content[0].Text)
+	if reasoningItem.Summary[0].Text != "Let me think..." {
+		t.Errorf("reasoning Summary Text = %q, want %q", reasoningItem.Summary[0].Text, "Let me think...")
+	}
+	if len(reasoningItem.Content) != 0 {
+		t.Errorf("reasoning Content should be empty, len = %d", len(reasoningItem.Content))
 	}
 
 	if msgItem == nil {

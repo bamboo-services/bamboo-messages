@@ -121,7 +121,23 @@ func (p *ResponsesProvider) buildInput(systemPrompt string, messages []provider.
 // 将助手消息（可能包含文本内容和工具调用）转换为 OpenAI SDK 输入项列表，
 // 一个助手消息可能拆分为多个输入项。
 func (p *ResponsesProvider) buildAssistantItem(msg provider.Message) []responses.ResponseInputItemUnionParam {
-	items := make([]responses.ResponseInputItemUnionParam, 0, len(msg.ToolCalls)+1)
+	items := make([]responses.ResponseInputItemUnionParam, 0, len(msg.ToolCalls)+2)
+
+	if msg.ThinkingContent != "" {
+		summary := []responses.ResponseReasoningItemSummaryParam{
+			{Text: msg.ThinkingContent},
+		}
+		reasoningParam := &responses.ResponseReasoningItemParam{
+			ID:      "rs_" + msg.ThinkingSignature,
+			Summary: summary,
+		}
+		if msg.ThinkingSignature != "" {
+			reasoningParam.EncryptedContent = param.NewOpt(msg.ThinkingSignature)
+		}
+		items = append(items, responses.ResponseInputItemUnionParam{
+			OfReasoning: reasoningParam,
+		})
+	}
 
 	if msg.Content != "" {
 		items = append(items, responses.ResponseInputItemUnionParam{

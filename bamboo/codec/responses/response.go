@@ -78,8 +78,10 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 			reasoningItems = append(reasoningItems, outputItem{
 				Type:    "reasoning",
 				ID:      "rs_" + b.Signature,
-				Content: []outputContent{{Type: "reasoning_text", Text: b.Thinking}},
-				Summary: []outputReasoningSummary{},
+				Content: []outputContent{},
+				Summary: []outputReasoningSummary{
+					{Type: "summary_text", Text: b.Thinking},
+				},
 			})
 
 		case *bamboo.ToolUseBlock:

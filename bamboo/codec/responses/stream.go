@@ -357,7 +357,7 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 		}
 
 	case "thinking":
-		// 1. reasoning_text.done
+		// 1. reasoning_text.done — 流式展示事件，保留完整文本供实时显示
 		ev := reasoningDoneEvent{
 			OutputIndex:  s.reasoningIndex,
 			ContentIndex: 0,
@@ -368,15 +368,16 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 			return nil, err
 		}
 
-		// 2. output_item.done（reasoning item，status=completed，携带完整 content）
+		// 2. output_item.done — reasoning item 使用 summary（明文）
+		reasoningText := s.reasoningText.String()
 		item := outputItem{
-			Type:   "reasoning",
-			ID:     s.reasoningItemID,
-			Status: "completed",
-			Content: []outputContent{
-				{Type: "reasoning_text", Text: s.reasoningText.String()},
+			Type:    "reasoning",
+			ID:      s.reasoningItemID,
+			Status:  "completed",
+			Content: []outputContent{},
+			Summary: []outputReasoningSummary{
+				{Type: "summary_text", Text: reasoningText},
 			},
-			Summary: []outputReasoningSummary{},
 		}
 		done := outputItemAdded{OutputIndex: s.reasoningIndex, Item: item}
 		outputItemDoneBytes, err := s.marshalSSE("response.output_item.done", done)

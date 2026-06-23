@@ -52,10 +52,22 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 			}
 		case "reasoning":
 			rc := item.AsReasoning()
-			for _, content := range rc.Content {
-				if content.Text != "" {
-					result.Thinking += content.Text
+			for _, sum := range rc.Summary {
+				if sum.Text != "" {
+					result.Thinking += sum.Text
 				}
+			}
+			if result.Thinking == "" {
+				for _, content := range rc.Content {
+					if content.Text != "" {
+						result.Thinking += content.Text
+					}
+				}
+			}
+			// encrypted_content 是 OpenAI 服务端加密的不透明 token，
+			// Responses → Responses 直连时原样传回可保持推理上下文连续性。
+			if rc.EncryptedContent != "" {
+				result.ThinkingSignature = rc.EncryptedContent
 			}
 		case "function_call":
 			fc := item.AsFunctionCall()
