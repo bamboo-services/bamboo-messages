@@ -229,22 +229,31 @@ func (s *openaiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 }
 
 // handleMessageDelta 处理 message_delta 事件。
+//
+// 注意：仅当 StopReason 非空时才设置 finish_reason 字段。
+// UsageDelta 会产生 StopReason 为空的 EventMessageDelta（仅携带 usage），
+// 此时不应输出 finish_reason，避免产生多个终止事件。
+// 真正的 finish_reason 仅由 handleStop 产生的非空 StopReason 事件决定。
 func (s *openaiStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([]byte, error) {
 	msgDelta, ok := event.Delta.(*bamboo.MessageDelta)
 	if !ok {
 		return nil, nil
 	}
 
-	finishReason := mapFinishReason(msgDelta.StopReason)
 	chunk := openaiChunk{
 		ID:      s.id,
 		Object:  "chat.completion.chunk",
 		Created: s.created,
 		Choices: []openaiDelta{{
-			Index:        0,
-			Delta:        openaiDeltaMsg{},
-			FinishReason: &finishReason,
+			Index: 0,
+			Delta: openaiDeltaMsg{},
 		}},
+	}
+
+	// 仅当 StopReason 非空时才映射 finish_reason
+	if msgDelta.StopReason != "" {
+		finishReason := mapFinishReason(msgDelta.StopReason)
+		chunk.Choices[0].FinishReason = &finishReason
 	}
 
 	if event.Usage != nil {

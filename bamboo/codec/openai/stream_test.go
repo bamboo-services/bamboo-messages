@@ -203,6 +203,53 @@ func TestStreamSerializer_ToolCallStream(t *testing.T) {
 	}
 }
 
+// TestStreamSerializer_UsageDeltaNoFinishReason 验证 UsageDelta 产生的 message_delta
+// （StopReason 为空）不会输出 finish_reason 字段。
+//
+// 背景：上游模型在 finish chunk 中同时返回 usage 和 finish_reason，
+// bamboo 适配器会拆分为 UsageDelta（先）和 StreamTypeStop（后）两个事件。
+// UsageDelta 在 StreamConverter 中生成 EventMessageDelta(StopReason=""),
+// 如果 codec 层把空 StopReason 映射为 "stop"，会产生一个额外的 finish_reason:"stop" chunk，
+// 导致客户端收到两个 finish_reason（先 stop 后 tool_calls）。
+func TestStreamSerializer_UsageDeltaNoFinishReason(t *testing.T) {
+	s := newStreamSerializer()
+
+	// message_start
+	s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+
+	// 模拟 UsageDelta 产生的 EventMessageDelta（StopReason 为空，仅携带 usage）
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type: bamboo.EventMessageDelta,
+		Delta: &bamboo.MessageDelta{
+			StopReason: "",
+		},
+		Usage: &bamboo.Usage{
+			InputTokens:  10,
+			OutputTokens: 20,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(usage delta) error = %v", err)
+	}
+	chunk := parseSSEChunk(t, data)
+
+	if chunk.Choices[0].FinishReason != nil {
+		t.Errorf("FinishReason should be nil for empty StopReason, got %q", *chunk.Choices[0].FinishReason)
+	}
+	if chunk.Usage == nil {
+		t.Fatal("Usage should be present")
+	}
+	if chunk.Usage.PromptTokens != 10 {
+		t.Errorf("PromptTokens = %d, want 10", chunk.Usage.PromptTokens)
+	}
+	if chunk.Usage.CompletionTokens != 20 {
+		t.Errorf("CompletionTokens = %d, want 20", chunk.Usage.CompletionTokens)
+	}
+}
+
 func TestStreamSerializer_FlushDONE(t *testing.T) {
 	s := newStreamSerializer()
 	data, err := s.Flush()

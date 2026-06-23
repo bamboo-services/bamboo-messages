@@ -287,6 +287,7 @@ type StreamConverter struct {
 	textBlockStarted     bool
 	thinkingBlockStarted bool
 	finishReason         FinishReason
+	stopHandled          bool
 }
 
 func NewStreamConverter() *StreamConverter { return &StreamConverter{} }
@@ -302,8 +303,10 @@ func (sc *StreamConverter) Convert(event provider.StreamEvent) []StreamEvent {
 	case provider.StreamTypeDelta:
 		return sc.handleDelta(event.Delta)
 	case provider.StreamTypeStop:
-		// 记录适配器提供的完成原因，供 handleStop 使用
 		sc.finishReason = mapFinishReason(event.FinishReason)
+		if sc.stopHandled {
+			return nil
+		}
 		return sc.handleStop()
 	case provider.StreamTypeDone:
 		return nil
@@ -455,6 +458,7 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 }
 
 func (sc *StreamConverter) handleStop() []StreamEvent {
+	sc.stopHandled = true
 	usage := sc.usage
 	if usage == nil {
 		usage = &Usage{}

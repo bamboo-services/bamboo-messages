@@ -1549,3 +1549,40 @@ func TestStreamConverter_UsageImmediateEmit(t *testing.T) {
 		t.Errorf("Usage.CacheReadInputTokens = %d, want 10", first.Usage.CacheReadInputTokens)
 	}
 }
+
+// TestStreamConverter_DoubleStopIdempotent 验证 StreamConverter 收到两次 StreamTypeStop 时，
+// 第二次不会重复生成 handleStop 事件序列。
+//
+// 背景：部分上游模型在同一个流中发送两个带 finish_reason 的 chunk（如先 stop 再 tool_calls），
+// 适配器层会为每个 finish_reason chunk 生成 StreamTypeStop 事件。
+// 如果 StreamConverter 不做幂等控制，会输出两个 EventMessageDelta + 两个 EventMessageStop，
+// 导致下游 codec 层产生两个带 finish_reason 的 SSE chunk。
+func TestStreamConverter_DoubleStopIdempotent(t *testing.T) {
+	sc := NewStreamConverter()
+
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+	sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStartDelta("text"),
+	})
+	sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewTextDelta("hello"),
+	})
+
+	firstStop := sc.Convert(provider.StreamEvent{
+		Type:         provider.StreamTypeStop,
+		FinishReason: provider.FinishReasonStop,
+	})
+	if len(firstStop) == 0 {
+		t.Fatal("first StreamTypeStop should produce events")
+	}
+
+	secondStop := sc.Convert(provider.StreamEvent{
+		Type:         provider.StreamTypeStop,
+		FinishReason: provider.FinishReasonToolCalls,
+	})
+	if len(secondStop) != 0 {
+		t.Errorf("second StreamTypeStop should produce 0 events, got %d", len(secondStop))
+	}
+}
