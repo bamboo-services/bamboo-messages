@@ -16,7 +16,10 @@
 //	}
 package relay
 
-import "github.com/bamboo-services/bamboo-messages/bamboo"
+import (
+	"github.com/bamboo-services/bamboo-messages/bamboo"
+	"github.com/bamboo-services/bamboo-messages/provider"
+)
 
 // Config relay 运行时配置，携带可选的回调函数和 debug 开关。
 //
@@ -38,6 +41,12 @@ type Config struct {
 	// 非 nil 时启用流式输出平滑缓冲，nil 时直接透传上游事件。
 	// 通过 WithSmoothBuffer(level) 或 WithSmoothBufferCustom(params) 启用。
 	Smooth *SmoothConfig
+
+	// OnRateSample 速率采样回调。
+	// 仅在启用 SmoothBuffer 时由 SmoothPacer 触发，每次输出 tick 采样一次。
+	// 参数为 (从流开始的经过秒数, 该 tick 的 token/s 速率, 采样类型)。
+	// 通过 WithRateSampleCallback(fn) 设置。
+	OnRateSample func(elapsedSec, tokensPerSec float64, kind provider.RateSampleKind)
 }
 
 // Option relay 配置选项函数。
@@ -76,6 +85,17 @@ func WithErrorCallback(fn func(error)) Option {
 func WithDebug(enabled bool) Option {
 	return func(c *Config) {
 		c.Debug = enabled
+	}
+}
+
+// WithRateSampleCallback 设置速率采样回调。
+//
+// 仅在启用 SmoothBuffer（通过 WithSmoothBuffer 或 WithSmoothBufferCustom）时生效。
+// 每次 SmoothPacer 输出 tick 后触发，记录该时刻的瞬时 token/s 速率。
+// 适用于实时速率监控、打字机效果可视化等场景。
+func WithRateSampleCallback(fn func(elapsedSec, tokensPerSec float64, kind provider.RateSampleKind)) Option {
+	return func(c *Config) {
+		c.OnRateSample = fn
 	}
 }
 

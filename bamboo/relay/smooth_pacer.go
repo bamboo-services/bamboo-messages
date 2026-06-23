@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
+	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // pacerMode pacer 运行模式。
@@ -63,6 +64,12 @@ type SmoothPacer struct {
 	smoothedInterval time.Duration
 	lastArrival      time.Time
 
+	// 速率采样回调（只在 run 中调用）
+	// 每次 outputBatch 输出帧后触发，按帧 kind 区分 thinking/output
+	onRateSample func(elapsedSec, tokensPerSec float64, kind provider.RateSampleKind)
+	startTime    time.Time
+	lastEmitTime time.Time
+
 	// 生命周期
 	done chan struct{}
 }
@@ -83,10 +90,20 @@ func NewSmoothPacer(format codec.FormatType, params SmoothParams, out chan<- []b
 		done:             make(chan struct{}),
 		queue:            make([]microFrame, 0, 64),
 		mode:             modeNormal,
-		smoothedInterval: params.MinInterval, // 初始 = 最小间隔（首帧快速输出）
+		smoothedInterval: params.MinInterval,
+		startTime:        time.Now(),
 	}
 	go p.run()
 	return p
+}
+
+// SetRateSampleCallback 设置速率采样回调。
+//
+// 回调在 outputBatch 每次 tick 输出帧后触发（在 run goroutine 中调用），
+// 参数为 (从流开始的经过秒数, 该 tick 的 token/s 速率, 采样类型)。
+// 必须在 run goroutine 启动前（NewSmoothPacer 返回后立即）调用。
+func (p *SmoothPacer) SetRateSampleCallback(fn func(elapsedSec, tokensPerSec float64, kind provider.RateSampleKind)) {
+	p.onRateSample = fn
 }
 
 // Push 非阻塞推送 SSE 帧到 pacer。
@@ -378,10 +395,14 @@ func (p *SmoothPacer) outputBatch() {
 
 	// 队首是 barrier → 排空前面积压的数据帧后输出 barrier
 	if p.queue[0].isBarrier {
+		// 统计 barrier 前排空的数据帧（用于速率采样）
+		var thinkingN, outputN int
 		for len(p.queue) > 0 && !p.queue[0].isBarrier {
+			p.recordFrameForSampling(p.queue[0], &thinkingN, &outputN)
 			p.outputFrame(p.queue[0])
 			p.queue = p.queue[1:]
 		}
+		p.emitRateSamples(thinkingN, outputN)
 		if len(p.queue) > 0 {
 			p.outputFrame(p.queue[0])
 			p.queue = p.queue[1:]
@@ -393,16 +414,62 @@ func (p *SmoothPacer) outputBatch() {
 	intervalAtFloor := p.currentInterval() == minIntervalFloor
 	effectiveTokens := effectiveTokensPerFrame(len(p.queue), p.params.TokensPerFrame, intervalAtFloor)
 
+	var thinkingN, outputN int
 	tokensOutput := 0
 	for len(p.queue) > 0 && tokensOutput < effectiveTokens {
 		frame := p.queue[0]
 		if frame.isBarrier {
 			break
 		}
+		p.recordFrameForSampling(frame, &thinkingN, &outputN)
 		p.outputFrame(frame)
 		p.queue = p.queue[1:]
 		tokensOutput++
 	}
+
+	p.emitRateSamples(thinkingN, outputN)
+}
+
+// recordFrameForSampling 按帧 kind 累计 thinking/output token 数。
+func (p *SmoothPacer) recordFrameForSampling(frame microFrame, thinkingN, outputN *int) {
+	switch frame.kind {
+	case frameThinking:
+		*thinkingN++
+	case frameText:
+		*outputN++
+	}
+}
+
+// emitRateSamples 按类型触发速率采样回调。
+// 同一 tick 可能同时输出 thinking 和 output 帧（混排），分别采样。
+func (p *SmoothPacer) emitRateSamples(thinkingN, outputN int) {
+	if p.onRateSample == nil {
+		return
+	}
+
+	now := time.Now()
+	if p.lastEmitTime.IsZero() {
+		p.lastEmitTime = now
+		return
+	}
+
+	intervalSec := now.Sub(p.lastEmitTime).Seconds()
+	elapsedSec := now.Sub(p.startTime).Seconds()
+
+	if intervalSec <= 0 {
+		return
+	}
+
+	if thinkingN > 0 {
+		rate := float64(thinkingN) / intervalSec
+		p.onRateSample(elapsedSec, rate, provider.RateSampleKindThinking)
+	}
+	if outputN > 0 {
+		rate := float64(outputN) / intervalSec
+		p.onRateSample(elapsedSec, rate, provider.RateSampleKindOutput)
+	}
+
+	p.lastEmitTime = now
 }
 
 // outputFrame 输出单个微帧到 out channel。

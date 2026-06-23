@@ -178,6 +178,9 @@ func RelayStream(
 		var pacer *SmoothPacer
 		if cfg.Smooth != nil && cfg.Smooth.Level != SmoothLevelOff {
 			pacer = NewSmoothPacer(outFormat, cfg.Smooth.Params, out, ctx)
+			if cfg.OnRateSample != nil {
+				pacer.SetRateSampleCallback(cfg.OnRateSample)
+			}
 			defer pacer.Wait()
 		}
 
