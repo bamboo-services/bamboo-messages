@@ -635,9 +635,18 @@ func TestConvertStreamUsage(t *testing.T) {
 		Delta: provider.NewUsageDelta(100, 50),
 	})
 
-	// Usage 不直接产生事件，存储在转换器内部
-	if len(events) != 0 {
-		t.Fatalf("expected 0 events, got %d", len(events))
+	// Usage 被立即发射为 MessageDelta 事件（回归修复后行为）
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event (immediate usage emit), got %d", len(events))
+	}
+	if events[0].Type != EventMessageDelta {
+		t.Errorf("events[0].Type = %q, want message_delta", events[0].Type)
+	}
+	if events[0].Usage == nil {
+		t.Fatal("events[0].Usage is nil")
+	}
+	if events[0].Usage.InputTokens != 100 {
+		t.Errorf("Usage.InputTokens = %d, want 100", events[0].Usage.InputTokens)
 	}
 }
 
@@ -742,7 +751,7 @@ func TestConvertStreamFullLifecycle(t *testing.T) {
 		Delta: provider.NewTextDelta(" there"),
 	})...)
 
-	// Usage (stored internally)
+	// Usage (立即发射 MessageDelta 事件)
 	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
 		Type:  provider.StreamTypeDelta,
 		Delta: provider.NewUsageDelta(50, 10),
@@ -751,12 +760,14 @@ func TestConvertStreamFullLifecycle(t *testing.T) {
 	// Stop
 	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})...)
 
-	// 验证事件序列: message_start, content_block_start, delta, delta, content_block_stop, message_delta, message_stop
+	// 验证事件序列: message_start, content_block_start, delta, delta,
+	// message_delta(usage立即发射), content_block_stop, message_delta, message_stop
 	expectedTypes := []StreamEventType{
 		EventMessageStart,
 		EventContentBlockStart,
 		EventContentBlockDelta,
 		EventContentBlockDelta,
+		EventMessageDelta, // usage 立即发射
 		EventContentBlockStop,
 		EventMessageDelta,
 		EventMessageStop,
@@ -1264,6 +1275,7 @@ func TestStreamConverter_TextOnly(t *testing.T) {
 		EventMessageStart,      // start → message_start
 		EventContentBlockStart, // block_start(text)
 		EventContentBlockDelta, // text_delta
+		EventMessageDelta,      // usage 立即发射
 		EventContentBlockStop,  // stop → content_block_stop
 		EventMessageDelta,      // stop → message_delta
 		EventMessageStop,       // stop → message_stop
@@ -1278,8 +1290,8 @@ func TestStreamConverter_TextOnly(t *testing.T) {
 		}
 	}
 
-	// 验证 usage 透传
-	msgDeltaEvent := allEvents[4]
+	// 验证 usage 透传（stop 的 message_delta 在 events[5]）
+	msgDeltaEvent := allEvents[5]
 	if msgDeltaEvent.Usage == nil {
 		t.Fatal("message_delta Usage 不应为 nil")
 	}
@@ -1485,5 +1497,55 @@ func TestConvertStreamWithUsageInStop(t *testing.T) {
 	}
 	if msgDeltaEvent.Usage.OutputTokens != 200 {
 		t.Errorf("Usage.OutputTokens = %d, want 200", msgDeltaEvent.Usage.OutputTokens)
+	}
+}
+
+// TestStreamConverter_UsageImmediateEmit 验证 Usage Delta 被立即转为 MessageDelta 事件。
+//
+// 背景：Usage 事件（StreamDeltaTypeUsage）到达时，StreamConverter 应立即返回
+// 一个 EventMessageDelta 事件并携带 Usage，确保流中断时 usage 不丢失。
+// 这是 usage 即时发射的回归测试。
+func TestStreamConverter_UsageImmediateEmit(t *testing.T) {
+	sc := NewStreamConverter()
+
+	// 先发 start 建立 message_start
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+
+	// 发 BlockStart(text)
+	sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStartDelta("text"),
+	})
+
+	// 发 Usage Delta — 应立即返回 MessageDelta + Usage
+	events := sc.Convert(provider.StreamEvent{
+		Type: provider.StreamTypeDelta,
+		Delta: provider.NewUsageDeltaWithCache(
+			42, 88, 5, 10,
+		),
+	})
+
+	if len(events) == 0 {
+		t.Fatal("Usage delta should produce at least one event")
+	}
+
+	first := events[0]
+	if first.Type != EventMessageDelta {
+		t.Errorf("first event Type = %v, want %v", first.Type, EventMessageDelta)
+	}
+	if first.Usage == nil {
+		t.Fatal("first event Usage is nil — usage should be emitted immediately")
+	}
+	if first.Usage.InputTokens != 42 {
+		t.Errorf("Usage.InputTokens = %d, want 42", first.Usage.InputTokens)
+	}
+	if first.Usage.OutputTokens != 88 {
+		t.Errorf("Usage.OutputTokens = %d, want 88", first.Usage.OutputTokens)
+	}
+	if first.Usage.CacheCreationInputTokens != 5 {
+		t.Errorf("Usage.CacheCreationInputTokens = %d, want 5", first.Usage.CacheCreationInputTokens)
+	}
+	if first.Usage.CacheReadInputTokens != 10 {
+		t.Errorf("Usage.CacheReadInputTokens = %d, want 10", first.Usage.CacheReadInputTokens)
 	}
 }

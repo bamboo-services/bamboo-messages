@@ -14,7 +14,7 @@ func (p *CompletionsProvider) handleChunk(chunk openai.ChatCompletionChunk, text
 	var events []provider.StreamEvent
 
 	// 处理 usage（最后一个 chunk 可能没有 choices）
-	if chunk.Usage.TotalTokens > 0 {
+	if chunk.Usage.TotalTokens > 0 || chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 {
 		events = append(events, provider.StreamEvent{
 			Type: provider.StreamTypeDelta,
 			Delta: provider.NewUsageDeltaWithCache(

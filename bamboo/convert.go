@@ -438,7 +438,17 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 			CacheCreationInputTokens: data.CacheCreationInputTokens,
 			CacheReadInputTokens:     data.CacheReadInputTokens,
 		}
-		return nil
+		// 立即返回 usage 事件，确保流中断时 usage 不丢失
+		return []StreamEvent{{
+			Type:  EventMessageDelta,
+			Delta: &MessageDelta{},
+			Usage: &Usage{
+				InputTokens:              data.InputTokens,
+				OutputTokens:             data.OutputTokens,
+				CacheCreationInputTokens: data.CacheCreationInputTokens,
+				CacheReadInputTokens:     data.CacheReadInputTokens,
+			},
+		}}
 	default:
 		return nil
 	}

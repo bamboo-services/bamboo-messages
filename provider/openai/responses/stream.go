@@ -176,14 +176,31 @@ func (p *ResponsesProvider) contentResponseCompleted(event responses.ResponseStr
 // 当 OpenAI 请求失败时触发，包装错误信息并返回 ErrorEvent。
 func (p *ResponsesProvider) contentResponseFailed(ctx context.Context, event responses.ResponseStreamEventUnion) []provider.StreamEvent {
 	e := event.AsResponseFailed()
+	usage := e.Response.Usage
+	var events []provider.StreamEvent
+
+	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
+		events = append(events, provider.StreamEvent{
+			Type: provider.StreamTypeDelta,
+			Delta: provider.NewUsageDeltaWithCache(
+				usage.InputTokens,
+				usage.OutputTokens,
+				0,
+				usage.InputTokensDetails.CachedTokens,
+			),
+		})
+	}
+
 	errMsg := "OpenAI 响应失败"
 	if e.Response.Error.Message != "" {
 		errMsg += ": " + e.Response.Error.Message
 	}
-	return []provider.StreamEvent{{
+	events = append(events, provider.StreamEvent{
 		Type: provider.StreamTypeError,
 		Err:  xError.NewError(ctx, nil, errMsg, false, nil),
-	}}
+	})
+
+	return events
 }
 
 // contentResponseIncomplete 处理响应未完成事件。
@@ -191,11 +208,28 @@ func (p *ResponsesProvider) contentResponseFailed(ctx context.Context, event res
 // 当响应因长度限制等原因未完成时触发，发送停止事件结束流。
 func (p *ResponsesProvider) contentResponseIncomplete(event responses.ResponseStreamEventUnion) []provider.StreamEvent {
 	e := event.AsResponseIncomplete()
+	usage := e.Response.Usage
+	var events []provider.StreamEvent
+
+	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
+		events = append(events, provider.StreamEvent{
+			Type: provider.StreamTypeDelta,
+			Delta: provider.NewUsageDeltaWithCache(
+				usage.InputTokens,
+				usage.OutputTokens,
+				0,
+				usage.InputTokensDetails.CachedTokens,
+			),
+		})
+	}
+
 	// 响应未完成，发送停止事件并携带完成原因
-	return []provider.StreamEvent{{
+	events = append(events, provider.StreamEvent{
 		Type:         provider.StreamTypeStop,
 		FinishReason: mapResponseFinishReason(e.Response),
-	}}
+	})
+
+	return events
 }
 
 // mapResponseFinishReason 根据 OpenAI Responses 状态和输出推断完成原因。

@@ -77,8 +77,16 @@ func Relay(
 	client := bamboo.NewClient(p)
 	resp, err := client.Complete(ctx, req.Messages, req.System, req.Config)
 	if err != nil {
+		// 即使出错，如果 resp 非 nil 也尝试触发 usage 回调（兜底）
+		if resp != nil {
+			cfg.triggerUsage(resp.Usage)
+		}
 		cfg.triggerError(err)
-		return nil, fmt.Errorf("relay: provider complete failed: %w", err)
+
+		// 将上游错误序列化为目标协议格式的错误响应 body，
+		// 确保调用方（如 newapi）拿到协议格式的错误 JSON 而非空 body。
+		errorBody := outCodec.SerializeError(err)
+		return errorBody, fmt.Errorf("relay: provider complete failed: %w", err)
 	}
 
 	// ── 触发 Usage 回调 ──
@@ -172,6 +180,13 @@ func RelayStream(
 	out := make(chan []byte, 64)
 
 	go func() {
+		var lastUsage *bamboo.Usage
+		usageTriggered := false
+		defer func() {
+			if !usageTriggered && lastUsage != nil {
+				cfg.triggerUsage(*lastUsage)
+			}
+		}()
 		defer close(out)
 
 		// ── 平滑缓冲器（可选）──
@@ -192,7 +207,9 @@ func RelayStream(
 
 			// 处理 Usage 事件
 			if event.Usage != nil {
+				lastUsage = event.Usage
 				cfg.triggerUsage(*event.Usage)
+				usageTriggered = true
 			}
 
 			// 序列化事件
@@ -211,6 +228,11 @@ func RelayStream(
 						return
 					}
 				}
+			}
+
+			// 错误事件是终结性的，序列化发出后立即停止处理
+			if event.Type == bamboo.EventError {
+				break
 			}
 		}
 

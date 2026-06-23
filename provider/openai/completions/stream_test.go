@@ -192,3 +192,50 @@ func TestHandleChoice_OnlyReasoning(t *testing.T) {
 		t.Error("should not emit TextDelta when only reasoning_content present")
 	}
 }
+
+// TestHandleChunk_RelaxedUsageCondition 验证 usage 提取条件已放宽。
+//
+// 背景：原条件 `chunk.Usage.TotalTokens > 0` 会遗漏 TotalTokens=0 的 chunk
+// （如 CompletionTokens=0 但 PromptTokens>0 的场景）。修复后条件为
+// TotalTokens>0 || PromptTokens>0 || CompletionTokens>0，确保只要有
+// 任一非零字段就提取 usage。
+//
+// 构造 ChatCompletionChunk{Usage:{PromptTokens:100, CompletionTokens:0, TotalTokens:0}}，
+// 断言 events 包含 UsageDelta。
+func TestHandleChunk_RelaxedUsageCondition(t *testing.T) {
+	p := NewCompletionsProvider("test-api-key")
+
+	chunk := openai.ChatCompletionChunk{
+		Usage: openai.CompletionUsage{
+			PromptTokens:     100,
+			CompletionTokens: 0,
+			TotalTokens:      0,
+		},
+	}
+
+	textBlockStarted := false
+	thinkingBlockStarted := false
+	events := p.handleChunk(chunk, &textBlockStarted, &thinkingBlockStarted)
+
+	found := false
+	for _, e := range events {
+		if e.Delta.Type == provider.StreamDeltaTypeUsage {
+			found = true
+			data, ok := e.Delta.Data.(provider.UsageData)
+			if !ok {
+				t.Fatal("UsageDelta Data is not UsageData")
+			}
+			if data.InputTokens != 100 {
+				t.Errorf("UsageData.InputTokens = %d, want 100", data.InputTokens)
+			}
+			if data.OutputTokens != 0 {
+				t.Errorf("UsageData.OutputTokens = %d, want 0", data.OutputTokens)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected UsageDelta event when PromptTokens>0 but TotalTokens=0 — " +
+			"relaxed condition should fire")
+	}
+}

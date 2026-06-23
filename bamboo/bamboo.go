@@ -127,6 +127,13 @@ func (c *client) Complete(ctx context.Context, messages []BambooMessage, system 
 		result, err = c.provider.Complete(ctx, providerMsgs, providerConfig)
 	}
 	if err != nil {
+		// 兜底：即使出错，如果 result 非 nil（Provider 返回了部分结果），仍转换为 Response 返回，
+		// 上层可通过 resp != nil && err != nil 判断是"部分成功"还是完全失败。
+		if result != nil {
+			providerType := string(c.provider.GetProviderType())
+			resp := resultToResponse(result, providerType)
+			return resp, fmt.Errorf("bamboo: complete failed: %w", err)
+		}
 		return nil, fmt.Errorf("bamboo: complete failed: %w", err)
 	}
 

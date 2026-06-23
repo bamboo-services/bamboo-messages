@@ -94,6 +94,7 @@ type responsesStreamSerializer struct {
 	messageText   strings.Builder
 
 	// reasoning output 项目状态
+	reasoningText   strings.Builder
 	reasoningItemID string
 	reasoningIndex  int
 
@@ -285,6 +286,7 @@ func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamE
 
 	case bamboo.DeltaThinkingDelta:
 		s.reasoningItemID = s.ensureReasoningItem()
+		s.reasoningText.WriteString(delta.Thinking)
 
 		ev := reasoningDeltaEvent{
 			OutputIndex:  s.reasoningIndex,
@@ -355,18 +357,21 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 		ev := reasoningDoneEvent{
 			OutputIndex:  s.reasoningIndex,
 			ContentIndex: 0,
-			Text:         "",
+			Text:         s.reasoningText.String(),
 		}
 		contentDoneBytes, err := s.marshalSSE("response.reasoning_text.done", ev)
 		if err != nil {
 			return nil, err
 		}
 
-		// 2. output_item.done（reasoning item，status=completed）
+		// 2. output_item.done（reasoning item，status=completed，携带完整 content）
 		item := outputItem{
 			Type:   "reasoning",
 			ID:     s.reasoningItemID,
 			Status: "completed",
+			Content: []outputContent{
+				{Type: "reasoning_text", Text: s.reasoningText.String()},
+			},
 		}
 		done := outputItemAdded{OutputIndex: s.reasoningIndex, Item: item}
 		outputItemDoneBytes, err := s.marshalSSE("response.output_item.done", done)
@@ -420,20 +425,20 @@ func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 		status = "incomplete"
 	}
 
-	var usage *responsesUsage
+	usage := &responsesUsage{}
 	if event.Usage != nil {
-		u := &responsesUsage{
+		usage = &responsesUsage{
 			InputTokens:  event.Usage.InputTokens,
 			OutputTokens: event.Usage.OutputTokens,
+			TotalTokens:  event.Usage.InputTokens + event.Usage.OutputTokens,
 		}
 		// Responses 无原生 cache_creation_input_tokens 字段，仅映射 CacheReadInputTokens 到 cached_tokens。
 		// CacheCreationInputTokens 在跨协议转换中会丢失，此为已知限制。
 		if event.Usage.CacheCreationInputTokens > 0 || event.Usage.CacheReadInputTokens > 0 {
-			u.InputTokensDetails = &responsesInputTokensDet{
+			usage.InputTokensDetails = &responsesInputTokensDet{
 				CachedTokens: event.Usage.CacheReadInputTokens,
 			}
 		}
-		usage = u
 	}
 
 	resp := responseObj{

@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"context"
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -132,5 +133,56 @@ func TestReasoningAndTextIndependentTracking(t *testing.T) {
 	// 验证：两个 block 状态独立，互不影响
 	if !thinkingBlockStarted || !textBlockStarted {
 		t.Error("both block started flags should be true")
+	}
+}
+
+// TestContentResponseFailed_UsageCarried 验证 response.failed 事件仍携带 Usage。
+//
+// 背景：contentResponseFailed 在流式响应失败时触发，应像 contentResponseCompleted
+// 一样提取 usage 信息并发送 UsageDelta，确保失败场景下 usage 也能被上层捕获。
+//
+// 构造 ResponseFailed 事件带 Usage{InputTokens:50, OutputTokens:30}，
+// 断言 events 包含 UsageDelta。
+func TestContentResponseFailed_UsageCarried(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	rawJSON := `{
+		"type": "response.failed",
+		"response": {
+			"id": "resp_fail_001",
+			"status": "failed",
+			"usage": {
+				"input_tokens": 50,
+				"output_tokens": 30
+			},
+			"error": {
+				"message": "internal error"
+			}
+		}
+	}`
+	event := unmarshalResponseEvent(t, rawJSON)
+
+	events := p.contentResponseFailed(context.Background(), event)
+
+	found := false
+	for _, e := range events {
+		if e.Delta.Type == provider.StreamDeltaTypeUsage {
+			found = true
+			data, ok := e.Delta.Data.(provider.UsageData)
+			if !ok {
+				t.Fatal("UsageDelta Data is not UsageData")
+			}
+			if data.InputTokens != 50 {
+				t.Errorf("UsageData.InputTokens = %d, want 50", data.InputTokens)
+			}
+			if data.OutputTokens != 30 {
+				t.Errorf("UsageData.OutputTokens = %d, want 30", data.OutputTokens)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected UsageDelta event in response.failed with usage — " +
+			"usage should be carried even on failure path")
 	}
 }

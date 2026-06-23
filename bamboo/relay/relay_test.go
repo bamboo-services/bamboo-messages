@@ -63,7 +63,8 @@ func (m *mockProvider) Complete(_ context.Context, messages []provider.Message, 
 	m.lastMessages = messages
 	m.lastConfig = config
 	if m.completeErr != nil {
-		return nil, m.completeErr
+		// 返回 result + err（若 result 非 nil），允许上层兜底提取 usage
+		return m.completeResult, m.completeErr
 	}
 	return m.completeResult, nil
 }
@@ -73,7 +74,7 @@ func (m *mockProvider) CompleteWithSystem(_ context.Context, system string, mess
 	m.lastMessages = messages
 	m.lastConfig = config
 	if m.completeErr != nil {
-		return nil, m.completeErr
+		return m.completeResult, m.completeErr
 	}
 	return m.completeResult, nil
 }
