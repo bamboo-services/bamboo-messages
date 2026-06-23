@@ -26,13 +26,6 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 	go func() {
 		defer close(eventCh)
 
-		// 发送流开始事件
-		select {
-		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
-		case <-ctx.Done():
-			return
-		}
-
 		params := p.buildParams(systemPrompt, messages, config)
 
 		provider.DebugRequest(
@@ -47,8 +40,19 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 
 		// 追踪完成原因，从 message_delta 提取，供 message_stop 使用
 		var finishReason provider.FinishReason
+		startSent := false
 
 		for stream.Next() {
+			// 延迟发送 StreamTypeStart：首次成功读取数据后确认连接正常才发送
+			if !startSent {
+				startSent = true
+				select {
+				case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
+				case <-ctx.Done():
+					return
+				}
+			}
+
 			event := stream.Current()
 			events := p.handleStreamEvent(event, &finishReason)
 			for _, e := range events {

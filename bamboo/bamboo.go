@@ -54,6 +54,9 @@ func NewClient(p provider.Provider) BambooClient {
 // ChatWithSystem 或 Chat，然后在独立 goroutine 中将 provider.StreamEvent
 // 转换为 bamboo.StreamEvent 发送到输出 channel。
 // channel 会在流结束后自动关闭，或当 ctx 被取消时提前关闭。
+//
+// 连接级错误同步返回：若 provider 的首个事件为 Error（如上游 400 拒绝），
+// 直接返回 (nil, error)，不启动 SSE 流，避免客户端收到空流一直等待。
 func (c *client) Chat(ctx context.Context, messages []BambooMessage, system string, config *RequestConfig) (<-chan StreamEvent, error) {
 	// 转换消息
 	providerMsgs, err := messagesToProvider(messages)
@@ -72,14 +75,38 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 		providerCh = c.provider.Chat(ctx, providerMsgs, providerConfig)
 	}
 
+	// Peek 首个 provider 事件：若为连接级 Error（无 Start 前导），同步返回错误
+	var firstEvent provider.StreamEvent
+	var hasFirst bool
+	select {
+	case firstEvent, hasFirst = <-providerCh:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("bamboo: chat cancelled: %w", ctx.Err())
+	}
+	if !hasFirst {
+		return nil, fmt.Errorf("bamboo: provider stream closed before any event")
+	}
+	if firstEvent.Type == provider.StreamTypeError && firstEvent.Err != nil {
+		return nil, fmt.Errorf("bamboo: provider chat failed: %w", firstEvent.Err)
+	}
+
 	// 创建 bamboo 输出 channel 并启动转换 goroutine
 	out := make(chan StreamEvent)
 	converter := NewStreamConverter()
 
 	go func() {
 		defer close(out)
+
+		// 先处理已 peek 的首事件
+		for _, be := range converter.Convert(firstEvent) {
+			select {
+			case out <- be:
+			case <-ctx.Done():
+				return
+			}
+		}
+
 		for event := range providerCh {
-			// 检查上下文取消
 			select {
 			case <-ctx.Done():
 				out <- StreamEvent{
@@ -90,7 +117,6 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 			default:
 			}
 
-			// 转换 provider 事件 → bamboo 事件
 			bambooEvents := converter.Convert(event)
 			for _, be := range bambooEvents {
 				select {

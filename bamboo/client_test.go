@@ -261,7 +261,7 @@ func (m *mockRichProvider) GetAvailableModels() []string {
 // 补充单元测试
 // ──────────────────────────────────────────────────────────────────────
 
-// TestChatContextCancellation 验证上下文取消时 Chat 正确关闭 channel。
+// TestChatContextCancellation 验证上下文取消时 Chat 正确处理。
 func TestChatContextCancellation(t *testing.T) {
 	p := &mockProvider{}
 	c := NewClient(p)
@@ -271,19 +271,18 @@ func TestChatContextCancellation(t *testing.T) {
 	cancel()
 
 	messages := []BambooMessage{NewUserMessage("hi")}
+	// ctx 已取消，Chat 应同步返回 error（连接前取消）
 	ch, err := c.Chat(ctx, messages, "", nil)
-	if err != nil {
-		t.Fatalf("Chat 返回错误: %v", err)
+	if err == nil {
+		// 如果恰好 mock provider 在 cancel 前发出了首事件，channel 应仍正常关闭
+		for range ch {
+		}
+		return
 	}
-
-	// channel 应该被关闭
-	var events []StreamEvent
-	for e := range ch {
-		events = append(events, e)
+	// 预期：err 非 nil 且 ch 为 nil
+	if ch != nil {
+		t.Errorf("Chat returned non-nil channel with error")
 	}
-	// 可能收到 0 个事件（ctx 已取消，goroutine 快速退出）或收到部分事件
-	// 关键是 channel 必须被关闭（for range 能正常结束）
-	_ = events
 }
 
 // TestCompleteEmptyMessages 验证 Complete 传入空 messages 时的行为。

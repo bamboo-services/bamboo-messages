@@ -29,13 +29,6 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			config = &provider.ChatConfig{}
 		}
 
-		// 发送流开始事件
-		select {
-		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
-		case <-ctx.Done():
-			return
-		}
-
 		params := p.buildResponseNewParams(config.Model, p.buildInput(systemPrompt, messages), config)
 
 		provider.DebugRequest(
@@ -50,8 +43,19 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 
 		textBlockStarted := false
 		thinkingBlockStarted := false
+		startSent := false
 
 		for stream.Next() {
+			// 延迟发送 StreamTypeStart：首次成功读取数据后确认连接正常才发送
+			if !startSent {
+				startSent = true
+				select {
+				case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
+				case <-ctx.Done():
+					return
+				}
+			}
+
 			event := stream.Current()
 			events := p.handleStreamEvent(ctx, event, &textBlockStarted, &thinkingBlockStarted)
 			for _, e := range events {

@@ -24,13 +24,6 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 	go func() {
 		defer close(eventCh)
 
-		// 发送流开始事件
-		select {
-		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
-		case <-ctx.Done():
-			return
-		}
-
 		// 构建请求参数（共享逻辑提取至 buildParams）
 		params := p.buildParams(systemPrompt, messages, config)
 		params.StreamOptions = p.buildStreamOptions()
@@ -48,8 +41,19 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 		// 追踪文本块是否已开始，用于合成 OpenAI Completions 缺失的 content_block_start 事件
 		textBlockStarted := false
 		thinkingBlockStarted := false
+		startSent := false
 
 		for stream.Next() {
+			// 延迟发送 StreamTypeStart：首次成功读取数据后确认连接正常才发送
+			if !startSent {
+				startSent = true
+				select {
+				case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
+				case <-ctx.Done():
+					return
+				}
+			}
+
 			chunk := stream.Current()
 			events := p.handleChunk(chunk, &textBlockStarted, &thinkingBlockStarted)
 			for _, e := range events {

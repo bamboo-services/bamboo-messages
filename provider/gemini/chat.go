@@ -30,13 +30,6 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			config = &provider.ChatConfig{}
 		}
 
-		// 发送流开始事件
-		select {
-		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
-		case <-ctx.Done():
-			return
-		}
-
 		contents := p.buildMessages(messages)
 		gc := p.buildContentConfig(systemPrompt, config)
 
@@ -52,6 +45,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 
 		textBlockStarted := false
 		thinkingBlockStarted := false
+		startSent := false
 
 		for resp, err := range p.Client.Models.GenerateContentStream(ctx, config.Model, contents, gc) {
 			if err != nil {
@@ -63,6 +57,16 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 				case <-ctx.Done():
 				}
 				return
+			}
+
+			// 延迟发送 StreamTypeStart：首次成功读取数据后确认连接正常才发送
+			if !startSent {
+				startSent = true
+				select {
+				case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
+				case <-ctx.Done():
+					return
+				}
 			}
 
 			events := p.handleStreamEvent(resp, &textBlockStarted, &thinkingBlockStarted)
