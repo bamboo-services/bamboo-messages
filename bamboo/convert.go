@@ -125,6 +125,9 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		content := textBuilder.String()
 		hasContent := content != "" || len(toolCalls) > 0 || len(contentBlocks) > 0 || thinkingContent != ""
 		if hasContent || len(msg.Content) == 0 {
+			if msg.Role == RoleAssistant && content == "" && len(toolCalls) == 0 && len(contentBlocks) == 0 && thinkingContent == "" {
+				content = "-"
+			}
 			result = append(result, provider.Message{
 				Role:              providerRole(msg.Role),
 				Content:           content,

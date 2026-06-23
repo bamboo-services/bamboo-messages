@@ -182,6 +182,23 @@ func TestConvertEmptyContent(t *testing.T) {
 	}
 }
 
+// TestConvertEmptyAssistantContent 验证 assistant 空内容时自动补 "-"。
+func TestConvertEmptyAssistantContent(t *testing.T) {
+	msgs := []BambooMessage{
+		{Role: RoleAssistant, Content: []ContentBlock{}},
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	}
+	if result[0].Content != "-" {
+		t.Errorf("Content = %q, 期望 \"-\"", result[0].Content)
+	}
+}
+
 // ---- configToProvider 测试 ----
 
 func TestConvertConfig(t *testing.T) {
