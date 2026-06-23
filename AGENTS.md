@@ -1,7 +1,7 @@
 # 项目知识库
 
-**生成日期:** 2026-06-21
-**提交:** 3737eb5
+**生成日期:** 2026-06-23
+**提交:** 09b1c3d
 **分支:** master
 
 ## 概述
@@ -44,7 +44,7 @@ bamboo-messages/
 │   ├── content.go                 # ContentBlock 构造函数
 │   ├── errors.go                  # BambooError 错误类型
 │   ├── codec/                     # N-to-N 协议编解码层（anthropic/openai/responses/gemini 格式）
-│   ├── relay/                     # 跨协议中继层 (Relay / RelayStream + Debug)
+│   ├── relay/                     # 跨协议中继层 (Relay / RelayStream + SmoothPacer 平滑缓冲 + Debug)
 │   └── *_test.go                  # 单元测试 + 集成测试
 │
 ├── internal/
@@ -81,6 +81,7 @@ bamboo-messages/
 | 理解 Prompt Caching | `provider/type.go` + `bamboo/option.go` | CacheControl / SystemCacheControl / PromptCacheKey 三层方案 |
 | 查看使用示例 | `example/main.go` | 完整示例代码 |
 | 理解 N-to-N 协议互转 | `bamboo/codec/` + `bamboo/relay/` | codec 编解码 + relay 中继 |
+| 理解流式平滑缓冲 | `bamboo/relay/smooth*.go` | SmoothPacer EMA 自适应 + CJK 切分 + 三阶段模式 |
 | 理解内部错误类型 | `internal/xerr/error.go` | 最小错误包装，替代外部依赖 |
 
 ## 代码地图
@@ -166,11 +167,19 @@ bamboo-messages/
 |------|------|------|------|
 | `Relay` | 函数 | relay.go | 非流式协议互转 |
 | `RelayStream` | 函数 | relay.go | 流式协议互转 |
-| `Config` | 结构体 | config.go | relay 运行时配置 (OnUsage/OnError/Debug) |
+| `Config` | 结构体 | config.go | relay 运行时配置 (OnUsage/OnError/Debug/Smooth) |
 | `Option` | 函数类型 | config.go | Functional Options 配置 |
 | `WithUsageCallback` | 函数 | config.go | 设置 Token 用量回调 |
 | `WithErrorCallback` | 函数 | config.go | 设置错误回调 |
 | `WithDebug` | 函数 | config.go | 启用 relay 层 debug 日志 |
+| `WithSmoothBuffer` | 函数 | smooth.go | 启用流式平滑缓冲（预设档位: gentle/smooth/typewriter） |
+| `WithSmoothBufferCustom` | 函数 | smooth.go | 启用流式平滑缓冲（自定义参数） |
+| `SmoothLevel` | 类型 | smooth.go | 平滑档位标识 (off/gentle/smooth/typewriter/custom) |
+| `SmoothParams` | 结构体 | smooth.go | 平滑参数 (TokensPerFrame/MinInterval/MaxInterval/EMAAlpha/DrainTier*) |
+| `SmoothConfig` | 结构体 | smooth.go | 平滑配置 (Level + Params) |
+| `SmoothPacer` | 结构体 | smooth_pacer.go | 流式平滑缓冲器核心（EMA 自适应 + 三阶段模式） |
+| `FrameParser` | 结构体 | smooth_parser.go | SSE 帧解析器（提取 data 行） |
+| `TokenSplitter` | 结构体 | smooth_parser.go | CJK/Latin 文本切分器 |
 | `FormatRelayInput/FormatRelayParsed` | 函数 | debug.go | 返回格式化 debug 字符串（不受开关限制） |
 
 ### 内部工具 (`internal/xerr/`)
@@ -243,6 +252,10 @@ bamboo-messages/
 23. **ToolName/ToolCallID 分离** — `ToolResultBlock` 和 `provider.Message` 同时保存 `ToolName`（函数名）和 `ToolCallID`（调用 ID），Gemini `FunctionResponse` 需要两者同时存在
 24. **StreamConverter 类型安全** — `handleDelta` 中对 `delta.Data` 的断言使用 `ok` 模式，避免自定义 Provider 触发 panic
 25. **未知角色降级** — `messagesToProvider` 对 `system` 角色显式 warning 并降级为 `RoleUser`
+26. **流式平滑缓冲可选** — relay 层通过 `WithSmoothBuffer(level)` 或 `WithSmoothBufferCustom(params)` 启用；不设置时 `Config.Smooth` 为 nil，走原始流式路径
+27. **SmoothPacer 三阶段模式** — NORMAL（EMA 自适应间隔）→ DRAIN（尾部加速阶梯递减）→ FLUSH（错误冲刷立即排空）；上游结束后自动切换到 DRAIN
+28. **CJK 文本切分** — `TokenSplitter` 按 rune 切分：CJK 独立 token、Latin 连续合并、标点附着前 token、空格前缀附着后 token；跨帧残余保留在 `pendingTail`
+29. **积压感知缩减** — NORMAL 模式下队列积压增长时，有效间隔从 `baseInterval` 线性缩减到 `minIntervalFloor`（2ms），避免过度积压
 
 ## 反模式
 
@@ -273,6 +286,11 @@ bamboo-messages/
 - Usage 缓存字段全链路透传 — `UsageData.CacheCreationInputTokens` / `CacheReadInputTokens` 从 Provider 适配器 → `convert.go` → `codec` 序列化，完整传递到上层
 - Thinking 内容全链路保留 — `BambooMessage.ThinkingBlock` ↔ `provider.Message.ThinkingContent/ThinkingSignature` ↔ `provider.CompletionResult.Thinking` ↔ `bamboo.Response.ThinkingBlock` 双向透传
 - FinishReason 流式透传 — 适配器在 `StreamTypeStop` 事件中填充 `FinishReason`，`StreamConverter` 使用实际停止原因而非硬编码
+- N-to-N Codec 架构 — `codec` 层提供 4 种格式子包，`relay` 层提供函数式互转 API，实现任意协议间的请求-响应转换
+- 流式平滑缓冲可选 — relay 层通过 `WithSmoothBuffer(level)` 或 `WithSmoothBufferCustom(params)` 启用；不设置时 `Config.Smooth` 为 nil，走原始流式路径
+- SmoothPacer 三阶段模式 — NORMAL（EMA 自适应间隔）→ DRAIN（尾部加速阶梯递减）→ FLUSH（错误冲刷立即排空）；上游结束后自动切换到 DRAIN
+- CJK 文本切分 — `TokenSplitter` 按 rune 切分：CJK 独立 token、Latin 连续合并、标点附着前 token、空格前缀附着后 token；跨帧残余保留在 `pendingTail`
+- 积压感知缩减 — NORMAL 模式下队列积压增长时，有效间隔从 `baseInterval` 线性缩减到 `minIntervalFloor`（2ms），避免过度积压
 
 ## 常用命令
 
@@ -318,6 +336,7 @@ BAMBOO_DEBUG=true go test ./provider/anthropic/...
 - Gemini 适配器使用独立的 `params.go` 文件（`buildContentConfig`），与其他适配器的 `buildParams` 命名不同但职责一致
 - 新增 11 个 `*_audit_test.go` 文件用于回归审计：codec 请求解析、provider 参数映射、Gemini 流事件等
 - `CacheCreationInputTokens` 在跨协议到 OpenAI/Responses/Gemini 时无原生字段，当前按目标协议最佳实践透传或记录限制
+- relay 层新增流式平滑缓冲支持：`SmoothPacer` 实现 EMA 自适应间隔 + 三阶段模式（NORMAL/DRAIN/FLUSH）；`TokenSplitter` 支持 CJK/Latin 混合文本切分；预设档位 gentle/smooth/typewriter 可选
 
 ## 引用
 
