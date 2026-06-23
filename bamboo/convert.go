@@ -243,7 +243,7 @@ func resultToResponse(result *provider.CompletionResult, providerType string) *R
 	}
 	var content []ContentBlock
 	if result.Thinking != "" {
-		content = append(content, NewThinkingBlock(result.Thinking, ""))
+		content = append(content, NewThinkingBlock(result.Thinking, result.ThinkingSignature))
 	}
 	if result.Content != "" {
 		content = append(content, NewTextBlock(result.Content))

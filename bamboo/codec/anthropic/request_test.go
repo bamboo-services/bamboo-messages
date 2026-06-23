@@ -466,6 +466,7 @@ func TestParseRequest_InvalidJSON(t *testing.T) {
 }
 
 // TestParseRequest_OutputConfigEffort 验证 output_config.effort 字段解析为 ThinkingConfig.Effort。
+// "max" 应归一化为 "high"（跨协议兼容）。
 func TestParseRequest_OutputConfigEffort(t *testing.T) {
 	body := []byte(`{
 		"model": "claude-sonnet-4-20250514",
@@ -481,15 +482,15 @@ func TestParseRequest_OutputConfigEffort(t *testing.T) {
 	if req.Config.ThinkingConfig == nil {
 		t.Fatal("ThinkingConfig is nil")
 	}
-	if req.Config.ThinkingConfig.Effort != "max" {
-		t.Errorf("Effort = %q, want %q", req.Config.ThinkingConfig.Effort, "max")
+	if req.Config.ThinkingConfig.Effort != "xhigh" {
+		t.Errorf("Effort = %q, want %q (max should be normalized to xhigh)", req.Config.ThinkingConfig.Effort, "xhigh")
 	}
 }
 
 // TestParseRequest_OutputConfigOverridesThinking 验证 output_config.effort 覆盖 thinking 字段解析出的 Effort。
 //
 // 当请求同时含 thinking:{type:"adaptive"} 和 output_config:{effort:"max"} 时，
-// parseThinking 会把 adaptive→high，但 output_config.effort 是优先字段，应覆盖为 "max"。
+// parseThinking 会把 adaptive→high，但 output_config.effort 是优先字段，应覆盖为 "high"（max 归一化后）。
 func TestParseRequest_OutputConfigOverridesThinking(t *testing.T) {
 	body := []byte(`{
 		"model": "claude-sonnet-4-20250514",
@@ -506,8 +507,8 @@ func TestParseRequest_OutputConfigOverridesThinking(t *testing.T) {
 	if req.Config.ThinkingConfig == nil {
 		t.Fatal("ThinkingConfig is nil")
 	}
-	if req.Config.ThinkingConfig.Effort != "max" {
-		t.Errorf("Effort = %q, want %q (output_config overrides thinking)", req.Config.ThinkingConfig.Effort, "max")
+	if req.Config.ThinkingConfig.Effort != "xhigh" {
+		t.Errorf("Effort = %q, want %q (output_config overrides thinking, max normalized to xhigh)", req.Config.ThinkingConfig.Effort, "xhigh")
 	}
 }
 

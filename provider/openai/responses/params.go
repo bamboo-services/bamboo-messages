@@ -94,15 +94,15 @@ func (p *ResponsesProvider) buildResponseNewParams(model string, input responses
 		reasoning := shared.ReasoningParam{
 			Effort: shared.ReasoningEffort(config.ThinkingConfig.Effort),
 		}
-		// 根据 Effort 自动映射 Summary
 		switch config.ThinkingConfig.Effort {
 		case "none":
-			// 无需 summary
+		case "minimal":
+			reasoning.Summary = "concise"
 		case "low":
 			reasoning.Summary = "concise"
 		case "medium":
 			reasoning.Summary = "auto"
-		case "high":
+		case "high", "xhigh":
 			reasoning.Summary = "detailed"
 		}
 		params.Reasoning = reasoning

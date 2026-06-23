@@ -132,16 +132,18 @@ func TestBuildStreamOptions_DefaultSet(t *testing.T) {
 	}
 }
 
-// TestBuildParams_LegacyNoReasoningEffort 验证 Legacy 模式跳过 reasoning_effort 映射。
-func TestBuildParams_LegacyNoReasoningEffort(t *testing.T) {
+// TestBuildParams_LegacyReasoningEffort 验证 Legacy 模式正常映射 reasoning_effort。
+//
+// Legacy 模式和默认模式都透传 reasoning_effort，GLM-5.2 原生支持完整值域。
+func TestBuildParams_LegacyReasoningEffort(t *testing.T) {
 	p := newLegacyProvider(t)
 	config := &provider.ChatConfig{
 		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
 	}
 	params := p.buildParams("", nil, config)
 
-	if params.ReasoningEffort != "" {
-		t.Errorf("Legacy: ReasoningEffort should be empty, got %q", string(params.ReasoningEffort))
+	if params.ReasoningEffort != shared.ReasoningEffort("high") {
+		t.Errorf("Legacy: ReasoningEffort = %q, want %q", string(params.ReasoningEffort), "high")
 	}
 }
 
@@ -279,6 +281,95 @@ func TestBuildParams_LegacyThinkingPassthroughUnknownType(t *testing.T) {
 	}
 	if thinkingMap["extra"] != "data" {
 		t.Errorf("Legacy: thinking.extra = %v, want 'data' (preserved)", thinkingMap["extra"])
+	}
+}
+
+// TestBuildParams_LegacyThinkingFromEffort 验证 Legacy 模式下无原始 thinking JSON 时，
+// 从 ThinkingConfig.Effort 合成 thinking 参数注入 ExtraFields。
+//
+// GLM-5.2 需要 thinking: {type:"enabled"} 启用思考 + reasoning_effort 控制级别。
+// effort 到 thinking 的映射：none→disabled，其他→enabled。effort 值本身通过 reasoning_effort 传递。
+func TestBuildParams_LegacyThinkingFromEffort(t *testing.T) {
+	tests := []struct {
+		effort              string
+		wantThinkingType    string
+		wantReasoningEffort string
+	}{
+		{"none", "disabled", "none"},
+		{"minimal", "enabled", "minimal"},
+		{"low", "enabled", "low"},
+		{"medium", "enabled", "medium"},
+		{"high", "enabled", "high"},
+		{"xhigh", "enabled", "xhigh"},
+		{"max", "enabled", "max"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.effort, func(t *testing.T) {
+			p := newLegacyProvider(t)
+			config := &provider.ChatConfig{
+				ThinkingConfig: &provider.ThinkingConfig{Effort: tt.effort},
+			}
+			params := p.buildParams("", nil, config)
+
+			// 验证 reasoning_effort 直接透传
+			if string(params.ReasoningEffort) != tt.wantReasoningEffort {
+				t.Errorf("reasoning_effort = %q, want %q", string(params.ReasoningEffort), tt.wantReasoningEffort)
+			}
+
+			// 验证 thinking 合成
+			extraFields := params.ExtraFields()
+			if extraFields == nil {
+				t.Fatalf("ExtraFields should not be nil for effort=%s", tt.effort)
+			}
+			thinking, ok := extraFields["thinking"]
+			if !ok {
+				t.Fatalf("expected 'thinking' in ExtraFields for effort=%s", tt.effort)
+			}
+			thinkingMap, ok := thinking.(map[string]any)
+			if !ok {
+				t.Fatalf("thinking type = %T, want map[string]any", thinking)
+			}
+			if thinkingMap["type"] != tt.wantThinkingType {
+				t.Errorf("thinking.type = %v, want %q", thinkingMap["type"], tt.wantThinkingType)
+			}
+		})
+	}
+}
+
+// TestBuildParams_LegacyThinkingEffortOverriddenByRawThinking 验证 ProviderExtra["thinking"]
+// 优先于 ThinkingConfig.Effort 合成。
+//
+// 当跨协议请求同时包含 thinking JSON 和 output_config.effort 时，
+// codec 层将原始 thinking JSON 存入 ProviderExtra，effort 解析到 ThinkingConfig。
+// Legacy 模式应优先使用原始 thinking JSON，而非从 effort 合成。
+func TestBuildParams_LegacyThinkingEffortOverriddenByRawThinking(t *testing.T) {
+	p := newLegacyProvider(t)
+	thinkingValue := map[string]any{"type": "enabled", "budget_tokens": int64(50000)}
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "low"},
+		ProviderExtra:  map[string]any{"thinking": thinkingValue},
+	}
+	params := p.buildParams("", nil, config)
+
+	extraFields := params.ExtraFields()
+	if extraFields == nil {
+		t.Fatal("Legacy: ExtraFields should not be nil")
+	}
+	thinking, ok := extraFields["thinking"]
+	if !ok {
+		t.Fatal("Legacy: expected 'thinking' in ExtraFields")
+	}
+	thinkingMap, ok := thinking.(map[string]any)
+	if !ok {
+		t.Fatalf("Legacy: thinking type = %T, want map[string]any", thinking)
+	}
+	// 应保留原始 thinking JSON，而非 Effort 合成的 {type:"enabled"}
+	budget, hasBudget := thinkingMap["budget_tokens"].(int64)
+	if !hasBudget {
+		t.Error("Legacy: expected budget_tokens from raw thinking JSON to be preserved")
+	} else if budget != 50000 {
+		t.Errorf("Legacy: budget_tokens = %d, want 50000 (raw thinking should take priority)", budget)
 	}
 }
 

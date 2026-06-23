@@ -56,21 +56,26 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 		params.Tools = tools
 	}
 
-	// === ReasoningEffort — Legacy 跳过自动映射 ===
-	if !p.legacyCompat {
-		if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
-			params.ReasoningEffort = shared.ReasoningEffort(config.ThinkingConfig.Effort)
-		}
+	// === ReasoningEffort ===
+	// 默认模式和 Legacy 模式都映射 reasoning_effort，直接透传标准值域。
+	// GLM-5.2 等第三方端点原生支持 none/minimal/low/medium/high/xhigh/max 全部值，
+	// 服务端会做兼容映射（xhigh→max、low/medium→high），无需客户端降级。
+	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
+		params.ReasoningEffort = shared.ReasoningEffort(config.ThinkingConfig.Effort)
 	}
 
 	// === thinking 透传 — Legacy only ===
-	// 从 ProviderExtra 提取原始 thinking JSON 并归一化后注入 ExtraFields。
-	// 跨协议场景（如 Anthropic 入口 → OpenAI Completions legacyCompat 出口）时，
-	// 原始 thinking 可能是 Anthropic 格式（type:"adaptive"），需归一化为
-	// legacy 端点可识别的格式（type:"enabled"），避免 GLM/Kimi 等静默返回空响应。
+	// GLM 等第三方端点需要 thinking: {type:"enabled"} 启用思考，reasoning_effort 控制级别。
+	// 数据来源优先级：
+	//   1. ProviderExtra["thinking"] — 原始 thinking JSON（跨协议场景，如 Anthropic 入口）
+	//   2. ThinkingConfig.Effort — 合成 {type:"enabled"} 或 {type:"disabled"}
 	if p.legacyCompat {
 		if thinking, ok := provider.GetExtraAny(config.ProviderExtra, "thinking"); ok {
 			params.SetExtraFields(map[string]any{"thinking": normalizeLegacyThinking(thinking)})
+		} else if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
+			if synthesized := effortToLegacyThinking(config.ThinkingConfig.Effort); synthesized != nil {
+				params.SetExtraFields(map[string]any{"thinking": synthesized})
+			}
 		}
 	}
 
@@ -164,6 +169,20 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 	}
 
 	return params
+}
+
+// effortToLegacyThinking 将统一 Effort 值合成为 GLM 等第三方端点的 thinking 参数。
+//
+// GLM-5.2 需要 thinking: {type:"enabled"} 启用思考，reasoning_effort 控制级别。
+// 此函数仅负责合成 thinking 开关，effort 值本身通过 reasoning_effort 字段传递。
+//
+//	none          → {type:"disabled"}
+//	其他任意非空值 → {type:"enabled"}
+func effortToLegacyThinking(effort string) map[string]any {
+	if effort == "none" {
+		return map[string]any{"type": "disabled"}
+	}
+	return map[string]any{"type": "enabled"}
 }
 
 // normalizeLegacyThinking 将原始 thinking 配置归一化为 legacy 端点可识别的格式。

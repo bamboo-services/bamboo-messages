@@ -116,13 +116,16 @@ func (p *Provider) buildContentConfig(systemPrompt string, config *provider.Chat
 
 // mapThinkingConfig 将统一的 ThinkingConfig.Effort 映射为 genai.ThinkingConfig。
 //
-//   - "none" → nil（不启用思考）
-//   - "low" → IncludeThoughts + ThinkingLevelLow
-//   - "medium" → IncludeThoughts + ThinkingLevelMedium
-//   - "high" → IncludeThoughts + ThinkingLevelHigh
+// Gemini ThinkingLevel 仅支持 LOW/MEDIUM/HIGH 三档，对标准值域做降级映射：
+//   - "none" → nil
+//   - "minimal" → LOW
+//   - "low" → LOW
+//   - "medium" → MEDIUM
+//   - "high" → HIGH
+//   - "xhigh" → HIGH
 func mapThinkingConfig(effort string) *genai.ThinkingConfig {
 	switch effort {
-	case "low":
+	case "minimal", "low":
 		return &genai.ThinkingConfig{
 			IncludeThoughts: true,
 			ThinkingLevel:   genai.ThinkingLevelLow,
@@ -132,7 +135,7 @@ func mapThinkingConfig(effort string) *genai.ThinkingConfig {
 			IncludeThoughts: true,
 			ThinkingLevel:   genai.ThinkingLevelMedium,
 		}
-	case "high":
+	case "high", "xhigh":
 		return &genai.ThinkingConfig{
 			IncludeThoughts: true,
 			ThinkingLevel:   genai.ThinkingLevelHigh,

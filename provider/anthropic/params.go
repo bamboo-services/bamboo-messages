@@ -54,8 +54,15 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 	}
 
 	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
-		params.Thinking = anthropic.BetaThinkingConfigParamUnion{
-			OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{},
+		if config.ThinkingConfig.Effort == "none" {
+			disabled := anthropic.NewBetaThinkingConfigDisabledParam()
+			params.Thinking = anthropic.BetaThinkingConfigParamUnion{
+				OfDisabled: &disabled,
+			}
+		} else {
+			params.Thinking = anthropic.BetaThinkingConfigParamUnion{
+				OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{},
+			}
 		}
 	}
 
