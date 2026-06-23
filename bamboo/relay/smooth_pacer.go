@@ -28,6 +28,13 @@ const (
 // 极端情况下 select ctx.Done 保证可取消。
 const inputBufferSize = 128
 
+// minIntervalFloor 积压感知间隔缩减的下限。
+//
+// 当队列积压从 10 增长到 100 时，NORMAL 模式的有效间隔会
+// 从 baseInterval 线性缩减到这个下限（2ms），避免过度积压。
+// 到达下限后由 effectiveTokensPerFrame 接管，通过扩容 token 提升吞吐。
+const minIntervalFloor = 2 * time.Millisecond
+
 // SmoothPacer 流式平滑缓冲器。
 //
 // 接收 codec 序列化后的 SSE 帧，通过 FrameParser 切分为微帧，
@@ -147,6 +154,7 @@ func (p *SmoothPacer) run() {
 	}
 
 	upstreamDone := false
+	timerActive := false
 
 	for {
 		// ── 检查完成条件 ──
@@ -178,35 +186,41 @@ func (p *SmoothPacer) run() {
 			return
 		}
 
-		// 首帧无延迟（smoothedInterval 初始 = MinInterval，但首帧应立即输出）
-		// 通过 timer.Reset(interval) 控制节奏
-		timer.Reset(interval)
+		// 积压感知：仅当 timer 未激活且队列非空时才 Reset
+		// 避免 input 到达后反复重置 timer 导致 outputBatch 饥饿（活锁）
+		if !timerActive && len(p.queue) > 0 {
+			timer.Reset(interval)
+			timerActive = true
+		}
 
 		select {
 		case <-timer.C:
+			timerActive = false
 			p.outputBatch()
 
 		case data := <-p.input:
-			// tick 期间有新数据到达，先处理数据，不重置 timer
-			// timer 会继续倒计时，下一轮循环再处理输出
+			// tick 期间有新数据到达，仅入队，不停止 timer
+			// timer 会继续倒计时，下一轮 select 自然竞争
 			p.handleInput(data)
-			// 消耗掉未触发的 timer（避免下一轮立即触发）
-			if !timer.Stop() {
-				<-timer.C
-			}
 
 		case <-p.signal:
 			p.enterDrain(&upstreamDone)
-			if !timer.Stop() {
-				<-timer.C
+			if timerActive {
+				if !timer.Stop() {
+					<-timer.C
+				}
+				timerActive = false
 			}
 
 		case <-p.ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
+			if timerActive {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
 				}
+				timerActive = false
 			}
 			p.enterFlushAndExit()
 			return
@@ -265,6 +279,63 @@ func (p *SmoothPacer) flushParserTails() {
 
 // ── 节奏控制 ──
 
+// effectiveInterval 阶段一：积压感知间隔缩减。
+//
+// queueLen 10→100 映射到 factor 1.0→0.0（线性），
+// effective 从 baseInterval 线性缩减到 minFloor。
+// queueLen ≤ 10 时返回 baseInterval（无积压感知）。
+func effectiveInterval(queueLen int, baseInterval time.Duration, minFloor time.Duration) time.Duration {
+	if baseInterval < minFloor {
+		baseInterval = minFloor
+	}
+	if queueLen <= 10 {
+		return baseInterval
+	}
+	progress := float64(queueLen-10) / 90.0
+	if progress > 1.0 {
+		progress = 1.0
+	}
+	factor := 1.0 - progress
+	effective := time.Duration(float64(baseInterval) * factor)
+	if effective < minFloor {
+		effective = minFloor
+	}
+	return effective
+}
+
+// effectiveTokensPerFrame 阶段二：interval 到 floor 后 token 扩容。
+//
+// 仅当 intervalAtFloor=true 且 queueLen > 20 时扩容。
+// 每 20 帧额外积压 → multiplier +1，上限 8。
+func effectiveTokensPerFrame(queueLen int, baseTokens int, intervalAtFloor bool) int {
+	if !intervalAtFloor || queueLen <= 20 {
+		return baseTokens
+	}
+	multiplier := 1 + (queueLen-20)/20
+	if multiplier > 8 {
+		multiplier = 8
+	}
+	return baseTokens * multiplier
+}
+
+// effectiveDrainInterval 计算 DRAIN 模式下的输出间隔。
+//
+// DRAIN 模式简化为两级：
+//   - remaining > drainTier2Ratio → minIntervalFloor（快速排空但有间隔）
+//   - remaining ≤ drainTier2Ratio → 0（立即排空）
+//
+// drainInitial == 0 时返回 minIntervalFloor（防止除零）。
+func effectiveDrainInterval(queueLen int, drainInitial int, drainTier2Ratio float64) time.Duration {
+	if drainInitial == 0 {
+		return minIntervalFloor
+	}
+	remaining := float64(queueLen) / float64(drainInitial)
+	if remaining > drainTier2Ratio {
+		return minIntervalFloor
+	}
+	return 0
+}
+
 // currentInterval 根据当前模式返回输出间隔。
 //
 //	NORMAL: EMA 钳制到 [MinInterval, MaxInterval]
@@ -273,34 +344,17 @@ func (p *SmoothPacer) flushParserTails() {
 func (p *SmoothPacer) currentInterval() time.Duration {
 	switch p.mode {
 	case modeNormal:
-		interval := p.smoothedInterval
-		if interval < p.params.MinInterval {
-			interval = p.params.MinInterval
-		}
-		if interval > p.params.MaxInterval {
-			interval = p.params.MaxInterval
-		}
-		return interval
-
-	case modeDrain:
-		if p.drainInitial == 0 {
-			return p.params.MinInterval
-		}
-		remaining := float64(len(p.queue)) / float64(p.drainInitial)
-
 		baseInterval := p.smoothedInterval
 		if baseInterval < p.params.MinInterval {
 			baseInterval = p.params.MinInterval
 		}
-
-		switch {
-		case remaining > p.params.DrainTier1Ratio:
-			return baseInterval
-		case remaining > p.params.DrainTier2Ratio:
-			return time.Duration(float64(baseInterval) * p.params.DrainTier1Mult)
-		default:
-			return time.Duration(float64(baseInterval) * p.params.DrainTier2Mult)
+		if baseInterval > p.params.MaxInterval {
+			baseInterval = p.params.MaxInterval
 		}
+		return effectiveInterval(len(p.queue), baseInterval, minIntervalFloor)
+
+	case modeDrain:
+		return effectiveDrainInterval(len(p.queue), p.drainInitial, p.params.DrainTier2Ratio)
 
 	case modeFlush:
 		return 0
@@ -335,9 +389,12 @@ func (p *SmoothPacer) outputBatch() {
 		return
 	}
 
-	// 正常输出：TokensPerFrame 个 token
+	// 正常输出：动态计算 TokensPerFrame（积压感知扩容）
+	intervalAtFloor := p.currentInterval() == minIntervalFloor
+	effectiveTokens := effectiveTokensPerFrame(len(p.queue), p.params.TokensPerFrame, intervalAtFloor)
+
 	tokensOutput := 0
-	for len(p.queue) > 0 && tokensOutput < p.params.TokensPerFrame {
+	for len(p.queue) > 0 && tokensOutput < effectiveTokens {
 		frame := p.queue[0]
 		if frame.isBarrier {
 			break

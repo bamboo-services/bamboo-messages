@@ -181,7 +181,7 @@ func (s *responsesStreamSerializer) handleMessageStart(event bamboo.StreamEvent)
 		Output: []outputItem{},
 	}
 
-	return s.marshalSSE("response.created", resp)
+	return s.marshalSSEWithResponse("response.created", resp)
 }
 
 // handleContentBlockStart 处理 content_block_start 事件。
@@ -313,30 +313,96 @@ func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamE
 }
 
 // handleContentBlockStop 处理 content_block_stop 事件。
+//
+// 每种内容块先发送对应的 content-done 事件（output_text.done / reasoning_text.done / function_call_arguments.done），
+// 再追加 output_item.done 事件（携带完整 item，status 为 "completed"）。两个 SSE 帧拼接到同一个 []byte 返回。
 func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEvent) ([]byte, error) {
 	switch s.lastBlockTypeStr {
 	case "text":
 		if s.messageAdded {
+			// 1. output_text.done
 			ev := textDoneEvent{
 				OutputIndex:  s.messageIndex,
 				ContentIndex: 0,
 				Text:         s.messageText.String(),
 			}
-			return s.marshalSSE("response.output_text.done", ev)
+			contentDoneBytes, err := s.marshalSSE("response.output_text.done", ev)
+			if err != nil {
+				return nil, err
+			}
+
+			// 2. output_item.done（message item，status=completed，携带完整 content）
+			item := outputItem{
+				Type:   "message",
+				ID:     s.messageItemID,
+				Role:   "assistant",
+				Status: "completed",
+				Content: []outputContent{
+					{Type: "output_text", Text: s.messageText.String()},
+				},
+			}
+			done := outputItemAdded{OutputIndex: s.messageIndex, Item: item}
+			outputItemDoneBytes, err := s.marshalSSE("response.output_item.done", done)
+			if err != nil {
+				return nil, err
+			}
+
+			return append(contentDoneBytes, outputItemDoneBytes...), nil
 		}
+
 	case "thinking":
+		// 1. reasoning_text.done
 		ev := reasoningDoneEvent{
 			OutputIndex:  s.reasoningIndex,
 			ContentIndex: 0,
 			Text:         "",
 		}
-		return s.marshalSSE("response.reasoning_text.done", ev)
+		contentDoneBytes, err := s.marshalSSE("response.reasoning_text.done", ev)
+		if err != nil {
+			return nil, err
+		}
+
+		// 2. output_item.done（reasoning item，status=completed）
+		item := outputItem{
+			Type:   "reasoning",
+			ID:     s.reasoningItemID,
+			Status: "completed",
+		}
+		done := outputItemAdded{OutputIndex: s.reasoningIndex, Item: item}
+		outputItemDoneBytes, err := s.marshalSSE("response.output_item.done", done)
+		if err != nil {
+			return nil, err
+		}
+
+		return append(contentDoneBytes, outputItemDoneBytes...), nil
+
 	case "tool_use":
+		// 1. function_call_arguments.done
 		ev := functionCallArgsDone{
 			OutputIndex: s.functionCallIdx,
 			Arguments:   s.currentCallArgs.String(),
 		}
-		return s.marshalSSE("response.function_call_arguments.done", ev)
+		contentDoneBytes, err := s.marshalSSE("response.function_call_arguments.done", ev)
+		if err != nil {
+			return nil, err
+		}
+
+		// 2. output_item.done（function_call item，status=completed）
+		item := outputItem{
+			Type:      "function_call",
+			ID:        s.functionCallItem,
+			CallID:    s.currentCallID,
+			Name:      s.currentCallName,
+			Arguments: s.currentCallArgs.String(),
+			Status:    "completed",
+		}
+		done := outputItemAdded{OutputIndex: s.functionCallIdx, Item: item}
+		outputItemDoneBytes, err := s.marshalSSE("response.output_item.done", done)
+		if err != nil {
+			return nil, err
+		}
+
+		return append(contentDoneBytes, outputItemDoneBytes...), nil
 	}
 
 	return nil, nil
@@ -378,7 +444,7 @@ func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 		Usage:  usage,
 	}
 
-	return s.marshalSSE("response.completed", resp)
+	return s.marshalSSEWithResponse("response.completed", resp)
 }
 
 // handleError 处理 error 事件 → response.failed。
@@ -398,7 +464,7 @@ func (s *responsesStreamSerializer) handleError(event bamboo.StreamEvent) ([]byt
 		},
 	}
 
-	return s.marshalSSE("response.failed", resp)
+	return s.marshalSSEWithResponse("response.failed", resp)
 }
 
 // ── 内部辅助方法 ──
@@ -414,13 +480,61 @@ func (s *responsesStreamSerializer) ensureReasoningItem() string {
 	return s.reasoningItemID
 }
 
-// marshalSSE 将事件序列化为 SSE 数据帧。
+// marshalSSE 将事件序列化为 SSE 数据帧，并在 JSON payload 中注入 `"type": eventType` 字段。
 //
-// 格式：`event: {type}\ndata: {json}\n\n`
+// 输出格式：
+//
+//	event: {type}
+//	data: {"type":"{eventType}",...payloadFields}
+//
+// 参考 bamboo/relay/smooth_parser.go 的 buildResponsesDeltaFrame 模式：
+// codex 的 Rust SSE 解析器依赖 data JSON 的 "type" 字段路由事件。
 func (s *responsesStreamSerializer) marshalSSE(eventType string, payload any) ([]byte, error) {
-	data, err := json.Marshal(payload)
+	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal %s event: %w", eventType, err)
+	}
+
+	// 将 payload 反序列化为 map 以注入 type 字段（保持原字段完整）
+	merged := make(map[string]any, 8)
+	if err := json.Unmarshal(raw, &merged); err != nil {
+		// 非 object payload（理论上不会发生），回退为直接包装
+		return []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, raw)), nil
+	}
+	merged["type"] = eventType
+
+	data, err := json.Marshal(merged)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-marshal %s event with type: %w", eventType, err)
+	}
+	return []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, data)), nil
+}
+
+// marshalSSEWithResponse 将生命周期事件序列化为带 response 嵌套包装的 SSE 数据帧。
+//
+// 输出格式（codex serde_json::from_value::<ResponseCompleted> 期望的嵌套结构）：
+//
+//	event: {eventType}
+//	data: {"type":"{eventType}","response":{...responseObj}}
+func (s *responsesStreamSerializer) marshalSSEWithResponse(eventType string, resp responseObj) ([]byte, error) {
+	respRaw, err := json.Marshal(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal response for %s event: %w", eventType, err)
+	}
+
+	var respMap map[string]any
+	if err := json.Unmarshal(respRaw, &respMap); err != nil {
+		return []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, respRaw)), nil
+	}
+
+	payload := map[string]any{
+		"type":     eventType,
+		"response": respMap,
+	}
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal %s event payload: %w", eventType, err)
 	}
 	return []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, data)), nil
 }

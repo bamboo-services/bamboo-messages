@@ -648,6 +648,183 @@ func TestSmoothBuffer_PureControl(t *testing.T) {
 	}
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// 分组 6: Pacer 算法单元测试（effectiveInterval / effectiveTokensPerFrame / DRAIN currentInterval）
+// ════════════════════════════════════════════════════════════════════════════
+
+// TestEffectiveInterval 积压感知间隔缩减回归测试。
+//
+// effectiveInterval 将 queueLen 10→100 线性映射到 factor 1.0→0.0，
+// effective 从 baseInterval 线性缩减到 minFloor。queueLen ≤ 10 时无积压感知。
+func TestEffectiveInterval(t *testing.T) {
+	base := 30 * time.Millisecond
+	floor := minIntervalFloor // 2ms
+
+	tests := []struct {
+		name     string
+		queueLen int
+		want     time.Duration
+	}{
+		// queue ≤ 10 → 返回 baseInterval（无积压感知）
+		{"no_backlog_small", 5, base},
+		{"no_backlog_boundary", 10, base},
+
+		// queue 11-99 → 线性缩减
+		// progress = (50-10)/90 = 0.444, factor = 0.556, effective ≈ 16.67ms
+		{"linear_mid", 50, time.Duration(float64(base) * (1.0 - float64(50-10)/90.0))},
+
+		// queue ≥ 100 → 钳制到 floor
+		{"floor_boundary", 100, floor},
+		{"floor_extreme", 500, floor},
+		{"floor_huge", 10000, floor},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			got := effectiveInterval(tt.queueLen, base, floor)
+			if got != tt.want {
+				t.Errorf("effectiveInterval(%d, %v, %v) = %v, want %v",
+					tt.queueLen, base, floor, got, tt.want)
+			}
+			// 永远不低于 floor
+			if got < floor {
+				t.Errorf("effectiveInterval(%d) = %v < floor %v (floor violation)",
+					tt.queueLen, got, floor)
+			}
+		})
+	}
+}
+
+// TestEffectiveInterval_BaseBelowFloor baseInterval < floor 时钳制到 floor。
+func TestEffectiveInterval_BaseBelowFloor(t *testing.T) {
+	got := effectiveInterval(5, 1*time.Millisecond, minIntervalFloor)
+	if got != minIntervalFloor {
+		t.Errorf("effectiveInterval with base < floor = %v, want %v", got, minIntervalFloor)
+	}
+}
+
+// TestEffectiveTokensPerFrame token 扩容回归测试。
+//
+// 仅当 intervalAtFloor=true 且 queueLen > 20 时扩容。
+// 每 20 帧额外积压 → multiplier +1，上限 8。
+func TestEffectiveTokensPerFrame(t *testing.T) {
+	baseTokens := 2
+
+	tests := []struct {
+		name           string
+		queueLen       int
+		intervalAtFloor bool
+		want           int
+	}{
+		// queue ≤ 20 → baseTokens
+		{"queue_below_threshold", 15, true, baseTokens},
+		{"queue_at_threshold", 20, true, baseTokens},
+
+		// queue 21-39 → multiplier=1 (整数除法 (queue-20)/20=0 → multiplier=1+0=1)
+		{"multiplier_1_just_above", 25, true, baseTokens * 1}, // (5/20)=0
+		{"multiplier_1_mid", 39, true, baseTokens * 1},        // (19/20)=0
+
+		// queue 40-59 → multiplier=2
+		{"multiplier_2_boundary", 40, true, baseTokens * 2}, // (20/20)=1
+		{"multiplier_2_mid", 59, true, baseTokens * 2},      // (39/20)=1
+
+		// queue 60-79 → multiplier=3
+		{"multiplier_3", 60, true, baseTokens * 3}, // (40/20)=2
+
+		// queue 100 → multiplier=5
+		{"multiplier_5", 100, true, baseTokens * 5}, // (80/20)=4
+
+		// queue 300 → multiplier=8（clamp）
+		{"multiplier_clamped", 300, true, baseTokens * 8}, // (280/20)=14 → clamp 8
+
+		// queue 1000 → multiplier=8（clamp）
+		{"multiplier_clamped_extreme", 1000, true, baseTokens * 8},
+
+		// intervalAtFloor=false → baseTokens
+		{"not_at_floor", 60, false, baseTokens},
+		{"not_at_floor_huge", 1000, false, baseTokens},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			got := effectiveTokensPerFrame(tt.queueLen, baseTokens, tt.intervalAtFloor)
+			if got != tt.want {
+				t.Errorf("effectiveTokensPerFrame(%d, %d, %v) = %d, want %d",
+					tt.queueLen, baseTokens, tt.intervalAtFloor, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEffectiveTokensPerFrame_DifferentBaseTokens 不同 baseTokens 值。
+func TestEffectiveTokensPerFrame_DifferentBaseTokens(t *testing.T) {
+	// baseTokens=1, queue=100, atFloor → multiplier=5, effective=5
+	got := effectiveTokensPerFrame(100, 1, true)
+	if got != 5 {
+		t.Errorf("effectiveTokensPerFrame(100, 1, true) = %d, want 5", got)
+	}
+
+	// baseTokens=4, queue=100, atFloor → multiplier=5, effective=20
+	got = effectiveTokensPerFrame(100, 4, true)
+	if got != 20 {
+		t.Errorf("effectiveTokensPerFrame(100, 4, true) = %d, want 20", got)
+	}
+}
+
+// TestEffectiveDrainInterval DRAIN 模式输出间隔纯函数回归测试。
+//
+// effectiveDrainInterval 将 queueLen/drainInitial 计算剩余比例，
+// 高于 DrainTier2Ratio → minIntervalFloor，低于 → 0（立即排空）。
+func TestEffectiveDrainInterval(t *testing.T) {
+	tier2Ratio := 0.2
+
+	t.Run("drainInitial_zero_returns_floor", func(t *testing.T) {
+		result := effectiveDrainInterval(0, 0, tier2Ratio)
+		if result != minIntervalFloor {
+			t.Errorf("drainInitial=0: got %v, want %v", result, minIntervalFloor)
+		}
+	})
+
+	t.Run("high_remaining_returns_floor", func(t *testing.T) {
+		// remaining = 60/100 = 0.6 > 0.2
+		result := effectiveDrainInterval(60, 100, tier2Ratio)
+		if result != minIntervalFloor {
+			t.Errorf("high remaining: got %v, want %v", result, minIntervalFloor)
+		}
+	})
+
+	t.Run("low_remaining_returns_zero", func(t *testing.T) {
+		// remaining = 5/100 = 0.05 ≤ 0.2
+		result := effectiveDrainInterval(5, 100, tier2Ratio)
+		if result != 0 {
+			t.Errorf("low remaining: got %v, want 0", result)
+		}
+	})
+
+	t.Run("boundary_returns_zero", func(t *testing.T) {
+		// remaining = 20/100 = 0.2 == tier2Ratio → not > → returns 0
+		result := effectiveDrainInterval(20, 100, tier2Ratio)
+		if result != 0 {
+			t.Errorf("boundary: got %v, want 0", result)
+		}
+	})
+}
+
+// TestSmoothPacer_FlushCurrentInterval FLUSH 模式 currentInterval 返回 0。
+func TestSmoothPacer_FlushCurrentInterval(t *testing.T) {
+	p := &SmoothPacer{
+		mode:             modeFlush,
+		smoothedInterval: 30 * time.Millisecond,
+	}
+
+	interval := p.currentInterval()
+	if interval != 0 {
+		t.Errorf("FLUSH mode: interval = %v, want 0", interval)
+	}
+}
+
 // TestSmoothBuffer_LongDelta 极长单 delta（500+ CJK 字符）— 不 panic、不卡死、内容完整。
 func TestSmoothBuffer_LongDelta(t *testing.T) {
 	// 构建超长文本（控制在合理范围，避免超时）
