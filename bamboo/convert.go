@@ -362,10 +362,17 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 			},
 		}
 	case provider.StreamDeltaTypeTextOutput:
-		// 防御性：若 provider 未发送 block_start，自动补发
 		var events []StreamEvent
 		if !sc.textBlockStarted {
 			sc.textBlockStarted = true
+			if sc.thinkingBlockStarted {
+				sc.thinkingBlockStarted = false
+				events = append(events, StreamEvent{
+					Type:  EventContentBlockStop,
+					Index: sc.blockIndex,
+				})
+				sc.blockIndex++
+			}
 			tb := NewTextBlock("")
 			events = append(events, StreamEvent{
 				Type:         EventContentBlockStart,

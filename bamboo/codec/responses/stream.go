@@ -55,6 +55,20 @@ type reasoningDeltaEvent struct {
 	Delta        string `json:"delta"`
 }
 
+// reasoningSummaryDelta response.reasoning_summary_text.delta 事件。
+type reasoningSummaryDeltaEvent struct {
+	OutputIndex  int    `json:"output_index"`
+	SummaryIndex int    `json:"summary_index"`
+	Delta        string `json:"delta"`
+}
+
+// reasoningSummaryDone response.reasoning_summary_text.done 事件。
+type reasoningSummaryDoneEvent struct {
+	OutputIndex  int    `json:"output_index"`
+	SummaryIndex int    `json:"summary_index"`
+	Text         string `json:"text"`
+}
+
 // reasoningDone response.reasoning_text.done 事件。
 type reasoningDoneEvent struct {
 	OutputIndex  int    `json:"output_index"`
@@ -297,7 +311,22 @@ func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamE
 			ContentIndex: 0,
 			Delta:        delta.Thinking,
 		}
-		return s.marshalSSE("response.reasoning_text.delta", ev)
+		rawBytes, err := s.marshalSSE("response.reasoning_text.delta", ev)
+		if err != nil {
+			return nil, err
+		}
+
+		summaryEv := reasoningSummaryDeltaEvent{
+			OutputIndex: s.reasoningIndex,
+			SummaryIndex: 0,
+			Delta:        delta.Thinking,
+		}
+		summaryBytes, err := s.marshalSSE("response.reasoning_summary_text.delta", summaryEv)
+		if err != nil {
+			return nil, err
+		}
+
+		return append(rawBytes, summaryBytes...), nil
 
 	case bamboo.DeltaInputJSON:
 		// function_call 参数增量
@@ -357,16 +386,29 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 		}
 
 	case "thinking":
-		// 1. reasoning_text.done — 流式展示事件，保留完整文本供实时显示
-		ev := reasoningDoneEvent{
+		// 1. reasoning_text.done + reasoning_summary_text.done
+		reasoningFull := s.reasoningText.String()
+
+		rawDoneEv := reasoningDoneEvent{
 			OutputIndex:  s.reasoningIndex,
 			ContentIndex: 0,
-			Text:         s.reasoningText.String(),
+			Text:         reasoningFull,
 		}
-		contentDoneBytes, err := s.marshalSSE("response.reasoning_text.done", ev)
+		contentDoneBytes, err := s.marshalSSE("response.reasoning_text.done", rawDoneEv)
 		if err != nil {
 			return nil, err
 		}
+
+		summaryDoneEv := reasoningSummaryDoneEvent{
+			OutputIndex:  s.reasoningIndex,
+			SummaryIndex: 0,
+			Text:         reasoningFull,
+		}
+		summaryDoneBytes, err := s.marshalSSE("response.reasoning_summary_text.done", summaryDoneEv)
+		if err != nil {
+			return nil, err
+		}
+		contentDoneBytes = append(contentDoneBytes, summaryDoneBytes...)
 
 		// 2. output_item.done — reasoning item 使用 summary（明文）
 		reasoningText := s.reasoningText.String()
