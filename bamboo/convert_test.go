@@ -170,12 +170,15 @@ func TestConvertEmptyContent(t *testing.T) {
 	msgs := []BambooMessage{
 		{Role: RoleUser, Content: []ContentBlock{}},
 	}
-	_, err := messagesToProvider(msgs)
-	if err == nil {
-		t.Fatal("expected error for empty content, got nil")
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "content cannot be empty") {
-		t.Errorf("error = %q, want content cannot be empty", err.Error())
+	if len(result) != 1 {
+		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	}
+	if result[0].Content != "" {
+		t.Errorf("Content = %q, 期望空字符串", result[0].Content)
 	}
 }
 

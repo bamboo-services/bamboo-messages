@@ -146,15 +146,15 @@ func TestChatBasic(t *testing.T) {
 	}
 }
 
-// TestChatEmptyMessages 验证空 Content 的消息返回错误。
+// TestChatEmptyMessages 验证空 Content 的消息不再返回错误。
 func TestChatEmptyMessages(t *testing.T) {
 	c := NewClient(&mockProvider{})
 	ctx := context.Background()
 
-	// BambooMessage 的 Content 为空切片，messagesToProvider 应返回错误
+	// 空 Content 的消息应被允许，不返回错误
 	_, err := c.Chat(ctx, []BambooMessage{{Role: RoleUser, Content: []ContentBlock{}}}, "", nil)
-	if err == nil {
-		t.Fatal("期望空 Content 返回错误")
+	if err != nil {
+		t.Fatalf("空 Content 不应返回错误, got: %v", err)
 	}
 }
 
@@ -291,10 +291,10 @@ func TestCompleteEmptyMessages(t *testing.T) {
 	c := NewClient(&mockProvider{})
 	ctx := context.Background()
 
-	// 空 content 的消息，messagesToProvider 应返回错误
+	// 空 Content 的消息应被允许，不返回错误
 	_, err := c.Complete(ctx, []BambooMessage{{Role: RoleUser, Content: []ContentBlock{}}}, "", nil)
-	if err == nil {
-		t.Fatal("期望空 Content 返回错误")
+	if err != nil {
+		t.Fatalf("空 Content 不应返回错误, got: %v", err)
 	}
 }
 

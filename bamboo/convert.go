@@ -28,10 +28,6 @@ var finishReasonMap = map[provider.FinishReason]FinishReason{
 func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 	var result []provider.Message
 	for _, msg := range msgs {
-		if len(msg.Content) == 0 {
-			return nil, NewBambooError(ErrorTypeInvalidRequest, "content cannot be empty")
-		}
-
 		var textBuilder strings.Builder
 		var toolCalls []provider.ToolCall
 		var toolResults []provider.Message
@@ -41,6 +37,8 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		var thinkingContent string
 		var thinkingSignature string
 
+		// Content 为空数组时允许透传，生成 Content="" 的空消息，
+		// 由下游适配器内部处理（补空字符串或跳过），外部允许传递空 content。
 		for _, block := range msg.Content {
 			switch b := block.(type) {
 			case *TextBlock:
@@ -125,7 +123,8 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		}
 
 		content := textBuilder.String()
-		if content != "" || len(toolCalls) > 0 || len(contentBlocks) > 0 || thinkingContent != "" {
+		hasContent := content != "" || len(toolCalls) > 0 || len(contentBlocks) > 0 || thinkingContent != ""
+		if hasContent || len(msg.Content) == 0 {
 			result = append(result, provider.Message{
 				Role:              providerRole(msg.Role),
 				Content:           content,

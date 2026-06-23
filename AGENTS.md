@@ -47,6 +47,14 @@ bamboo-messages/
 │   ├── relay/                     # 跨协议中继层 (Relay / RelayStream + SmoothPacer 平滑缓冲 + Debug)
 │   └── *_test.go                  # 单元测试 + 集成测试
 │
+├── pkg/                            # 通用组件工具包 — 可复用的工具函数和类型
+│   ├── option/                     # 通用 Functional Options 模式
+│   │   └── option.go               # WithAPIKey/WithBaseURL/WithHeader/WithDebug + ApplyOptions
+│   ├── helpers/                    # 通用工具函数
+│   │   └── helpers.go              # PtrFloat64/PtrBool/PtrInt64/PtrString + GetExtra* 安全取值
+│   └── errors/                     # 通用错误类型
+│       └── errors.go               # Error + BambooError 错误类型
+│
 ├── internal/
 │   └── xerr/                      # 内部最小错误类型（替代 bamboo-base-go/common/error）
 │       └── error.go               # xerr.Error — err + Message
@@ -83,6 +91,9 @@ bamboo-messages/
 | 理解 N-to-N 协议互转 | `bamboo/codec/` + `bamboo/relay/` | codec 编解码 + relay 中继 |
 | 理解流式平滑缓冲 | `bamboo/relay/smooth*.go` | SmoothPacer EMA 自适应 + CJK 切分 + 三阶段模式 |
 | 理解内部错误类型 | `internal/xerr/error.go` | 最小错误包装，替代外部依赖 |
+| 使用通用 Options 模式 | `pkg/option/option.go` | WithAPIKey/WithBaseURL/WithHeader/WithDebug + ApplyOptions |
+| 使用通用工具函数 | `pkg/helpers/helpers.go` | PtrFloat64/PtrBool/PtrInt64/PtrString + GetExtra* 安全取值 |
+| 使用通用错误类型 | `pkg/errors/errors.go` | Error + BambooError 错误类型 |
 
 ## 代码地图
 
@@ -189,6 +200,23 @@ bamboo-messages/
 | `Error` | 结构体 | error.go | 内部最小错误类型 (err + Message)，替代 bamboo-base-go/common/error |
 | `NewError` | 函数 | error.go | 兼容原 xError.NewError 签名的构造函数 |
 
+### 通用组件工具包 (`pkg/`)
+
+| 符号 | 类型 | 文件 | 作用 |
+|------|------|------|------|
+| `Option` | 函数类型 | option/option.go | 通用配置选项 func(*Config) |
+| `Config` | 结构体 | option/option.go | 通用 Provider 配置 (APIKey/BaseURL/Headers/Debug) |
+| `WithAPIKey` | 函数 | option/option.go | 设置 API 密钥 |
+| `WithBaseURL` | 函数 | option/option.go | 设置自定义基础 URL |
+| `WithHeader` | 函数 | option/option.go | 添加自定义 HTTP 请求头 |
+| `WithDebug` | 函数 | option/option.go | 启用 debug 日志 |
+| `ApplyOptions` | 函数 | option/option.go | 将选项列表应用到默认配置 |
+| `PtrFloat64/PtrBool/PtrInt64/PtrString` | 函数 | helpers/helpers.go | 指针辅助函数 |
+| `GetExtraFloat64/Int64/String/Bool/Any` | 函数 | helpers/helpers.go | ProviderExtra 安全取值 helpers |
+| `Error` | 结构体 | errors/errors.go | 内部最小错误类型 (err + Message) |
+| `BambooError` | 结构体 | errors/errors.go | Bamboo SDK 统一错误类型 |
+| `NewBambooError/NewBambooErrorWithCode` | 函数 | errors/errors.go | BambooError 构造函数 |
+
 ## 模块架构
 
 ```text
@@ -223,6 +251,13 @@ bamboo-messages/
 │anthropic││openai/ ││openai/       ││  gemini   │
 │ +Cache ││complet.││responses     ││ +params.go│
 └────────┘└────────┘└──────────────┘└───────────┘
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│              pkg (通用组件工具包)         │
+│  option/ + helpers/ + errors/           │
+│  可复用的工具函数和类型                  │
+└─────────────────────────────────────────┘
 ```
 
 ## 约定
@@ -337,6 +372,9 @@ BAMBOO_DEBUG=true go test ./provider/anthropic/...
 - 新增 11 个 `*_audit_test.go` 文件用于回归审计：codec 请求解析、provider 参数映射、Gemini 流事件等
 - `CacheCreationInputTokens` 在跨协议到 OpenAI/Responses/Gemini 时无原生字段，当前按目标协议最佳实践透传或记录限制
 - relay 层新增流式平滑缓冲支持：`SmoothPacer` 实现 EMA 自适应间隔 + 三阶段模式（NORMAL/DRAIN/FLUSH）；`TokenSplitter` 支持 CJK/Latin 混合文本切分；预设档位 gentle/smooth/typewriter 可选
+- `pkg/` 包提供通用组件工具：`option/` 包含通用 Functional Options 模式，`helpers/` 包含指针辅助函数和 ProviderExtra 安全取值，`errors/` 包含通用错误类型
+- 新增适配器时，建议优先使用 `pkg/option` 包的通用配置模式，减少重复代码
+- `pkg/helpers` 包的 GetExtra* 函数与 `provider.GetExtra*` 功能相同，但 `pkg/helpers` 包不依赖 `provider` 包，可独立使用
 
 ## 引用
 
