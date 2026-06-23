@@ -336,6 +336,26 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		if !ok {
 			return nil
 		}
+
+		var events []StreamEvent
+
+		if data.BlockType == "text" && sc.thinkingBlockStarted {
+			sc.thinkingBlockStarted = false
+			events = append(events, StreamEvent{
+				Type:  EventContentBlockStop,
+				Index: sc.blockIndex,
+			})
+			sc.blockIndex++
+		}
+		if data.BlockType == "thinking" && sc.textBlockStarted {
+			sc.textBlockStarted = false
+			events = append(events, StreamEvent{
+				Type:  EventContentBlockStop,
+				Index: sc.blockIndex,
+			})
+			sc.blockIndex++
+		}
+
 		if data.BlockType == "text" {
 			sc.textBlockStarted = true
 		}
@@ -354,13 +374,12 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		default:
 			cb = NewTextBlock("")
 		}
-		return []StreamEvent{
-			{
-				Type:         EventContentBlockStart,
-				Index:        sc.blockIndex,
-				ContentBlock: cb,
-			},
-		}
+		events = append(events, StreamEvent{
+			Type:         EventContentBlockStart,
+			Index:        sc.blockIndex,
+			ContentBlock: cb,
+		})
+		return events
 	case provider.StreamDeltaTypeTextOutput:
 		var events []StreamEvent
 		if !sc.textBlockStarted {

@@ -1342,6 +1342,7 @@ func TestStreamConverter_ThinkingAndText(t *testing.T) {
 		EventMessageStart,      // start
 		EventContentBlockStart, // block_start(thinking)
 		EventContentBlockDelta, // thinking_delta
+		EventContentBlockStop,  // block_start(text) → 关闭 thinking block
 		EventContentBlockStart, // block_start(text)
 		EventContentBlockDelta, // text_delta
 		EventContentBlockStop,  // stop
@@ -1372,7 +1373,7 @@ func TestStreamConverter_ThinkingAndText(t *testing.T) {
 	}
 
 	// 验证 text delta 内容
-	textEvent := allEvents[4]
+	textEvent := allEvents[5]
 	textDelta, ok := textEvent.Delta.(*StreamDelta)
 	if !ok {
 		t.Fatal("text event Delta 类型不匹配")
