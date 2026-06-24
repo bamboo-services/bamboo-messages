@@ -349,7 +349,8 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			textBlockStarted := false
 			thinkingBlockStarted := false
-			result := p.handleChunk(tt.chunk, &textBlockStarted, &thinkingBlockStarted)
+			stopSent := false
+			result := p.handleChunk(tt.chunk, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 			if len(result) != tt.wantLen {
 				t.Errorf("handleChunk() returned %d events, want %d", len(result), tt.wantLen)
 				return

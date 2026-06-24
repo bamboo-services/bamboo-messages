@@ -37,9 +37,10 @@ type Response struct {
 
 	// ---- Bamboo 扩展字段 ----
 
-	ProviderType string `json:"provider_type"`        // 底层协议类型（如 "anthropic"、"openai-completions"）
-	RequestID    string `json:"request_id,omitempty"` // 请求追踪 ID
-	CreatedAt    int64  `json:"created_at,omitempty"` // 响应创建时间的 Unix 时间戳
+	ProviderType string `json:"provider_type"`           // 底层协议类型（如 "anthropic"、"openai-completions"）
+	RequestID    string `json:"request_id,omitempty"`    // 请求追踪 ID
+	ResponseID   string `json:"response_id,omitempty"`   // 响应 ID（OpenAI Responses API 的 response ID，用于多轮对话链路追踪）
+	CreatedAt    int64  `json:"created_at,omitempty"`    // 响应创建时间的 Unix 时间戳
 }
 
 // UnmarshalJSON 自定义 JSON 反序列化，使用 ContentBlocks 包装类型

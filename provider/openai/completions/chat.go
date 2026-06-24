@@ -42,9 +42,9 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 		textBlockStarted := false
 		thinkingBlockStarted := false
 		startSent := false
+		stopSent := false
 
 		for stream.Next() {
-			// 延迟发送 StreamTypeStart：首次成功读取数据后确认连接正常才发送
 			if !startSent {
 				startSent = true
 				select {
@@ -55,7 +55,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			}
 
 			chunk := stream.Current()
-			events := p.handleChunk(chunk, &textBlockStarted, &thinkingBlockStarted)
+			events := p.handleChunk(chunk, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 			for _, e := range events {
 				select {
 				case eventCh <- e:

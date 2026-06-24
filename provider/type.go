@@ -84,6 +84,7 @@ type CompletionResult struct {
 	ToolCalls         []ToolCall   `json:"tool_calls,omitempty"`         // 工具调用列表
 	FinishReason      FinishReason `json:"finish_reason"`                // 结束原因
 	Usage             UsageData    `json:"usage"`                        // Token 用量统计
+	ResponseID        string       `json:"response_id,omitempty"`        // 响应 ID（OpenAI Responses API 用于多轮对话循环追踪）
 }
 
 // ============================================
@@ -101,6 +102,7 @@ type Message struct {
 	ContentBlocks     []ContentBlock `json:"content_blocks,omitempty"`     // 多媒体内容块（优先于 Content）
 	ThinkingContent   string         `json:"thinking_content,omitempty"`   // 思考过程内容（用于多轮对话中保留 thinking block）
 	ThinkingSignature string         `json:"thinking_signature,omitempty"` // 思考过程签名（Anthropic extended thinking 验证签名）
+	ReasoningID       string         `json:"reasoning_id,omitempty"`       // 推理项 ID（OpenAI Responses API 的 reasoning item ID，如 "rs_xxx"，独立于 ThinkingSignature）
 	ToolCalls         []ToolCall     `json:"tool_calls,omitempty"`         // 助手发起的工具调用
 	ToolCallID        string         `json:"tool_call_id,omitempty"`       // 工具响应的调用 ID
 	ToolName          string         `json:"tool_name,omitempty"`          // 工具响应的函数名（Gemini FunctionResponse 需要）

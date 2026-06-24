@@ -268,6 +268,7 @@ func resultToResponse(result *provider.CompletionResult, providerType string) *R
 		},
 		ProviderType: providerType,
 		RequestID:    fmt.Sprintf("req_%d", time.Now().UnixNano()),
+		ResponseID:   result.ResponseID,
 		CreatedAt:    time.Now().Unix(),
 	}
 }
@@ -296,6 +297,11 @@ func NewStreamConverter() *StreamConverter { return &StreamConverter{} }
 //
 // 根据事件类型路由到不同的处理方法，自动管理内容块索引
 // 和 BlockStart 状态追踪。
+//
+// StreamTypeStop 不会立即输出终止事件，而是缓存 finishReason 并等待
+// StreamTypeDone 触发 handleStop()。这彻底消除了双 stop 导致的
+// finish_reason 覆盖问题——无论上游发多少个 StreamTypeStop，
+// 客户端只收到一次终止事件序列。
 func (sc *StreamConverter) Convert(event provider.StreamEvent) []StreamEvent {
 	switch event.Type {
 	case provider.StreamTypeStart:
@@ -303,17 +309,45 @@ func (sc *StreamConverter) Convert(event provider.StreamEvent) []StreamEvent {
 	case provider.StreamTypeDelta:
 		return sc.handleDelta(event.Delta)
 	case provider.StreamTypeStop:
-		sc.finishReason = mapFinishReason(event.FinishReason)
-		if sc.stopHandled {
+		sc.recordFinishReason(event.FinishReason)
+		return nil
+	case provider.StreamTypeDone:
+		if !sc.started || sc.stopHandled {
 			return nil
 		}
 		return sc.handleStop()
-	case provider.StreamTypeDone:
-		return nil
 	case provider.StreamTypeError:
 		return sc.handleError(event.Err)
 	default:
 		return nil
+	}
+}
+
+// recordFinishReason 以优先级策略记录完成原因。
+//
+// 优先级：tool_use > max_tokens > end_turn > stop_sequence。
+// 当已记录的原因为 tool_use 时不允许被后续的 stop 覆盖——
+// 这是 agent loop 不中断的关键保障：即使上游先发 stop 后发 tool_calls，
+// 最终输出给客户端的 finish_reason 始终是 tool_calls。
+func (sc *StreamConverter) recordFinishReason(reason provider.FinishReason) {
+	incoming := mapFinishReason(reason)
+	if finishReasonPriority(incoming) > finishReasonPriority(sc.finishReason) {
+		sc.finishReason = incoming
+	}
+}
+
+// finishReasonPriority 返回完成原因的优先级权重。
+// tool_use 最高（2），确保有工具调用时不会被其他原因覆盖。
+// max_tokens 次之（1），因为 token 限制是上游的硬性截断。
+// 其他原因最低（0）。
+func finishReasonPriority(r FinishReason) int {
+	switch r {
+	case FinishReasonToolUse:
+		return 2
+	case FinishReasonMaxTokens:
+		return 1
+	default:
+		return 0
 	}
 }
 

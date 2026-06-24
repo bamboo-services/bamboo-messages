@@ -46,9 +46,9 @@ func TestHandleChoice_ReasoningContent(t *testing.T) {
 
 	textBlockStarted := false
 	thinkingBlockStarted := false
-	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted)
+	stopSent := false
+	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 
-	// 应产生 2 个事件: BlockStart("thinking") + ThinkingDelta
 	if len(events) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(events))
 	}
@@ -77,7 +77,8 @@ func TestHandleChoice_ReasoningContentNull(t *testing.T) {
 
 	textBlockStarted := false
 	thinkingBlockStarted := false
-	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted)
+	stopSent := false
+	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 
 	// null 值: Valid() 返回 false，应跳过
 	if len(events) != 0 {
@@ -101,7 +102,8 @@ func TestHandleChoice_ReasoningContentEmpty(t *testing.T) {
 
 	textBlockStarted := false
 	thinkingBlockStarted := false
-	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted)
+	stopSent := false
+	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 
 	// 空字符串: 反序列化成功但 reasoning == ""，应跳过
 	if len(events) != 0 {
@@ -126,7 +128,8 @@ func TestHandleChoice_ReasoningBeforeText(t *testing.T) {
 
 	textBlockStarted := false
 	thinkingBlockStarted := false
-	events1 := p.handleChoice(reasoningChoice, &textBlockStarted, &thinkingBlockStarted)
+	stopSent := false
+	events1 := p.handleChoice(reasoningChoice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 
 	if len(events1) != 2 {
 		t.Fatalf("first call: expected 2 events, got %d", len(events1))
@@ -150,7 +153,7 @@ func TestHandleChoice_ReasoningBeforeText(t *testing.T) {
 		},
 	}
 
-	events2 := p.handleChoice(textChoice, &textBlockStarted, &thinkingBlockStarted)
+	events2 := p.handleChoice(textChoice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 
 	if len(events2) != 2 {
 		t.Fatalf("second call: expected 2 events, got %d", len(events2))
@@ -177,7 +180,8 @@ func TestHandleChoice_OnlyReasoning(t *testing.T) {
 
 	textBlockStarted := false
 	thinkingBlockStarted := false
-	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted)
+	stopSent := false
+	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 
 	// 应产生 BlockStart("thinking") + ThinkingDelta，不崩溃
 	if len(events) != 2 {
@@ -215,7 +219,8 @@ func TestHandleChunk_RelaxedUsageCondition(t *testing.T) {
 
 	textBlockStarted := false
 	thinkingBlockStarted := false
-	events := p.handleChunk(chunk, &textBlockStarted, &thinkingBlockStarted)
+	stopSent := false
+	events := p.handleChunk(chunk, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 
 	found := false
 	for _, e := range events {

@@ -224,11 +224,12 @@ func (m *mockErrorProvider) GetAvailableModels() []string {
 type mockRichProvider struct{}
 
 func (m *mockRichProvider) Chat(_ context.Context, _ []provider.Message, _ *provider.ChatConfig) <-chan provider.StreamEvent {
-	ch := make(chan provider.StreamEvent, 4)
+	ch := make(chan provider.StreamEvent, 5)
 	ch <- provider.StreamEvent{Type: provider.StreamTypeStart}
 	ch <- provider.StreamEvent{Type: provider.StreamTypeDelta, Delta: provider.NewTextDelta("hello")}
 	ch <- provider.StreamEvent{Type: provider.StreamTypeDelta, Delta: provider.NewUsageDelta(10, 5)}
 	ch <- provider.StreamEvent{Type: provider.StreamTypeStop}
+	ch <- provider.StreamEvent{Type: provider.StreamTypeDone}
 	close(ch)
 	return ch
 }

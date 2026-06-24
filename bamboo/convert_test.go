@@ -654,7 +654,8 @@ func TestConvertStreamStop(t *testing.T) {
 	sc := NewStreamConverter()
 	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
 
-	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})
+	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})
 
 	if len(events) != 3 {
 		t.Fatalf("expected 3 events, got %d", len(events))
@@ -683,9 +684,10 @@ func TestConvertStreamDone(t *testing.T) {
 	sc := NewStreamConverter()
 	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
 
+	// Done 在没有 Stop 时应触发 handleStop（兜底）
 	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})
-	if len(events) != 0 {
-		t.Fatalf("expected 0 events for done, got %d", len(events))
+	if len(events) == 0 {
+		t.Fatal("expected events for done (fallback stop), got 0")
 	}
 }
 
@@ -757,17 +759,20 @@ func TestConvertStreamFullLifecycle(t *testing.T) {
 		Delta: provider.NewUsageDelta(50, 10),
 	})...)
 
-	// Stop
+	// Stop (deferred, produces no events)
 	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})...)
 
-	// 验证事件序列: message_start, content_block_start, delta, delta,
+	// Done triggers the deferred stop sequence
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})...)
+
+	// message_start, content_block_start, delta, delta,
 	// message_delta(usage立即发射), content_block_stop, message_delta, message_stop
 	expectedTypes := []StreamEventType{
 		EventMessageStart,
 		EventContentBlockStart,
 		EventContentBlockDelta,
 		EventContentBlockDelta,
-		EventMessageDelta, // usage 立即发射
+		EventMessageDelta,
 		EventContentBlockStop,
 		EventMessageDelta,
 		EventMessageStop,
@@ -1153,7 +1158,7 @@ func TestBuildParameters_EmptySchema(t *testing.T) {
 	}
 }
 
-// TestConvertStreamErrorWithNilErr 验证 StreamTypeDone 返回空事件。
+// TestConvertStreamTypeDone 验证 StreamTypeDone 在未经过 Start 时直接返回空事件。
 func TestConvertStreamTypeDone(t *testing.T) {
 	sc := NewStreamConverter()
 	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})
@@ -1168,7 +1173,8 @@ func TestConvertStreamStopWithoutUsage(t *testing.T) {
 	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
 	// 不发送 usage delta，直接 stop
 
-	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})
+	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})
 	if len(events) != 3 {
 		t.Fatalf("期望 3 个事件, 实际 %d", len(events))
 	}
@@ -1268,17 +1274,19 @@ func TestStreamConverter_TextOnly(t *testing.T) {
 		Delta: provider.NewUsageDelta(10, 5),
 	})...)
 
-	// stop
+	// stop (deferred)
 	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})...)
+	// done triggers stop sequence
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})...)
 
 	expectedTypes := []StreamEventType{
-		EventMessageStart,      // start → message_start
-		EventContentBlockStart, // block_start(text)
-		EventContentBlockDelta, // text_delta
-		EventMessageDelta,      // usage 立即发射
-		EventContentBlockStop,  // stop → content_block_stop
-		EventMessageDelta,      // stop → message_delta
-		EventMessageStop,       // stop → message_stop
+		EventMessageStart,
+		EventContentBlockStart,
+		EventContentBlockDelta,
+		EventMessageDelta,
+		EventContentBlockStop,
+		EventMessageDelta,
+		EventMessageStop,
 	}
 
 	if len(allEvents) != len(expectedTypes) {
@@ -1335,19 +1343,20 @@ func TestStreamConverter_ThinkingAndText(t *testing.T) {
 		Delta: provider.NewTextDelta("the answer is 42"),
 	})...)
 
-	// stop
+	// stop (deferred) + done triggers stop sequence
 	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})...)
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})...)
 
 	expectedTypes := []StreamEventType{
-		EventMessageStart,      // start
-		EventContentBlockStart, // block_start(thinking)
-		EventContentBlockDelta, // thinking_delta
-		EventContentBlockStop,  // block_start(text) → 关闭 thinking block
-		EventContentBlockStart, // block_start(text)
-		EventContentBlockDelta, // text_delta
-		EventContentBlockStop,  // stop
-		EventMessageDelta,      // stop
-		EventMessageStop,       // stop
+		EventMessageStart,
+		EventContentBlockStart,
+		EventContentBlockDelta,
+		EventContentBlockStop,
+		EventContentBlockStart,
+		EventContentBlockDelta,
+		EventContentBlockStop,
+		EventMessageDelta,
+		EventMessageStop,
 	}
 
 	if len(allEvents) != len(expectedTypes) {
@@ -1409,19 +1418,20 @@ func TestStreamConverter_ToolCall(t *testing.T) {
 		Delta: provider.NewToolCallDeltaData(`{"query":"golang"}`),
 	})...)
 
-	// stop
+	// stop (deferred) + done triggers stop sequence
 	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})...)
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})...)
 
 	expectedTypes := []StreamEventType{
-		EventMessageStart,      // start
-		EventContentBlockStart, // 防御性自动补发 block_start (text_delta without prior block_start)
-		EventContentBlockDelta, // text_delta
-		EventContentBlockStop,  // tool_call → close previous
-		EventContentBlockStart, // tool_call → open tool_use
-		EventContentBlockDelta, // tool_call_delta
-		EventContentBlockStop,  // stop
-		EventMessageDelta,      // stop
-		EventMessageStop,       // stop
+		EventMessageStart,
+		EventContentBlockStart,
+		EventContentBlockDelta,
+		EventContentBlockStop,
+		EventContentBlockStart,
+		EventContentBlockDelta,
+		EventContentBlockStop,
+		EventMessageDelta,
+		EventMessageStop,
 	}
 
 	if len(allEvents) != len(expectedTypes) {
@@ -1485,8 +1495,9 @@ func TestConvertStreamWithUsageInStop(t *testing.T) {
 		Delta: provider.NewTextDelta("test"),
 	})
 
-	// stop 事件应携带之前存储的 usage
-	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})
+	// stop 延迟到 done 才输出终止事件序列
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})
+	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})
 
 	// events: [content_block_stop, message_delta, message_stop]
 	msgDeltaEvent := events[1]
@@ -1551,39 +1562,68 @@ func TestStreamConverter_UsageImmediateEmit(t *testing.T) {
 	}
 }
 
-// TestStreamConverter_DoubleStopIdempotent 验证 StreamConverter 收到两次 StreamTypeStop 时，
-// 第二次不会重复生成 handleStop 事件序列。
-//
-// 背景：部分上游模型在同一个流中发送两个带 finish_reason 的 chunk（如先 stop 再 tool_calls），
-// 适配器层会为每个 finish_reason chunk 生成 StreamTypeStop 事件。
-// 如果 StreamConverter 不做幂等控制，会输出两个 EventMessageDelta + 两个 EventMessageStop，
-// 导致下游 codec 层产生两个带 finish_reason 的 SSE chunk。
-func TestStreamConverter_DoubleStopIdempotent(t *testing.T) {
+// TestStreamConverter_StopDeferredToDone 验证 StreamTypeStop 不立即输出终止事件，
+// 而是延迟到 StreamTypeDone 统一输出。这保证了无论上游发多少个 stop，
+// 客户端只收到一次终止事件序列。
+func TestStreamConverter_StopDeferredToDone(t *testing.T) {
 	sc := NewStreamConverter()
 
 	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
-	sc.Convert(provider.StreamEvent{
-		Type:  provider.StreamTypeDelta,
-		Delta: provider.NewBlockStartDelta("text"),
-	})
-	sc.Convert(provider.StreamEvent{
-		Type:  provider.StreamTypeDelta,
-		Delta: provider.NewTextDelta("hello"),
-	})
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDelta, Delta: provider.NewTextDelta("hi")})
 
-	firstStop := sc.Convert(provider.StreamEvent{
-		Type:         provider.StreamTypeStop,
-		FinishReason: provider.FinishReasonStop,
-	})
-	if len(firstStop) == 0 {
-		t.Fatal("first StreamTypeStop should produce events")
+	stopEvents := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop, FinishReason: provider.FinishReasonStop})
+	if len(stopEvents) != 0 {
+		t.Fatalf("StreamTypeStop should produce 0 events (deferred to Done), got %d", len(stopEvents))
 	}
 
-	secondStop := sc.Convert(provider.StreamEvent{
-		Type:         provider.StreamTypeStop,
-		FinishReason: provider.FinishReasonToolCalls,
-	})
-	if len(secondStop) != 0 {
-		t.Errorf("second StreamTypeStop should produce 0 events, got %d", len(secondStop))
+	doneEvents := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})
+	if len(doneEvents) == 0 {
+		t.Fatal("StreamTypeDone should produce stop event sequence")
+	}
+
+	var hasMsgDelta, hasMsgStop bool
+	for _, ev := range doneEvents {
+		if ev.Type == EventMessageDelta {
+			hasMsgDelta = true
+		}
+		if ev.Type == EventMessageStop {
+			hasMsgStop = true
+		}
+	}
+	if !hasMsgDelta {
+		t.Error("missing EventMessageDelta in Done output")
+	}
+	if !hasMsgStop {
+		t.Error("missing EventMessageStop in Done output")
+	}
+}
+
+// TestStreamConverter_FinishReasonPriority 验证当上游发送多个 StreamTypeStop 时，
+// finishReason 优先级策略确保 tool_use 不被 stop 覆盖。
+//
+// 复现 agent loop 中断场景：上游先发 finish_reason=stop，后发 finish_reason=tool_calls。
+// 修复前：客户端收到 finish_reason=stop → agent loop 终止。
+// 修复后：tool_use 优先级高于 stop → 客户端收到 finish_reason=tool_use → agent loop 继续。
+func TestStreamConverter_FinishReasonPriority(t *testing.T) {
+	sc := NewStreamConverter()
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDelta, Delta: provider.NewToolCallDelta("call_1", "edit")})
+
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop, FinishReason: provider.FinishReasonStop})
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop, FinishReason: provider.FinishReasonToolCalls})
+
+	doneEvents := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})
+
+	var stopReason FinishReason
+	for _, ev := range doneEvents {
+		if ev.Type == EventMessageDelta {
+			if md, ok := ev.Delta.(*MessageDelta); ok {
+				stopReason = md.StopReason
+			}
+		}
+	}
+
+	if stopReason != FinishReasonToolUse {
+		t.Fatalf("StopReason = %q, want %q (tool_use must win over stop)", stopReason, FinishReasonToolUse)
 	}
 }
