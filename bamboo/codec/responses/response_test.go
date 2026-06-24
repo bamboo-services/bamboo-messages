@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
+	openairesponses "github.com/openai/openai-go/v3/responses"
 )
 
 func TestSerializeResponse_TextOnly(t *testing.T) {
@@ -78,6 +79,54 @@ func TestSerializeResponse_TextOnly(t *testing.T) {
 	}
 	if out.Usage.OutputTokens != 5 {
 		t.Errorf("Usage.OutputTokens = %d", out.Usage.OutputTokens)
+	}
+}
+
+func TestSerializeResponse_UsageDetailsIncludeZeroRequiredFields(t *testing.T) {
+	resp := &bamboo.Response{
+		ID:         "resp_usage_zero",
+		Model:      "gpt-4o",
+		StopReason: bamboo.FinishReasonEndTurn,
+		Content: []bamboo.ContentBlock{
+			bamboo.NewTextBlock("Hello!"),
+		},
+		Usage: bamboo.Usage{
+			InputTokens:  10,
+			OutputTokens: 5,
+		},
+	}
+
+	data, err := serializeResponse(resp)
+	if err != nil {
+		t.Fatalf("serializeResponse() error = %v", err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal raw response error = %v", err)
+	}
+	usage, ok := raw["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing usage: %s", data)
+	}
+	inputDetails, ok := usage["input_tokens_details"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing input_tokens_details: %v", usage)
+	}
+	if value, ok := inputDetails["cached_tokens"].(float64); !ok || value != 0 {
+		t.Fatalf("cached_tokens = %v (%T), want explicit 0", inputDetails["cached_tokens"], inputDetails["cached_tokens"])
+	}
+	outputDetails, ok := usage["output_tokens_details"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing output_tokens_details: %v", usage)
+	}
+	if value, ok := outputDetails["reasoning_tokens"].(float64); !ok || value != 0 {
+		t.Fatalf("reasoning_tokens = %v (%T), want explicit 0", outputDetails["reasoning_tokens"], outputDetails["reasoning_tokens"])
+	}
+
+	var parsed openairesponses.Response
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("openai-go failed to parse Response: %v\nraw: %s", err, data)
 	}
 }
 

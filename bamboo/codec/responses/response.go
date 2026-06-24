@@ -59,11 +59,11 @@ type responsesUsage struct {
 }
 
 type responsesInputTokensDet struct {
-	CachedTokens int64 `json:"cached_tokens,omitempty"`
+	CachedTokens int64 `json:"cached_tokens"`
 }
 
 type responsesOutputTokensDet struct {
-	ReasoningTokens int64 `json:"reasoning_tokens,omitempty"`
+	ReasoningTokens int64 `json:"reasoning_tokens"`
 }
 
 // serializeResponse 将 Bamboo Response 序列化为 OpenAI Responses JSON。

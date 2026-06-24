@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
+	openairesponses "github.com/openai/openai-go/v3/responses"
 )
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -493,6 +494,141 @@ func TestStreamSerializer_ResponseCompletedWithUsage(t *testing.T) {
 	}
 	if int64(usage["output_tokens"].(float64)) != 50 {
 		t.Errorf("output_tokens = %v", usage["output_tokens"])
+	}
+}
+
+func TestStreamSerializer_ResponseCompletedUsageDetailsIncludeZeroRequiredFields(t *testing.T) {
+	s := newStreamSerializer()
+
+	s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type: bamboo.EventMessageDelta,
+		Delta: &bamboo.MessageDelta{
+			StopReason: bamboo.FinishReasonEndTurn,
+		},
+		Usage: &bamboo.Usage{
+			InputTokens:  12,
+			OutputTokens: 7,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Serialize error = %v", err)
+	}
+
+	evType, payload := parseResponsesSSE(t, data)
+	if evType != "response.completed" {
+		t.Fatalf("event type = %q, want %q", evType, "response.completed")
+	}
+	resp := extractResponse(t, payload)
+	if output, ok := resp["output"].([]any); !ok || len(output) != 0 {
+		t.Fatalf("response.output = %v (%T), want explicit empty array", resp["output"], resp["output"])
+	}
+	usage, ok := resp["usage"].(map[string]any)
+	if !ok {
+		t.Fatal("missing usage in response.completed")
+	}
+	inputDetails, ok := usage["input_tokens_details"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing input_tokens_details: %v", usage)
+	}
+	if value, ok := inputDetails["cached_tokens"].(float64); !ok || value != 0 {
+		t.Fatalf("input_tokens_details.cached_tokens = %v (%T), want explicit 0", inputDetails["cached_tokens"], inputDetails["cached_tokens"])
+	}
+	outputDetails, ok := usage["output_tokens_details"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing output_tokens_details: %v", usage)
+	}
+	if value, ok := outputDetails["reasoning_tokens"].(float64); !ok || value != 0 {
+		t.Fatalf("output_tokens_details.reasoning_tokens = %v (%T), want explicit 0", outputDetails["reasoning_tokens"], outputDetails["reasoning_tokens"])
+	}
+}
+
+func TestStreamSerializer_ResponseCompletedParsesWithOpenAIGoSchema(t *testing.T) {
+	s := newStreamSerializer()
+
+	s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+	s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        0,
+		ContentBlock: bamboo.NewTextBlock(""),
+	})
+	s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 0,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaTextDelta, Text: "Hello"},
+	})
+	s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockStop,
+		Index: 0,
+	})
+
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type: bamboo.EventMessageDelta,
+		Delta: &bamboo.MessageDelta{
+			StopReason: bamboo.FinishReasonEndTurn,
+		},
+		Usage: &bamboo.Usage{
+			InputTokens:  12,
+			OutputTokens: 7,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Serialize error = %v", err)
+	}
+
+	_, payload := parseResponsesSSE(t, data)
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload error = %v", err)
+	}
+	var completed openairesponses.ResponseCompletedEvent
+	if err := json.Unmarshal(raw, &completed); err != nil {
+		t.Fatalf("openai-go failed to parse ResponseCompletedEvent: %v\nraw: %s", err, raw)
+	}
+	if completed.Response.Usage.OutputTokensDetails.ReasoningTokens != 0 {
+		t.Fatalf("reasoning_tokens = %d, want 0", completed.Response.Usage.OutputTokensDetails.ReasoningTokens)
+	}
+}
+
+func TestStreamSerializer_ResponseCompletedWithoutUpstreamUsageParsesWithOpenAIGoSchema(t *testing.T) {
+	s := newStreamSerializer()
+
+	s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type: bamboo.EventMessageDelta,
+		Delta: &bamboo.MessageDelta{
+			StopReason: bamboo.FinishReasonEndTurn,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Serialize error = %v", err)
+	}
+
+	_, payload := parseResponsesSSE(t, data)
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload error = %v", err)
+	}
+	var completed openairesponses.ResponseCompletedEvent
+	if err := json.Unmarshal(raw, &completed); err != nil {
+		t.Fatalf("openai-go failed to parse ResponseCompletedEvent without upstream usage: %v\nraw: %s", err, raw)
+	}
+	if completed.Response.Usage.InputTokensDetails.CachedTokens != 0 {
+		t.Fatalf("cached_tokens = %d, want 0", completed.Response.Usage.InputTokensDetails.CachedTokens)
+	}
+	if completed.Response.Usage.OutputTokensDetails.ReasoningTokens != 0 {
+		t.Fatalf("reasoning_tokens = %d, want 0", completed.Response.Usage.OutputTokensDetails.ReasoningTokens)
 	}
 }
 

@@ -12,10 +12,10 @@ import (
 type responseObj struct {
 	ID        string          `json:"id"`
 	Object    string          `json:"object"`
-	CreatedAt int64           `json:"created_at,omitempty"`
-	Status    string          `json:"status,omitempty"`
-	Model     string          `json:"model,omitempty"`
-	Output    []outputItem    `json:"output,omitempty"`
+	CreatedAt int64           `json:"created_at"`
+	Status    string          `json:"status"`
+	Model     string          `json:"model"`
+	Output    []outputItem    `json:"output"`
 	Usage     *responsesUsage `json:"usage,omitempty"`
 	Error     *responseError  `json:"error,omitempty"`
 }
@@ -415,7 +415,7 @@ func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 		CreatedAt: s.createdAt,
 		Status:    status,
 		Model:     s.model,
-		Output:    append([]outputItem(nil), s.completedOutput...),
+		Output:    append([]outputItem{}, s.completedOutput...),
 		Usage:     buildResponsesUsage(event.Usage),
 	}
 	return s.marshalSSEWithResponse("response.completed", resp)
@@ -433,6 +433,7 @@ func (s *responsesStreamSerializer) handleError(event bamboo.StreamEvent) ([]byt
 		Object:    "response",
 		CreatedAt: s.createdAt,
 		Status:    "failed",
+		Output:    []outputItem{},
 		Error: &responseError{
 			Message: errMsg,
 			Type:    errType,
