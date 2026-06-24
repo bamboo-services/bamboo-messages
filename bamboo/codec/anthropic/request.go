@@ -26,6 +26,7 @@ type anthropicRequest struct {
 	ToolChoice    json.RawMessage    `json:"tool_choice,omitempty"`
 	Metadata      *anthropicMetadata `json:"metadata,omitempty"`
 	Thinking      json.RawMessage    `json:"thinking,omitempty"`
+	CacheControl  json.RawMessage    `json:"cache_control,omitempty"`
 	OutputConfig  json.RawMessage    `json:"output_config,omitempty"` // Anthropic 新 API: {effort:"max"|"high"|...}
 }
 
@@ -81,6 +82,9 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 
 	// 解析 system 上的 cache_control（放在 system 数组最后一个 block 上）
 	systemCacheControl := parseSystemCacheControl(req.System)
+	if systemCacheControl == nil {
+		systemCacheControl = parseCacheControlRaw(req.CacheControl)
+	}
 
 	// 解析消息列表
 	messages := make([]bamboo.BambooMessage, 0, len(req.Messages))
@@ -473,7 +477,6 @@ func parseOutputConfigEffort(raw json.RawMessage) string {
 	return obj.Effort
 }
 
-//
 // 映射规则:
 //   - {type:"adaptive"}             → ThinkingConfig{Effort:"high"}
 //   - {type:"enabled", budget_tokens:N} → ThinkingConfig{Effort:"medium"}

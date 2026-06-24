@@ -51,6 +51,12 @@ func TestParseRequest_Instructions(t *testing.T) {
 	if req.System != "You are helpful." {
 		t.Errorf("System = %q", req.System)
 	}
+	if req.Config.ProviderExtra == nil {
+		t.Fatal("ProviderExtra should preserve native instructions")
+	}
+	if req.Config.ProviderExtra["instructions"] != "You are helpful." {
+		t.Errorf("ProviderExtra[instructions] = %v", req.Config.ProviderExtra["instructions"])
+	}
 }
 
 func TestParseRequest_InputArrayUserMessage(t *testing.T) {

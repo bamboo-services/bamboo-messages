@@ -58,9 +58,13 @@ func (p *ResponsesProvider) contentOutputItemAdded(event responses.ResponseStrea
 	e := event.AsResponseOutputItemAdded()
 	switch e.Item.Type {
 	case "function_call":
+		callID := e.Item.CallID
+		if callID == "" {
+			callID = e.Item.ID
+		}
 		return []provider.StreamEvent{{
 			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewToolCallDelta(e.Item.ID, e.Item.Name),
+			Delta: provider.NewToolCallDelta(callID, e.Item.Name),
 		}}
 	default:
 		return nil

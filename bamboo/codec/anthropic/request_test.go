@@ -386,6 +386,29 @@ func TestParseRequest_TopKProviderExtra(t *testing.T) {
 	}
 }
 
+func TestParseRequest_TopLevelCacheControl(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"max_tokens": 1024,
+		"cache_control": {"type": "ephemeral", "ttl": "1h"},
+		"messages": [{"role": "user", "content": "Hi"}]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if req.Config.SystemCacheControl == nil {
+		t.Fatal("SystemCacheControl is nil; top-level cache_control should be preserved for relay")
+	}
+	if req.Config.SystemCacheControl.Type != "ephemeral" {
+		t.Errorf("CacheControl.Type = %q, want ephemeral", req.Config.SystemCacheControl.Type)
+	}
+	if req.Config.SystemCacheControl.TTL != "1h" {
+		t.Errorf("CacheControl.TTL = %q, want 1h", req.Config.SystemCacheControl.TTL)
+	}
+}
+
 func TestParseRequest_Stream(t *testing.T) {
 	body := []byte(`{
 		"model": "claude-sonnet-4-20250514",

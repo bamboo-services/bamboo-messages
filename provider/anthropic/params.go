@@ -8,7 +8,11 @@ import (
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
-const paramTopK = "top_k"
+const (
+	paramTopK                   = "top_k"
+	paramCacheNormalize         = "anthropic_cache_normalize"
+	paramCacheNormalizeMetadata = "anthropic_cache_normalize_metadata"
+)
 
 // buildParams 构建 Anthropic Messages 请求参数。
 //
@@ -68,6 +72,8 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 
 	if topK, ok := provider.GetExtraFloat64(config.ProviderExtra, paramTopK); ok {
 		params.TopK = param.NewOpt(int64(topK))
+	} else if topK, ok := provider.GetExtraInt64(config.ProviderExtra, paramTopK); ok {
+		params.TopK = param.NewOpt(topK)
 	}
 
 	// ToolChoice 映射: auto→OfAuto, none→OfNone, required/forced→OfAny
@@ -83,7 +89,8 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 		}
 	}
 
-	if config.UserID != "" || len(config.Metadata) > 0 {
+	cacheNormalize := anthropicCacheNormalizationEnabled(config)
+	if (config.UserID != "" || len(config.Metadata) > 0) && !cacheNormalize {
 		params.Metadata = anthropic.BetaMetadataParam{}
 		if config.UserID != "" {
 			params.Metadata.UserID = param.NewOpt(config.UserID)
@@ -123,4 +130,17 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 	}
 
 	return params
+}
+
+func anthropicCacheNormalizationEnabled(config *provider.ChatConfig) bool {
+	if config == nil {
+		return false
+	}
+	if enabled, ok := provider.GetExtraBool(config.ProviderExtra, paramCacheNormalize); ok {
+		return enabled
+	}
+	if enabled, ok := provider.GetExtraBool(config.ProviderExtra, paramCacheNormalizeMetadata); ok {
+		return enabled
+	}
+	return false
 }

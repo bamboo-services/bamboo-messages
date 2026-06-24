@@ -570,26 +570,20 @@ func TestConvertStreamToolCall(t *testing.T) {
 		Delta: provider.NewToolCallDelta("call_1", "search"),
 	})
 
-	// 应该产生 [content_block_stop, content_block_start]
-	if len(events) != 2 {
-		t.Fatalf("expected 2 events, got %d", len(events))
+	// tool-only 流不能凭空补一个 content_block_stop。
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
 	}
-	if events[0].Type != EventContentBlockStop {
-		t.Errorf("events[0].Type = %q, want content_block_stop", events[0].Type)
+	if events[0].Type != EventContentBlockStart {
+		t.Errorf("events[0].Type = %q, want content_block_start", events[0].Type)
 	}
 	if events[0].Index != 0 {
 		t.Errorf("events[0].Index = %d, want 0", events[0].Index)
 	}
-	if events[1].Type != EventContentBlockStart {
-		t.Errorf("events[1].Type = %q, want content_block_start", events[1].Type)
+	if events[0].ContentBlock.BlockType() != ContentBlockToolUse {
+		t.Errorf("ContentBlock.BlockType() = %q, want tool_use", events[0].ContentBlock.BlockType())
 	}
-	if events[1].Index != 1 {
-		t.Errorf("events[1].Index = %d, want 1", events[1].Index)
-	}
-	if events[1].ContentBlock.BlockType() != ContentBlockToolUse {
-		t.Errorf("ContentBlock.BlockType() = %q, want tool_use", events[1].ContentBlock.BlockType())
-	}
-	tb, ok := events[1].ContentBlock.(*ToolUseBlock)
+	tb, ok := events[0].ContentBlock.(*ToolUseBlock)
 	if !ok {
 		t.Fatal("ContentBlock 类型断言为 *ToolUseBlock 失败")
 	}
@@ -626,6 +620,41 @@ func TestConvertStreamToolCallDelta(t *testing.T) {
 	}
 }
 
+func TestConvertStreamParallelToolCallDeltasUseProviderIndex(t *testing.T) {
+	sc := NewStreamConverter()
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+
+	firstStart := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewToolCallDeltaWithIndex("call_1", "first_tool", 0),
+	})
+	secondStart := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewToolCallDeltaWithIndex("call_2", "second_tool", 1),
+	})
+	firstDelta := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewToolCallDeltaDataWithIndex(`{"first":`, 0),
+	})
+	secondDelta := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewToolCallDeltaDataWithIndex(`{"second":`, 1),
+	})
+
+	if len(firstStart) != 1 || firstStart[0].Index != 0 {
+		t.Fatalf("first tool start = %#v, want one block at index 0", firstStart)
+	}
+	if len(secondStart) != 1 || secondStart[0].Index != 1 {
+		t.Fatalf("second tool start = %#v, want one block at index 1", secondStart)
+	}
+	if len(firstDelta) != 1 || firstDelta[0].Index != 0 {
+		t.Fatalf("first tool delta = %#v, want index 0", firstDelta)
+	}
+	if len(secondDelta) != 1 || secondDelta[0].Index != 1 {
+		t.Fatalf("second tool delta = %#v, want index 1", secondDelta)
+	}
+}
+
 func TestConvertStreamUsage(t *testing.T) {
 	sc := NewStreamConverter()
 	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
@@ -657,21 +686,18 @@ func TestConvertStreamStop(t *testing.T) {
 	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})
 	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})
 
-	if len(events) != 3 {
-		t.Fatalf("expected 3 events, got %d", len(events))
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
 	}
-	if events[0].Type != EventContentBlockStop {
-		t.Errorf("events[0].Type = %q, want content_block_stop", events[0].Type)
+	if events[0].Type != EventMessageDelta {
+		t.Errorf("events[0].Type = %q, want message_delta", events[0].Type)
 	}
-	if events[1].Type != EventMessageDelta {
-		t.Errorf("events[1].Type = %q, want message_delta", events[1].Type)
-	}
-	if events[2].Type != EventMessageStop {
-		t.Errorf("events[2].Type = %q, want message_stop", events[2].Type)
+	if events[1].Type != EventMessageStop {
+		t.Errorf("events[1].Type = %q, want message_stop", events[1].Type)
 	}
 
 	// 验证 MessageDelta 的 StopReason
-	msgDelta, ok := events[1].Delta.(*MessageDelta)
+	msgDelta, ok := events[0].Delta.(*MessageDelta)
 	if !ok {
 		t.Fatal("Delta is not *MessageDelta")
 	}
@@ -1175,11 +1201,11 @@ func TestConvertStreamStopWithoutUsage(t *testing.T) {
 
 	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})
 	events := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})
-	if len(events) != 3 {
-		t.Fatalf("期望 3 个事件, 实际 %d", len(events))
+	if len(events) != 2 {
+		t.Fatalf("期望 2 个事件, 实际 %d", len(events))
 	}
 
-	msgDeltaEvent := events[1]
+	msgDeltaEvent := events[0]
 	if msgDeltaEvent.Usage == nil {
 		t.Fatal("Usage 不应为 nil")
 	}

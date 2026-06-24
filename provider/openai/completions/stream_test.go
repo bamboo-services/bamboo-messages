@@ -244,3 +244,31 @@ func TestHandleChunk_RelaxedUsageCondition(t *testing.T) {
 			"relaxed condition should fire")
 	}
 }
+
+func TestHandleChoice_AllowsFinishReasonUpgradeAfterStop(t *testing.T) {
+	p := NewCompletionsProvider("test-api-key")
+
+	textBlockStarted := false
+	thinkingBlockStarted := false
+	stopSent := false
+
+	stopEvents := p.handleChoice(openai.ChatCompletionChunkChoice{
+		FinishReason: "stop",
+	}, &textBlockStarted, &thinkingBlockStarted, &stopSent)
+	if len(stopEvents) != 1 {
+		t.Fatalf("stop choice events = %d, want 1", len(stopEvents))
+	}
+	if stopEvents[0].FinishReason != provider.FinishReasonStop {
+		t.Fatalf("first finish reason = %q, want %q", stopEvents[0].FinishReason, provider.FinishReasonStop)
+	}
+
+	toolEvents := p.handleChoice(openai.ChatCompletionChunkChoice{
+		FinishReason: "tool_calls",
+	}, &textBlockStarted, &thinkingBlockStarted, &stopSent)
+	if len(toolEvents) != 1 {
+		t.Fatalf("tool_calls choice events = %d, want 1; stopSent must not swallow finish reason upgrades", len(toolEvents))
+	}
+	if toolEvents[0].FinishReason != provider.FinishReasonToolCalls {
+		t.Fatalf("second finish reason = %q, want %q", toolEvents[0].FinishReason, provider.FinishReasonToolCalls)
+	}
+}

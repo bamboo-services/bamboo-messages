@@ -91,8 +91,10 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	}
 
 	var systemParts []string
+	extra := make(map[string]any)
 	if req.Instructions != "" {
 		systemParts = append(systemParts, req.Instructions)
+		extra["instructions"] = req.Instructions
 	}
 
 	var messages []bamboo.BambooMessage
@@ -150,8 +152,7 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 		config.UserID = req.User
 	}
 
-	// ProviderExtra：previous_response_id / store / truncation
-	extra := make(map[string]any)
+	// ProviderExtra：instructions / previous_response_id / store / truncation
 	if req.PreviousResponseID != "" {
 		extra["previous_response_id"] = req.PreviousResponseID
 	}

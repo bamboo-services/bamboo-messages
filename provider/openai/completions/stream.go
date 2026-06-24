@@ -69,7 +69,7 @@ func (p *CompletionsProvider) handleChoice(choice openai.ChatCompletionChunkChoi
 		events = append(events, p.handleToolCallDelta(tc)...)
 	}
 
-	if choice.FinishReason != "" && !*stopSent {
+	if choice.FinishReason != "" {
 		*stopSent = true
 		events = append(events, provider.StreamEvent{
 			Type:         provider.StreamTypeStop,
@@ -90,7 +90,7 @@ func (p *CompletionsProvider) handleToolCallDelta(tc openai.ChatCompletionChunkC
 	if tc.ID != "" {
 		events = append(events, provider.StreamEvent{
 			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewToolCallDelta(tc.ID, tc.Function.Name),
+			Delta: provider.NewToolCallDeltaWithIndex(tc.ID, tc.Function.Name, int(tc.Index)),
 		})
 	}
 
@@ -98,7 +98,7 @@ func (p *CompletionsProvider) handleToolCallDelta(tc openai.ChatCompletionChunkC
 	if tc.Function.Arguments != "" {
 		events = append(events, provider.StreamEvent{
 			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewToolCallDeltaData(tc.Function.Arguments),
+			Delta: provider.NewToolCallDeltaDataWithIndex(tc.Function.Arguments, int(tc.Index)),
 		})
 	}
 

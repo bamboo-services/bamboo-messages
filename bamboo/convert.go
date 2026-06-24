@@ -282,13 +282,21 @@ func mapFinishReason(reason provider.FinishReason) FinishReason {
 
 // StreamConverter 维护流事件转换状态，将 provider.StreamEvent 序列映射为 Anthropic 风格事件序列。
 type StreamConverter struct {
-	blockIndex           int
-	usage                *Usage
-	started              bool
-	textBlockStarted     bool
-	thinkingBlockStarted bool
-	finishReason         FinishReason
-	stopHandled          bool
+	blockIndex               int
+	nextBlockIndex           int
+	usage                    *Usage
+	started                  bool
+	textBlockStarted         bool
+	textBlockIndex           int
+	thinkingBlockStarted     bool
+	thinkingBlockIndex       int
+	currentToolBlockIndex    int
+	toolBlockStarted         bool
+	openToolBlockIndexes     []int
+	toolBlockByProviderIndex map[int]int
+	toolBlockByID            map[string]int
+	finishReason             FinishReason
+	stopHandled              bool
 }
 
 func NewStreamConverter() *StreamConverter { return &StreamConverter{} }
@@ -354,12 +362,145 @@ func finishReasonPriority(r FinishReason) int {
 func (sc *StreamConverter) handleStart() []StreamEvent {
 	sc.started = true
 	sc.blockIndex = 0
+	sc.nextBlockIndex = 0
+	sc.textBlockStarted = false
+	sc.textBlockIndex = 0
+	sc.thinkingBlockStarted = false
+	sc.thinkingBlockIndex = 0
+	sc.currentToolBlockIndex = 0
+	sc.toolBlockStarted = false
+	sc.openToolBlockIndexes = nil
+	sc.toolBlockByProviderIndex = make(map[int]int)
+	sc.toolBlockByID = make(map[string]int)
+	sc.finishReason = ""
+	sc.stopHandled = false
 	return []StreamEvent{
 		{
 			Type:    EventMessageStart,
 			Message: &BambooMessage{Role: RoleAssistant, Content: []ContentBlock{}},
 			Usage:   &Usage{},
 		},
+	}
+}
+
+func (sc *StreamConverter) nextIndex() int {
+	idx := sc.nextBlockIndex
+	sc.nextBlockIndex++
+	sc.blockIndex = idx
+	return idx
+}
+
+func (sc *StreamConverter) stopTextOrThinkingBlock() []StreamEvent {
+	var events []StreamEvent
+	if sc.thinkingBlockStarted {
+		sc.thinkingBlockStarted = false
+		events = append(events, StreamEvent{
+			Type:  EventContentBlockStop,
+			Index: sc.thinkingBlockIndex,
+		})
+	}
+	if sc.textBlockStarted {
+		sc.textBlockStarted = false
+		events = append(events, StreamEvent{
+			Type:  EventContentBlockStop,
+			Index: sc.textBlockIndex,
+		})
+	}
+	return events
+}
+
+func (sc *StreamConverter) startTextBlock() StreamEvent {
+	idx := sc.nextIndex()
+	sc.textBlockStarted = true
+	sc.textBlockIndex = idx
+	return StreamEvent{
+		Type:         EventContentBlockStart,
+		Index:        idx,
+		ContentBlock: NewTextBlock(""),
+	}
+}
+
+func (sc *StreamConverter) startThinkingBlock() StreamEvent {
+	idx := sc.nextIndex()
+	sc.thinkingBlockStarted = true
+	sc.thinkingBlockIndex = idx
+	return StreamEvent{
+		Type:         EventContentBlockStart,
+		Index:        idx,
+		ContentBlock: NewThinkingBlock("", ""),
+	}
+}
+
+func (sc *StreamConverter) startToolBlock(data provider.ToolCallData) []StreamEvent {
+	var events []StreamEvent
+	events = append(events, sc.stopTextOrThinkingBlock()...)
+
+	if data.HasIndex {
+		if idx, ok := sc.toolBlockByProviderIndex[data.Index]; ok {
+			sc.currentToolBlockIndex = idx
+			sc.toolBlockStarted = true
+			sc.blockIndex = idx
+			return events
+		}
+	}
+	if data.ID != "" {
+		if idx, ok := sc.toolBlockByID[data.ID]; ok {
+			sc.currentToolBlockIndex = idx
+			sc.toolBlockStarted = true
+			sc.blockIndex = idx
+			return events
+		}
+	}
+
+	idx := sc.nextIndex()
+	sc.currentToolBlockIndex = idx
+	sc.toolBlockStarted = true
+	sc.openToolBlockIndexes = append(sc.openToolBlockIndexes, idx)
+	if data.HasIndex {
+		sc.toolBlockByProviderIndex[data.Index] = idx
+	}
+	if data.ID != "" {
+		sc.toolBlockByID[data.ID] = idx
+	}
+
+	events = append(events, StreamEvent{
+		Type:         EventContentBlockStart,
+		Index:        idx,
+		ContentBlock: NewToolUseBlock(data.ID, data.Name, nil),
+	})
+	return events
+}
+
+func (sc *StreamConverter) toolDeltaIndex(data any) (int, bool) {
+	switch d := data.(type) {
+	case provider.ToolCallDeltaData:
+		if sc.toolBlockStarted {
+			return sc.currentToolBlockIndex, true
+		}
+		return sc.blockIndex, true
+	case provider.IndexedToolCallDeltaData:
+		if d.HasIndex {
+			if idx, ok := sc.toolBlockByProviderIndex[d.Index]; ok {
+				return idx, true
+			}
+		}
+		if sc.toolBlockStarted {
+			return sc.currentToolBlockIndex, true
+		}
+		return sc.blockIndex, true
+	default:
+		return 0, false
+	}
+}
+
+func toolDeltaPartialJSON(data any) (string, bool) {
+	switch d := data.(type) {
+	case provider.ToolCallDeltaData:
+		return string(d), true
+	case provider.IndexedToolCallDeltaData:
+		return d.PartialJSON, true
+	default:
+		return "", false
 	}
 }
 
@@ -373,65 +514,25 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 
 		var events []StreamEvent
 
-		if data.BlockType == "text" && sc.thinkingBlockStarted {
-			sc.thinkingBlockStarted = false
-			events = append(events, StreamEvent{
-				Type:  EventContentBlockStop,
-				Index: sc.blockIndex,
-			})
-			sc.blockIndex++
-		}
-		if data.BlockType == "thinking" && sc.textBlockStarted {
-			sc.textBlockStarted = false
-			events = append(events, StreamEvent{
-				Type:  EventContentBlockStop,
-				Index: sc.blockIndex,
-			})
-			sc.blockIndex++
-		}
-
-		if data.BlockType == "text" {
-			sc.textBlockStarted = true
-		}
-		if data.BlockType == "thinking" {
-			sc.thinkingBlockStarted = true
-		}
-		var cb ContentBlock
-		ct := mapBlockType(data.BlockType)
-		switch ct {
+		switch mapBlockType(data.BlockType) {
 		case ContentBlockText:
-			cb = NewTextBlock("")
+			events = append(events, sc.stopTextOrThinkingBlock()...)
+			events = append(events, sc.startTextBlock())
 		case ContentBlockThinking:
-			cb = NewThinkingBlock("", "")
+			events = append(events, sc.stopTextOrThinkingBlock()...)
+			events = append(events, sc.startThinkingBlock())
 		case ContentBlockToolUse:
-			cb = NewToolUseBlock(data.ID, data.Name, nil)
+			events = append(events, sc.startToolBlock(provider.ToolCallData{ID: data.ID, Name: data.Name})...)
 		default:
-			cb = NewTextBlock("")
+			events = append(events, sc.stopTextOrThinkingBlock()...)
+			events = append(events, sc.startTextBlock())
 		}
-		events = append(events, StreamEvent{
-			Type:         EventContentBlockStart,
-			Index:        sc.blockIndex,
-			ContentBlock: cb,
-		})
 		return events
 	case provider.StreamDeltaTypeTextOutput:
 		var events []StreamEvent
 		if !sc.textBlockStarted {
-			sc.textBlockStarted = true
-			if sc.thinkingBlockStarted {
-				sc.thinkingBlockStarted = false
-				events = append(events, StreamEvent{
-					Type:  EventContentBlockStop,
-					Index: sc.blockIndex,
-				})
-				sc.blockIndex++
-			}
-			tb := NewTextBlock("")
-			events = append(events, StreamEvent{
-				Type:         EventContentBlockStart,
-				Index:        sc.blockIndex,
-				ContentBlock: tb,
-			})
+			events = append(events, sc.stopTextOrThinkingBlock()...)
+			events = append(events, sc.startTextBlock())
 		}
 		textData, ok := delta.Data.(provider.TextData)
 		if !ok {
@@ -439,20 +540,15 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		}
 		events = append(events, StreamEvent{
 			Type:  EventContentBlockDelta,
-			Index: sc.blockIndex,
+			Index: sc.textBlockIndex,
 			Delta: &StreamDelta{Type: DeltaTextDelta, Text: string(textData)},
 		})
 		return events
 	case provider.StreamDeltaTypeThinking:
 		var events []StreamEvent
 		if !sc.thinkingBlockStarted {
-			sc.thinkingBlockStarted = true
-			thb := NewThinkingBlock("", "")
-			events = append(events, StreamEvent{
-				Type:         EventContentBlockStart,
-				Index:        sc.blockIndex,
-				ContentBlock: thb,
-			})
+			events = append(events, sc.stopTextOrThinkingBlock()...)
+			events = append(events, sc.startThinkingBlock())
 		}
 		thinkingData, ok := delta.Data.(provider.ThinkingData)
 		if !ok {
@@ -460,7 +556,7 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		}
 		events = append(events, StreamEvent{
 			Type:  EventContentBlockDelta,
-			Index: sc.blockIndex,
+			Index: sc.thinkingBlockIndex,
 			Delta: &StreamDelta{Type: DeltaThinkingDelta, Thinking: string(thinkingData)},
 		})
 		return events
@@ -469,26 +565,20 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		if !ok {
 			return nil
 		}
-		stopIdx := sc.blockIndex
-		sc.blockIndex++
-		tub := NewToolUseBlock(data.ID, data.Name, nil)
-		return []StreamEvent{
-			{Type: EventContentBlockStop, Index: stopIdx},
-			{
-				Type:         EventContentBlockStart,
-				Index:        sc.blockIndex,
-				ContentBlock: tub,
-			},
-		}
+		return sc.startToolBlock(data)
 	case provider.StreamDeltaTypeToolCallDelta:
-		tcdData, ok := delta.Data.(provider.ToolCallDeltaData)
+		partialJSON, ok := toolDeltaPartialJSON(delta.Data)
+		if !ok {
+			return nil
+		}
+		idx, ok := sc.toolDeltaIndex(delta.Data)
 		if !ok {
 			return nil
 		}
 		return []StreamEvent{{
 			Type:  EventContentBlockDelta,
-			Index: sc.blockIndex,
-			Delta: &StreamDelta{Type: DeltaInputJSON, PartialJSON: string(tcdData)},
+			Index: idx,
+			Delta: &StreamDelta{Type: DeltaInputJSON, PartialJSON: partialJSON},
 		}}
 	case provider.StreamDeltaTypeUsage:
 		data, ok := delta.Data.(provider.UsageData)
@@ -528,11 +618,22 @@ func (sc *StreamConverter) handleStop() []StreamEvent {
 	if stopReason == "" {
 		stopReason = FinishReasonEndTurn
 	}
-	return []StreamEvent{
-		{Type: EventContentBlockStop, Index: sc.blockIndex},
-		{Type: EventMessageDelta, Delta: &MessageDelta{StopReason: stopReason}, Usage: usage},
-		{Type: EventMessageStop},
+
+	var events []StreamEvent
+	events = append(events, sc.stopTextOrThinkingBlock()...)
+	for _, idx := range sc.openToolBlockIndexes {
+		events = append(events, StreamEvent{Type: EventContentBlockStop, Index: idx})
 	}
+	sc.openToolBlockIndexes = nil
+	sc.toolBlockStarted = false
+	sc.toolBlockByProviderIndex = nil
+	sc.toolBlockByID = nil
+
+	events = append(events,
+		StreamEvent{Type: EventMessageDelta, Delta: &MessageDelta{StopReason: stopReason}, Usage: usage},
+		StreamEvent{Type: EventMessageStop},
+	)
+	return events
 }
 
 func mapBlockType(blockType string) ContentBlockType {

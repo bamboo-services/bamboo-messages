@@ -8,9 +8,9 @@ import xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
 // 该结构体属于值类型，通常在多个 goroutine 之间通过 channel 进行传递，
 // 因此其内部字段在传递完成后应被视为只读，本身不保证并发安全的直接修改。
 type StreamEvent struct {
-	Type  StreamType       `json:"type" xml:"type"`   // 表示事件的具体分类或信号类型，用于在流处理管道中指导下游的分支路由逻辑。
-	Delta StreamDelta[any] `json:"delta" xml:"delta"` // 包含事件的实际负载数据，通常是一个字符串，可以是 AI 模型生成的文本、工具调用结果或其他相关信息。
-	Err   *xError.Error    `json:"err" xml:"err"`     // 字段用于在事件处理过程中捕获和传递可能发生的错误状态，允许下游组件根据该错误信息进行适当的错误处理或日志记录。
+	Type         StreamType       `json:"type" xml:"type"`                                       // 表示事件的具体分类或信号类型，用于在流处理管道中指导下游的分支路由逻辑。
+	Delta        StreamDelta[any] `json:"delta" xml:"delta"`                                     // 包含事件的实际负载数据，通常是一个字符串，可以是 AI 模型生成的文本、工具调用结果或其他相关信息。
+	Err          *xError.Error    `json:"err" xml:"err"`                                         // 字段用于在事件处理过程中捕获和传递可能发生的错误状态，允许下游组件根据该错误信息进行适当的错误处理或日志记录。
 	FinishReason FinishReason     `json:"finish_reason,omitempty" xml:"finish_reason,omitempty"` // 完成原因，仅在 StreamTypeStop 事件中由适配器填充，标识流结束的具体原因。
 }
 
@@ -67,14 +67,25 @@ type ThinkingData string
 //
 // 包含工具调用的唯一标识和工具名称，用于标记工具调用的开始。
 type ToolCallData struct {
-	ID   string `json:"id"`   // 工具调用唯一标识
-	Name string `json:"name"` // 工具名称
+	ID       string `json:"id"`                  // 工具调用唯一标识
+	Name     string `json:"name"`                // 工具名称
+	Index    int    `json:"index,omitempty"`     // Provider 原生工具索引（OpenAI 并行工具调用使用）
+	HasIndex bool   `json:"has_index,omitempty"` // 是否显式携带工具索引
 }
 
 // ToolCallDeltaData 工具调用增量数据。
 //
 // 包含 JSON 参数的增量部分，用于流式传输工具调用参数。
 type ToolCallDeltaData string
+
+// IndexedToolCallDeltaData 带 Provider 原生索引的工具调用参数增量数据。
+type IndexedToolCallDeltaData struct {
+	PartialJSON string `json:"partial_json"`        // JSON 参数增量片段
+	Index       int    `json:"index,omitempty"`     // Provider 原生工具索引
+	HasIndex    bool   `json:"has_index,omitempty"` // 是否显式携带工具索引
+}
+
+func (d IndexedToolCallDeltaData) String() string { return d.PartialJSON }
 
 // UsageData Token 使用量统计数据。
 //
@@ -144,6 +155,19 @@ func NewToolCallDelta(id, name string) StreamDelta[any] {
 	}
 }
 
+// NewToolCallDeltaWithIndex 创建带 Provider 原生索引的工具调用开始事件。
+func NewToolCallDeltaWithIndex(id, name string, index int) StreamDelta[any] {
+	return StreamDelta[any]{
+		Type: StreamDeltaTypeToolCall,
+		Data: ToolCallData{
+			ID:       id,
+			Name:     name,
+			Index:    index,
+			HasIndex: true,
+		},
+	}
+}
+
 // NewToolCallDeltaData 创建工具调用增量事件。
 //
 // 参数:
@@ -154,6 +178,18 @@ func NewToolCallDeltaData(partialJSON string) StreamDelta[any] {
 	return StreamDelta[any]{
 		Type: StreamDeltaTypeToolCallDelta,
 		Data: ToolCallDeltaData(partialJSON),
+	}
+}
+
+// NewToolCallDeltaDataWithIndex 创建带 Provider 原生索引的工具调用参数增量事件。
+func NewToolCallDeltaDataWithIndex(partialJSON string, index int) StreamDelta[any] {
+	return StreamDelta[any]{
+		Type: StreamDeltaTypeToolCallDelta,
+		Data: IndexedToolCallDeltaData{
+			PartialJSON: partialJSON,
+			Index:       index,
+			HasIndex:    true,
+		},
 	}
 }
 

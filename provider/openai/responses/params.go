@@ -25,6 +25,7 @@ func (p *ResponsesProvider) buildResponseNewParams(model string, input responses
 		Model: model,
 		Input: input,
 	}
+	extraFields := make(map[string]any)
 
 	if config.MaxTokens > 0 {
 		params.MaxOutputTokens = openai.Int(config.MaxTokens)
@@ -40,7 +41,7 @@ func (p *ResponsesProvider) buildResponseNewParams(model string, input responses
 
 	// Stop 参数 — Responses SDK 无原生 Stop 字段，通过 ExtraFields 传递
 	if len(config.Stop) > 0 {
-		params.SetExtraFields(map[string]any{"stop": config.Stop})
+		extraFields["stop"] = config.Stop
 	}
 
 	// UserID — 统一字段，标识终端用户，用于缓存优化和安全审计
@@ -55,9 +56,13 @@ func (p *ResponsesProvider) buildResponseNewParams(model string, input responses
 		params.PromptCacheKey = openai.Opt(key)
 	}
 
-	// ParallelToolCalls — 是否允许并行工具调用，通过 ExtraFields 传递
+	// ParallelToolCalls — 是否允许并行工具调用
 	if config.ParallelToolCalls {
-		params.SetExtraFields(map[string]any{"parallel_tool_calls": true})
+		params.ParallelToolCalls = openai.Bool(true)
+	}
+
+	if instructions, ok := provider.GetExtraString(config.ProviderExtra, "instructions"); ok && instructions != "" {
+		params.Instructions = openai.String(instructions)
 	}
 
 	// ProviderExtra: store — 是否持久化存储响应
@@ -82,7 +87,7 @@ func (p *ResponsesProvider) buildResponseNewParams(model string, input responses
 
 	// ProviderExtra: modalities — 输出模态（ResponseNewParams 无原生字段，通过 ExtraFields 传递）
 	if modalities, ok := provider.GetExtraAny(config.ProviderExtra, "modalities"); ok {
-		params.SetExtraFields(map[string]any{"modalities": modalities})
+		extraFields["modalities"] = modalities
 	}
 
 	if tools := buildTools(config.Tools); tools != nil {
@@ -134,6 +139,10 @@ func (p *ResponsesProvider) buildResponseNewParams(model string, input responses
 				},
 			}
 		}
+	}
+
+	if len(extraFields) > 0 {
+		params.SetExtraFields(extraFields)
 	}
 
 	return params

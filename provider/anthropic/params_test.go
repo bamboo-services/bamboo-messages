@@ -168,6 +168,70 @@ func TestBuildParams_TopK(t *testing.T) {
 	}
 }
 
+func TestBuildParams_TopKFromCodecInt64(t *testing.T) {
+	p := NewProvider("test-api-key")
+	config := &provider.ChatConfig{
+		ProviderExtra: map[string]any{"top_k": int64(40)},
+	}
+	params := p.buildParams("", nil, config)
+
+	if !params.TopK.Valid() {
+		t.Fatal("expected TopK to be valid for int64 ProviderExtra")
+	}
+	if params.TopK.Value != int64(40) {
+		t.Errorf("TopK.Value = %v, want 40", params.TopK.Value)
+	}
+}
+
+func TestBuildParams_CacheNormalizationRemovesDynamicMetadataOnlyWhenEnabled(t *testing.T) {
+	p := NewProvider("test-api-key")
+	config := &provider.ChatConfig{
+		UserID:         "dynamic-user",
+		Metadata:       map[string]string{"trace_id": "req-123"},
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
+		ProviderExtra: map[string]any{
+			"thinking":                  []byte(`{"type":"enabled","budget_tokens":1024}`),
+			"anthropic_cache_normalize": true,
+		},
+	}
+	params := p.buildParams("system prompt", []provider.Message{{Role: provider.RoleUser, Content: "hello"}}, config)
+
+	if params.Metadata.UserID.Valid() {
+		t.Fatal("metadata.user_id should be removed when cache normalization is enabled")
+	}
+	if len(params.Metadata.ExtraFields()) != 0 {
+		t.Fatalf("metadata extra fields should be removed, got %v", params.Metadata.ExtraFields())
+	}
+	if params.Thinking.OfAdaptive == nil {
+		t.Fatal("parsed ThinkingConfig should remain available; only raw ProviderExtra thinking is ignored")
+	}
+	if len(params.System) != 1 || params.System[0].Text != "system prompt" {
+		t.Fatalf("system prompt changed: %#v", params.System)
+	}
+	if len(params.Messages) != 1 {
+		t.Fatalf("messages changed: %#v", params.Messages)
+	}
+}
+
+func TestBuildParams_CacheNormalizationDefaultOff(t *testing.T) {
+	p := NewProvider("test-api-key")
+	config := &provider.ChatConfig{
+		UserID:   "dynamic-user",
+		Metadata: map[string]string{"trace_id": "req-123"},
+		ProviderExtra: map[string]any{
+			"thinking": []byte(`{"type":"enabled","budget_tokens":1024}`),
+		},
+	}
+	params := p.buildParams("", nil, config)
+
+	if !params.Metadata.UserID.Valid() || params.Metadata.UserID.Value != "dynamic-user" {
+		t.Fatalf("metadata.user_id should be preserved by default, got %#v", params.Metadata.UserID)
+	}
+	if params.Metadata.ExtraFields()["trace_id"] != "req-123" {
+		t.Fatalf("metadata extra fields should be preserved by default, got %v", params.Metadata.ExtraFields())
+	}
+}
+
 func TestBuildParams_ToolChoiceAuto(t *testing.T) {
 	p := NewProvider("test-api-key")
 	config := &provider.ChatConfig{ToolChoice: "auto"}

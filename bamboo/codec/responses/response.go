@@ -51,14 +51,19 @@ type outputReasoningSummary struct {
 
 // responsesUsage Responses 格式的 Token 用量。
 type responsesUsage struct {
-	InputTokens        int64                    `json:"input_tokens"`
-	OutputTokens       int64                    `json:"output_tokens"`
-	TotalTokens        int64                    `json:"total_tokens"`
-	InputTokensDetails *responsesInputTokensDet `json:"input_tokens_details,omitempty"`
+	InputTokens         int64                     `json:"input_tokens"`
+	OutputTokens        int64                     `json:"output_tokens"`
+	TotalTokens         int64                     `json:"total_tokens"`
+	InputTokensDetails  *responsesInputTokensDet  `json:"input_tokens_details,omitempty"`
+	OutputTokensDetails *responsesOutputTokensDet `json:"output_tokens_details,omitempty"`
 }
 
 type responsesInputTokensDet struct {
 	CachedTokens int64 `json:"cached_tokens,omitempty"`
+}
+
+type responsesOutputTokensDet struct {
+	ReasoningTokens int64 `json:"reasoning_tokens,omitempty"`
 }
 
 // serializeResponse 将 Bamboo Response 序列化为 OpenAI Responses JSON。
@@ -140,16 +145,11 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 	}
 
 	usage := responsesUsage{
-		InputTokens:  resp.Usage.InputTokens,
-		OutputTokens: resp.Usage.OutputTokens,
-		TotalTokens:  resp.Usage.InputTokens + resp.Usage.OutputTokens,
-	}
-	// Responses 无原生 cache_creation_input_tokens 字段，仅映射 CacheReadInputTokens 到 cached_tokens。
-	// CacheCreationInputTokens 在跨协议转换中会丢失，此为已知限制。
-	if resp.Usage.CacheCreationInputTokens > 0 || resp.Usage.CacheReadInputTokens > 0 {
-		usage.InputTokensDetails = &responsesInputTokensDet{
-			CachedTokens: resp.Usage.CacheReadInputTokens,
-		}
+		InputTokens:         resp.Usage.InputTokens,
+		OutputTokens:        resp.Usage.OutputTokens,
+		TotalTokens:         resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		InputTokensDetails:  &responsesInputTokensDet{CachedTokens: resp.Usage.CacheReadInputTokens},
+		OutputTokensDetails: &responsesOutputTokensDet{},
 	}
 
 	out := responsesOutput{

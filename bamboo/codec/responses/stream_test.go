@@ -82,6 +82,22 @@ func extractResponse(t *testing.T, payload map[string]any) map[string]any {
 	return resp
 }
 
+func requireSequenceNumber(t *testing.T, payload map[string]any) {
+	t.Helper()
+	if _, ok := payload["sequence_number"].(float64); !ok {
+		t.Fatalf("payload for %v missing numeric sequence_number: %v", payload["type"], payload)
+	}
+}
+
+func requireStringField(t *testing.T, payload map[string]any, key string) string {
+	t.Helper()
+	value, ok := payload[key].(string)
+	if !ok || value == "" {
+		t.Fatalf("payload for %v missing string %q: %v", payload["type"], key, payload)
+	}
+	return value
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // 流式序列化测试
 // ════════════════════════════════════════════════════════════════════════════
@@ -108,6 +124,7 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 	if payload["type"] != "response.created" {
 		t.Errorf("payload.type = %v, want %q", payload["type"], "response.created")
 	}
+	requireSequenceNumber(t, payload)
 	resp := extractResponse(t, payload)
 	if resp["object"] != "response" {
 		t.Errorf("response.object = %v, want %q", resp["object"], "response")
@@ -159,6 +176,12 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 	if evType != "response.output_text.delta" {
 		t.Errorf("event type = %q, want %q", evType, "response.output_text.delta")
 	}
+	requireSequenceNumber(t, payload)
+	requireStringField(t, payload, "response_id")
+	requireStringField(t, payload, "item_id")
+	if _, ok := payload["logprobs"].([]any); !ok {
+		t.Fatalf("output_text.delta should include logprobs array, got %T", payload["logprobs"])
+	}
 	if payload["delta"] != "Hello" {
 		t.Errorf("delta = %v, want %q", payload["delta"], "Hello")
 	}
@@ -182,6 +205,11 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 	if frames[0].eventType != "response.output_text.done" {
 		t.Errorf("frame[0] event type = %q, want %q", frames[0].eventType, "response.output_text.done")
 	}
+	requireSequenceNumber(t, frames[0].payload)
+	requireStringField(t, frames[0].payload, "item_id")
+	if _, ok := frames[0].payload["logprobs"].([]any); !ok {
+		t.Fatalf("output_text.done should include logprobs array, got %T", frames[0].payload["logprobs"])
+	}
 	if frames[0].payload["text"] != "Hello" {
 		t.Errorf("frame[0] text = %v, want %q", frames[0].payload["text"], "Hello")
 	}
@@ -189,6 +217,7 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 	if frames[1].eventType != "response.output_item.done" {
 		t.Errorf("frame[1] event type = %q, want %q", frames[1].eventType, "response.output_item.done")
 	}
+	requireSequenceNumber(t, frames[1].payload)
 	item, ok := frames[1].payload["item"].(map[string]any)
 	if !ok {
 		t.Fatal("frame[1] missing item in output_item.done")
@@ -215,6 +244,7 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 	if evType != "response.completed" {
 		t.Errorf("event type = %q, want %q", evType, "response.completed")
 	}
+	requireSequenceNumber(t, payload)
 	resp = extractResponse(t, payload)
 	if resp["status"] != "completed" {
 		t.Errorf("response.status = %v, want %q", resp["status"], "completed")
@@ -228,6 +258,15 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 	}
 	if int64(usage["output_tokens"].(float64)) != 5 {
 		t.Errorf("usage.output_tokens = %v", usage["output_tokens"])
+	}
+	if _, ok := usage["input_tokens_details"].(map[string]any); !ok {
+		t.Fatalf("usage.input_tokens_details missing: %v", usage)
+	}
+	if _, ok := usage["output_tokens_details"].(map[string]any); !ok {
+		t.Fatalf("usage.output_tokens_details missing: %v", usage)
+	}
+	if output, ok := resp["output"].([]any); !ok || len(output) == 0 {
+		t.Fatalf("response.completed should include completed output items, got %v", resp["output"])
 	}
 }
 
@@ -280,6 +319,12 @@ func TestStreamSerializer_FunctionCallStream(t *testing.T) {
 	if evType != "response.function_call_arguments.delta" {
 		t.Errorf("event type = %q, want %q", evType, "response.function_call_arguments.delta")
 	}
+	requireSequenceNumber(t, payload)
+	requireStringField(t, payload, "response_id")
+	requireStringField(t, payload, "item_id")
+	if payload["call_id"] != "call_abc" {
+		t.Fatalf("payload.call_id = %v, want call_abc", payload["call_id"])
+	}
 	if payload["delta"] != `{"city":"SF"` {
 		t.Errorf("delta = %v", payload["delta"])
 	}
@@ -299,6 +344,14 @@ func TestStreamSerializer_FunctionCallStream(t *testing.T) {
 	// 第一帧：function_call_arguments.done
 	if frames[0].eventType != "response.function_call_arguments.done" {
 		t.Errorf("frame[0] event type = %q, want %q", frames[0].eventType, "response.function_call_arguments.done")
+	}
+	requireSequenceNumber(t, frames[0].payload)
+	requireStringField(t, frames[0].payload, "item_id")
+	if frames[0].payload["call_id"] != "call_abc" {
+		t.Fatalf("frame[0] call_id = %v, want call_abc", frames[0].payload["call_id"])
+	}
+	if frames[0].payload["name"] != "get_weather" {
+		t.Fatalf("frame[0] name = %v, want get_weather", frames[0].payload["name"])
 	}
 	if frames[0].payload["arguments"] != `{"city":"SF"` {
 		t.Errorf("frame[0] arguments = %v", frames[0].payload["arguments"])

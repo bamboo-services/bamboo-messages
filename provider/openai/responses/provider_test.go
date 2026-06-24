@@ -639,6 +639,65 @@ func TestBuildParams_PreviousResponseID(t *testing.T) {
 	}
 }
 
+func TestBuildParams_InstructionsNativeField(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+	config := &provider.ChatConfig{
+		ProviderExtra: map[string]any{
+			"instructions":         "Use native instructions.",
+			"previous_response_id": "resp-123",
+		},
+	}
+
+	params := testBuildParams(p, config)
+
+	if !params.Instructions.Valid() {
+		t.Fatal("params.Instructions should be valid")
+	}
+	if params.Instructions.Value != "Use native instructions." {
+		t.Errorf("params.Instructions.Value = %q", params.Instructions.Value)
+	}
+	if !params.PreviousResponseID.Valid() || params.PreviousResponseID.Value != "resp-123" {
+		t.Fatalf("params.PreviousResponseID = %#v", params.PreviousResponseID)
+	}
+}
+
+func TestBuildParams_ParallelToolCallsNativeField(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+	params := testBuildParams(p, &provider.ChatConfig{ParallelToolCalls: true})
+
+	if !params.ParallelToolCalls.Valid() {
+		t.Fatal("params.ParallelToolCalls should be valid")
+	}
+	if !params.ParallelToolCalls.Value {
+		t.Fatal("params.ParallelToolCalls.Value should be true")
+	}
+}
+
+func TestBuildParams_ExtraFieldsMerged(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+	params := testBuildParams(p, &provider.ChatConfig{
+		Stop: []string{"STOP"},
+		ProviderExtra: map[string]any{
+			"modalities": []string{"text", "audio"},
+		},
+	})
+
+	data, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("序列化 params 失败: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("反序列化 params 失败: %v", err)
+	}
+	if _, ok := raw["stop"]; !ok {
+		t.Fatal("merged ExtraFields should include stop")
+	}
+	if _, ok := raw["modalities"]; !ok {
+		t.Fatal("merged ExtraFields should include modalities")
+	}
+}
+
 // TestBuildParams_Metadata 验证 Metadata 参数从 ChatConfig.Metadata 正确映射到 params.Metadata。
 //
 // Metadata 附加键值对元数据到响应中。

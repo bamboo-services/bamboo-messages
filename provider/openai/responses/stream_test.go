@@ -186,3 +186,38 @@ func TestContentResponseFailed_UsageCarried(t *testing.T) {
 			"usage should be carried even on failure path")
 	}
 }
+
+func TestContentOutputItemAdded_UsesCallIDForToolCallID(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	rawJSON := `{
+		"type": "response.output_item.added",
+		"output_index": 0,
+		"item": {
+			"type": "function_call",
+			"id": "fc_item_123",
+			"call_id": "call_real_456",
+			"name": "run_shell",
+			"arguments": ""
+		}
+	}`
+	event := unmarshalResponseEvent(t, rawJSON)
+
+	events := p.contentOutputItemAdded(event)
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(events))
+	}
+	if events[0].Delta.Type != provider.StreamDeltaTypeToolCall {
+		t.Fatalf("delta type = %q, want %q", events[0].Delta.Type, provider.StreamDeltaTypeToolCall)
+	}
+	data, ok := events[0].Delta.Data.(provider.ToolCallData)
+	if !ok {
+		t.Fatalf("delta data type = %T, want provider.ToolCallData", events[0].Delta.Data)
+	}
+	if data.ID != "call_real_456" {
+		t.Fatalf("ToolCallData.ID = %q, want call_id %q", data.ID, "call_real_456")
+	}
+	if data.Name != "run_shell" {
+		t.Fatalf("ToolCallData.Name = %q, want run_shell", data.Name)
+	}
+}

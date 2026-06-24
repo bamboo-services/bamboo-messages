@@ -9,17 +9,15 @@ import (
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 )
 
-// ── OpenAI Responses 流式事件 JSON 结构体 ──
-
-// responseObj response.created / response.completed 中的 response 对象。
 type responseObj struct {
-	ID     string          `json:"id"`
-	Object string          `json:"object"`
-	Status string          `json:"status,omitempty"`
-	Model  string          `json:"model,omitempty"`
-	Output []outputItem    `json:"output,omitempty"`
-	Usage  *responsesUsage `json:"usage,omitempty"`
-	Error  *responseError  `json:"error,omitempty"`
+	ID        string          `json:"id"`
+	Object    string          `json:"object"`
+	CreatedAt int64           `json:"created_at,omitempty"`
+	Status    string          `json:"status,omitempty"`
+	Model     string          `json:"model,omitempty"`
+	Output    []outputItem    `json:"output,omitempty"`
+	Usage     *responsesUsage `json:"usage,omitempty"`
+	Error     *responseError  `json:"error,omitempty"`
 }
 
 type responseError struct {
@@ -28,183 +26,156 @@ type responseError struct {
 	Code    string `json:"code,omitempty"`
 }
 
-// outputItemAdded response.output_item.added 事件。
 type outputItemAdded struct {
 	OutputIndex int        `json:"output_index"`
 	Item        outputItem `json:"item"`
 }
 
-// textDelta response.output_text.delta 事件。
 type textDeltaEvent struct {
 	OutputIndex  int    `json:"output_index"`
 	ContentIndex int    `json:"content_index"`
+	ItemID       string `json:"item_id"`
 	Delta        string `json:"delta"`
+	Logprobs     []any  `json:"logprobs"`
 }
 
-// textDone response.output_text.done 事件。
 type textDoneEvent struct {
 	OutputIndex  int    `json:"output_index"`
 	ContentIndex int    `json:"content_index"`
+	ItemID       string `json:"item_id"`
 	Text         string `json:"text"`
+	Logprobs     []any  `json:"logprobs"`
 }
 
-// reasoningDelta response.reasoning_text.delta 事件。
 type reasoningDeltaEvent struct {
 	OutputIndex  int    `json:"output_index"`
 	ContentIndex int    `json:"content_index"`
+	ItemID       string `json:"item_id"`
 	Delta        string `json:"delta"`
 }
 
-// reasoningSummaryDelta response.reasoning_summary_text.delta 事件。
 type reasoningSummaryDeltaEvent struct {
 	OutputIndex  int    `json:"output_index"`
 	SummaryIndex int    `json:"summary_index"`
+	ItemID       string `json:"item_id"`
 	Delta        string `json:"delta"`
 }
 
-// reasoningSummaryDone response.reasoning_summary_text.done 事件。
 type reasoningSummaryDoneEvent struct {
 	OutputIndex  int    `json:"output_index"`
 	SummaryIndex int    `json:"summary_index"`
+	ItemID       string `json:"item_id"`
 	Text         string `json:"text"`
 }
 
-// reasoningDone response.reasoning_text.done 事件。
 type reasoningDoneEvent struct {
 	OutputIndex  int    `json:"output_index"`
 	ContentIndex int    `json:"content_index"`
+	ItemID       string `json:"item_id"`
 	Text         string `json:"text"`
 }
 
-// functionCallArgsDelta response.function_call_arguments.delta 事件。
 type functionCallArgsDelta struct {
 	OutputIndex int    `json:"output_index"`
+	ItemID      string `json:"item_id"`
+	CallID      string `json:"call_id"`
 	Delta       string `json:"delta"`
 }
 
-// functionCallArgsDone response.function_call_arguments.done 事件。
 type functionCallArgsDone struct {
 	OutputIndex int    `json:"output_index"`
+	ItemID      string `json:"item_id"`
+	CallID      string `json:"call_id"`
+	Name        string `json:"name"`
 	Arguments   string `json:"arguments"`
 }
 
-// responsesStreamSerializer OpenAI Responses 流式序列化器（有状态）。
-//
-// Responses 的流式格式比 Chat Completions 复杂得多：
-//   - 文本内容合并到一个 message output 项目
-//   - ThinkingBlock / ToolUseBlock 各自独立为 output 项目
-//   - 每种内容块有对应的 output_item.added / *.delta / *.done 事件
-//   - 流以 response.created 开头、response.completed 结尾
 type responsesStreamSerializer struct {
-	// response 元数据
 	responseID string
 	model      string
 	createdAt  int64
 
-	// message output 项目状态（所有 TextBlock 合并到一个 message 项目）
+	sequenceNumber int64
+
+	outputIndexCounter int
+	completedOutput    []outputItem
+
 	messageItemID string
 	messageAdded  bool
-	messageIndex  int // message 项目的 output_index
+	messageIndex  int
 	messageText   strings.Builder
 
-	// reasoning output 项目状态
 	reasoningText   strings.Builder
 	reasoningItemID string
 	reasoningIndex  int
 
-	// function_call output 项目状态
-	currentCallID     string
-	currentCallName   string
-	currentCallArgs   strings.Builder
-	functionCallItem  string // 当前 function_call item ID
-	functionCallIdx   int    // 当前 function_call 的 output_index
-	functionCallCount int    // 已处理的 function_call 总数
+	currentCallID    string
+	currentCallName  string
+	currentCallArgs  strings.Builder
+	functionCallItem string
+	functionCallIdx  int
 
-	// output_index 全局计数器
-	outputIndexCounter int
+	blocks map[int]*responsesStreamBlock
 
-	// 是否已发送 response.created
-	created bool
-
-	// 是否已发送 response.completed（防止重复发送）
+	created       bool
 	completedSent bool
-
-	// 最后一次 content_block_start 的 block 类型，用于 content_block_stop 分发
-	lastBlockTypeStr string
 }
 
-// newStreamSerializer 创建一个新的 Responses 流式序列化器实例。
+type responsesStreamBlock struct {
+	kind        string
+	outputIndex int
+	itemID      string
+	callID      string
+	name        string
+	args        strings.Builder
+}
+
 func newStreamSerializer() *responsesStreamSerializer {
 	return &responsesStreamSerializer{
-		responseID: fmt.Sprintf("resp-%d", time.Now().UnixNano()),
+		responseID: fmt.Sprintf("resp_%d", time.Now().UnixNano()),
 		createdAt:  time.Now().Unix(),
+		blocks:     make(map[int]*responsesStreamBlock),
 	}
 }
 
-// Serialize 将单个 StreamEvent 序列化为 OpenAI Responses SSE 数据帧。
 func (s *responsesStreamSerializer) Serialize(event bamboo.StreamEvent) ([]byte, error) {
 	switch event.Type {
 	case bamboo.EventMessageStart:
 		return s.handleMessageStart(event)
-
 	case bamboo.EventContentBlockStart:
 		return s.handleContentBlockStart(event)
-
 	case bamboo.EventContentBlockDelta:
 		return s.handleContentBlockDelta(event)
-
 	case bamboo.EventContentBlockStop:
 		return s.handleContentBlockStop(event)
-
 	case bamboo.EventMessageDelta:
 		return s.handleMessageDelta(event)
-
-	case bamboo.EventMessageStop:
-		// 由 Flush 或 response.completed 覆盖
+	case bamboo.EventMessageStop, bamboo.EventPing:
 		return nil, nil
-
-	case bamboo.EventPing:
-		return nil, nil
-
 	case bamboo.EventError:
 		return s.handleError(event)
-
 	default:
 		return nil, nil
 	}
 }
 
-// Flush 在流结束时调用。
-//
-// Responses 流由 response.completed 事件终结（在 message_delta 时已发出），
-// Flush 不需要额外输出。
 func (s *responsesStreamSerializer) Flush() ([]byte, error) {
 	return nil, nil
 }
 
-// handleMessageStart 处理 message_start 事件 → response.created。
 func (s *responsesStreamSerializer) handleMessageStart(event bamboo.StreamEvent) ([]byte, error) {
 	s.created = true
-
-	// 从 message 中提取 ID（如果有）
-	if event.Message != nil {
-		// message_start 不携带 ID，使用默认值
-	}
-
 	resp := responseObj{
-		ID:     s.responseID,
-		Object: "response",
-		Status: "in_progress",
-		Model:  s.model,
-		Output: []outputItem{},
+		ID:        s.responseID,
+		Object:    "response",
+		CreatedAt: s.createdAt,
+		Status:    "in_progress",
+		Model:     s.model,
+		Output:    []outputItem{},
 	}
-
 	return s.marshalSSEWithResponse("response.created", resp)
 }
 
-// handleContentBlockStart 处理 content_block_start 事件。
-//
-// 根据 ContentBlock 类型分发到 message / reasoning / function_call 的 output_item.added。
 func (s *responsesStreamSerializer) handleContentBlockStart(event bamboo.StreamEvent) ([]byte, error) {
 	if event.ContentBlock == nil {
 		return nil, nil
@@ -212,73 +183,50 @@ func (s *responsesStreamSerializer) handleContentBlockStart(event bamboo.StreamE
 
 	switch event.ContentBlock.BlockType() {
 	case bamboo.ContentBlockText:
-		s.lastBlockTypeStr = "text"
-		if !s.messageAdded {
-			s.messageAdded = true
-			s.messageIndex = s.outputIndexCounter
-			s.outputIndexCounter++
-			s.messageItemID = fmt.Sprintf("msg-%d", time.Now().UnixNano())
-
-			item := outputItem{
-				Type:   "message",
-				ID:     s.messageItemID,
-				Role:   "assistant",
-				Status: "in_progress",
-			}
-			added := outputItemAdded{OutputIndex: s.messageIndex, Item: item}
-			return s.marshalSSE("response.output_item.added", added)
+		messageAlreadyAdded := s.messageAdded
+		block := s.ensureMessageBlock(event.Index)
+		if messageAlreadyAdded || block.outputIndex != s.messageIndex {
+			return nil, nil
 		}
-		return nil, nil
+		item := outputItem{
+			Type:   "message",
+			ID:     s.messageItemID,
+			Role:   "assistant",
+			Status: "in_progress",
+		}
+		return s.marshalSSE("response.output_item.added", outputItemAdded{OutputIndex: s.messageIndex, Item: item})
 
 	case bamboo.ContentBlockThinking:
-		s.lastBlockTypeStr = "thinking"
-		s.reasoningIndex = s.outputIndexCounter
-		s.outputIndexCounter++
-		s.reasoningItemID = fmt.Sprintf("rs-%d", time.Now().UnixNano())
-
+		block := s.ensureReasoningBlock(event.Index)
 		item := outputItem{
 			Type:    "reasoning",
-			ID:      s.reasoningItemID,
+			ID:      block.itemID,
+			Status:  "in_progress",
 			Summary: []outputReasoningSummary{},
 		}
-		added := outputItemAdded{OutputIndex: s.reasoningIndex, Item: item}
-		return s.marshalSSE("response.output_item.added", added)
+		return s.marshalSSE("response.output_item.added", outputItemAdded{OutputIndex: block.outputIndex, Item: item})
 
 	case bamboo.ContentBlockToolUse:
-		s.lastBlockTypeStr = "tool_use"
 		toolUse, ok := event.ContentBlock.(*bamboo.ToolUseBlock)
 		if !ok {
 			return nil, nil
 		}
-		s.currentCallID = toolUse.ID
-		s.currentCallName = toolUse.Name
-		s.currentCallArgs.Reset()
-		s.functionCallItem = fmt.Sprintf("fc-%d", time.Now().UnixNano())
-		s.functionCallIdx = s.outputIndexCounter
-		s.outputIndexCounter++
-		s.functionCallCount++
-
+		block := s.ensureToolBlock(event.Index, toolUse.ID, toolUse.Name)
 		item := outputItem{
 			Type:      "function_call",
-			ID:        s.functionCallItem,
-			CallID:    toolUse.ID,
-			Name:      toolUse.Name,
+			ID:        block.itemID,
+			CallID:    block.callID,
+			Name:      block.name,
 			Arguments: "",
+			Status:    "in_progress",
 		}
-		added := outputItemAdded{OutputIndex: s.functionCallIdx, Item: item}
-		return s.marshalSSE("response.output_item.added", added)
+		return s.marshalSSE("response.output_item.added", outputItemAdded{OutputIndex: block.outputIndex, Item: item})
+	default:
+		return nil, nil
 	}
-
-	return nil, nil
 }
 
-// handleContentBlockDelta 处理 content_block_delta 事件。
 func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamEvent) ([]byte, error) {
-	// 如果还没有发送 response.created，先补发
-	if !s.created {
-		s.created = true
-	}
-
 	delta, ok := event.Delta.(*bamboo.StreamDelta)
 	if !ok {
 		return nil, nil
@@ -286,182 +234,169 @@ func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamE
 
 	switch delta.Type {
 	case bamboo.DeltaTextDelta:
-		// 确保 message 项目已添加
-		if !s.messageAdded {
-			s.messageAdded = true
-			s.messageIndex = s.outputIndexCounter
-			s.outputIndexCounter++
-			s.messageItemID = fmt.Sprintf("msg-%d", time.Now().UnixNano())
-		}
+		block := s.ensureMessageBlock(event.Index)
 		s.messageText.WriteString(delta.Text)
-
 		ev := textDeltaEvent{
-			OutputIndex:  s.messageIndex,
+			OutputIndex:  block.outputIndex,
 			ContentIndex: 0,
+			ItemID:       block.itemID,
 			Delta:        delta.Text,
+			Logprobs:     []any{},
 		}
 		return s.marshalSSE("response.output_text.delta", ev)
 
 	case bamboo.DeltaThinkingDelta:
-		s.reasoningItemID = s.ensureReasoningItem()
+		block := s.ensureReasoningBlock(event.Index)
 		s.reasoningText.WriteString(delta.Thinking)
-
-		ev := reasoningDeltaEvent{
-			OutputIndex:  s.reasoningIndex,
+		raw := reasoningDeltaEvent{
+			OutputIndex:  block.outputIndex,
 			ContentIndex: 0,
+			ItemID:       block.itemID,
 			Delta:        delta.Thinking,
 		}
-		rawBytes, err := s.marshalSSE("response.reasoning_text.delta", ev)
+		rawBytes, err := s.marshalSSE("response.reasoning_text.delta", raw)
 		if err != nil {
 			return nil, err
 		}
-
-		summaryEv := reasoningSummaryDeltaEvent{
-			OutputIndex: s.reasoningIndex,
+		summary := reasoningSummaryDeltaEvent{
+			OutputIndex:  block.outputIndex,
 			SummaryIndex: 0,
+			ItemID:       block.itemID,
 			Delta:        delta.Thinking,
 		}
-		summaryBytes, err := s.marshalSSE("response.reasoning_summary_text.delta", summaryEv)
+		summaryBytes, err := s.marshalSSE("response.reasoning_summary_text.delta", summary)
 		if err != nil {
 			return nil, err
 		}
-
 		return append(rawBytes, summaryBytes...), nil
 
 	case bamboo.DeltaInputJSON:
-		// function_call 参数增量
+		block := s.ensureToolBlock(event.Index, s.currentCallID, s.currentCallName)
+		block.args.WriteString(delta.PartialJSON)
 		s.currentCallArgs.WriteString(delta.PartialJSON)
-
 		ev := functionCallArgsDelta{
-			OutputIndex: s.functionCallIdx,
+			OutputIndex: block.outputIndex,
+			ItemID:      block.itemID,
+			CallID:      block.callID,
 			Delta:       delta.PartialJSON,
 		}
 		return s.marshalSSE("response.function_call_arguments.delta", ev)
 
 	case bamboo.DeltaSignature:
-		// signature_delta 为 Anthropic Extended Thinking 特有的签名增量，
-		// OpenAI Responses 协议无对应字段，跨协议转换时丢弃。
+		return nil, nil
+	default:
 		return nil, nil
 	}
-
-	return nil, nil
 }
 
-// handleContentBlockStop 处理 content_block_stop 事件。
-//
-// 每种内容块先发送对应的 content-done 事件（output_text.done / reasoning_text.done / function_call_arguments.done），
-// 再追加 output_item.done 事件（携带完整 item，status 为 "completed"）。两个 SSE 帧拼接到同一个 []byte 返回。
 func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEvent) ([]byte, error) {
-	switch s.lastBlockTypeStr {
+	block := s.blocks[event.Index]
+	if block == nil {
+		return nil, nil
+	}
+	delete(s.blocks, event.Index)
+
+	switch block.kind {
 	case "text":
-		if s.messageAdded {
-			// 1. output_text.done
-			ev := textDoneEvent{
-				OutputIndex:  s.messageIndex,
-				ContentIndex: 0,
-				Text:         s.messageText.String(),
-			}
-			contentDoneBytes, err := s.marshalSSE("response.output_text.done", ev)
-			if err != nil {
-				return nil, err
-			}
-
-			// 2. output_item.done（message item，status=completed，携带完整 content）
-			item := outputItem{
-				Type:   "message",
-				ID:     s.messageItemID,
-				Role:   "assistant",
-				Status: "completed",
-				Content: []outputContent{
-					{Type: "output_text", Text: s.messageText.String()},
-				},
-			}
-			done := outputItemAdded{OutputIndex: s.messageIndex, Item: item}
-			outputItemDoneBytes, err := s.marshalSSE("response.output_item.done", done)
-			if err != nil {
-				return nil, err
-			}
-
-			return append(contentDoneBytes, outputItemDoneBytes...), nil
+		text := s.messageText.String()
+		done := textDoneEvent{
+			OutputIndex:  block.outputIndex,
+			ContentIndex: 0,
+			ItemID:       block.itemID,
+			Text:         text,
+			Logprobs:     []any{},
 		}
+		contentDoneBytes, err := s.marshalSSE("response.output_text.done", done)
+		if err != nil {
+			return nil, err
+		}
+		item := outputItem{
+			Type:   "message",
+			ID:     block.itemID,
+			Role:   "assistant",
+			Status: "completed",
+			Content: []outputContent{
+				{Type: "output_text", Text: text},
+			},
+		}
+		s.completedOutput = append(s.completedOutput, item)
+		itemDoneBytes, err := s.marshalSSE("response.output_item.done", outputItemAdded{OutputIndex: block.outputIndex, Item: item})
+		if err != nil {
+			return nil, err
+		}
+		return append(contentDoneBytes, itemDoneBytes...), nil
 
 	case "thinking":
-		// 1. reasoning_text.done + reasoning_summary_text.done
-		reasoningFull := s.reasoningText.String()
-
-		rawDoneEv := reasoningDoneEvent{
-			OutputIndex:  s.reasoningIndex,
+		text := s.reasoningText.String()
+		rawDone := reasoningDoneEvent{
+			OutputIndex:  block.outputIndex,
 			ContentIndex: 0,
-			Text:         reasoningFull,
+			ItemID:       block.itemID,
+			Text:         text,
 		}
-		contentDoneBytes, err := s.marshalSSE("response.reasoning_text.done", rawDoneEv)
+		rawDoneBytes, err := s.marshalSSE("response.reasoning_text.done", rawDone)
 		if err != nil {
 			return nil, err
 		}
-
-		summaryDoneEv := reasoningSummaryDoneEvent{
-			OutputIndex:  s.reasoningIndex,
+		summaryDone := reasoningSummaryDoneEvent{
+			OutputIndex:  block.outputIndex,
 			SummaryIndex: 0,
-			Text:         reasoningFull,
+			ItemID:       block.itemID,
+			Text:         text,
 		}
-		summaryDoneBytes, err := s.marshalSSE("response.reasoning_summary_text.done", summaryDoneEv)
+		summaryDoneBytes, err := s.marshalSSE("response.reasoning_summary_text.done", summaryDone)
 		if err != nil {
 			return nil, err
 		}
-		contentDoneBytes = append(contentDoneBytes, summaryDoneBytes...)
-
-		// 2. output_item.done — reasoning item 使用 summary（明文）
-		reasoningText := s.reasoningText.String()
 		item := outputItem{
 			Type:    "reasoning",
-			ID:      s.reasoningItemID,
+			ID:      block.itemID,
 			Status:  "completed",
 			Content: []outputContent{},
 			Summary: []outputReasoningSummary{
-				{Type: "summary_text", Text: reasoningText},
+				{Type: "summary_text", Text: text},
 			},
 		}
-		done := outputItemAdded{OutputIndex: s.reasoningIndex, Item: item}
-		outputItemDoneBytes, err := s.marshalSSE("response.output_item.done", done)
+		s.completedOutput = append(s.completedOutput, item)
+		itemDoneBytes, err := s.marshalSSE("response.output_item.done", outputItemAdded{OutputIndex: block.outputIndex, Item: item})
 		if err != nil {
 			return nil, err
 		}
-
-		return append(contentDoneBytes, outputItemDoneBytes...), nil
+		out := append(rawDoneBytes, summaryDoneBytes...)
+		return append(out, itemDoneBytes...), nil
 
 	case "tool_use":
-		// 1. function_call_arguments.done
-		ev := functionCallArgsDone{
-			OutputIndex: s.functionCallIdx,
-			Arguments:   s.currentCallArgs.String(),
+		args := block.args.String()
+		done := functionCallArgsDone{
+			OutputIndex: block.outputIndex,
+			ItemID:      block.itemID,
+			CallID:      block.callID,
+			Name:        block.name,
+			Arguments:   args,
 		}
-		contentDoneBytes, err := s.marshalSSE("response.function_call_arguments.done", ev)
+		contentDoneBytes, err := s.marshalSSE("response.function_call_arguments.done", done)
 		if err != nil {
 			return nil, err
 		}
-
-		// 2. output_item.done（function_call item，status=completed）
 		item := outputItem{
 			Type:      "function_call",
-			ID:        s.functionCallItem,
-			CallID:    s.currentCallID,
-			Name:      s.currentCallName,
-			Arguments: s.currentCallArgs.String(),
+			ID:        block.itemID,
+			CallID:    block.callID,
+			Name:      block.name,
+			Arguments: args,
 			Status:    "completed",
 		}
-		done := outputItemAdded{OutputIndex: s.functionCallIdx, Item: item}
-		outputItemDoneBytes, err := s.marshalSSE("response.output_item.done", done)
+		s.completedOutput = append(s.completedOutput, item)
+		itemDoneBytes, err := s.marshalSSE("response.output_item.done", outputItemAdded{OutputIndex: block.outputIndex, Item: item})
 		if err != nil {
 			return nil, err
 		}
-
-		return append(contentDoneBytes, outputItemDoneBytes...), nil
+		return append(contentDoneBytes, itemDoneBytes...), nil
+	default:
+		return nil, nil
 	}
-
-	return nil, nil
 }
 
-// handleMessageDelta 处理 message_delta 事件 → response.completed。
 func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([]byte, error) {
 	if s.completedSent {
 		return nil, nil
@@ -469,43 +404,23 @@ func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 	s.completedSent = true
 
 	msgDelta, ok := event.Delta.(*bamboo.MessageDelta)
-	if !ok {
-		// 仍然发送 response.completed
-	}
-
 	status := "completed"
 	if ok && msgDelta.StopReason == bamboo.FinishReasonMaxTokens {
 		status = "incomplete"
 	}
 
-	usage := &responsesUsage{}
-	if event.Usage != nil {
-		usage = &responsesUsage{
-			InputTokens:  event.Usage.InputTokens,
-			OutputTokens: event.Usage.OutputTokens,
-			TotalTokens:  event.Usage.InputTokens + event.Usage.OutputTokens,
-		}
-		// Responses 无原生 cache_creation_input_tokens 字段，仅映射 CacheReadInputTokens 到 cached_tokens。
-		// CacheCreationInputTokens 在跨协议转换中会丢失，此为已知限制。
-		if event.Usage.CacheCreationInputTokens > 0 || event.Usage.CacheReadInputTokens > 0 {
-			usage.InputTokensDetails = &responsesInputTokensDet{
-				CachedTokens: event.Usage.CacheReadInputTokens,
-			}
-		}
-	}
-
 	resp := responseObj{
-		ID:     s.responseID,
-		Object: "response",
-		Status: status,
-		Model:  s.model,
-		Usage:  usage,
+		ID:        s.responseID,
+		Object:    "response",
+		CreatedAt: s.createdAt,
+		Status:    status,
+		Model:     s.model,
+		Output:    append([]outputItem(nil), s.completedOutput...),
+		Usage:     buildResponsesUsage(event.Usage),
 	}
-
 	return s.marshalSSEWithResponse("response.completed", resp)
 }
 
-// handleError 处理 error 事件 → response.failed。
 func (s *responsesStreamSerializer) handleError(event bamboo.StreamEvent) ([]byte, error) {
 	errMsg := "unknown error"
 	errType := "server_error"
@@ -513,53 +428,109 @@ func (s *responsesStreamSerializer) handleError(event bamboo.StreamEvent) ([]byt
 		errMsg = event.Error.Message
 		errType = event.Error.Type
 	}
-
 	resp := responseObj{
-		ID: s.responseID,
+		ID:        s.responseID,
+		Object:    "response",
+		CreatedAt: s.createdAt,
+		Status:    "failed",
 		Error: &responseError{
 			Message: errMsg,
 			Type:    errType,
 		},
 	}
-
 	return s.marshalSSEWithResponse("response.failed", resp)
 }
 
-// ── 内部辅助方法 ──
-
-// ensureReasoningItem 确保 reasoning output 项目已添加，返回 item ID。
-func (s *responsesStreamSerializer) ensureReasoningItem() string {
-	if s.reasoningItemID != "" {
-		return s.reasoningItemID
+func (s *responsesStreamSerializer) ensureMessageBlock(index int) *responsesStreamBlock {
+	if block := s.blocks[index]; block != nil {
+		return block
 	}
-	s.reasoningIndex = s.outputIndexCounter
-	s.outputIndexCounter++
-	s.reasoningItemID = fmt.Sprintf("rs-%d", time.Now().UnixNano())
-	return s.reasoningItemID
+	if !s.messageAdded {
+		s.messageAdded = true
+		s.messageIndex = s.outputIndexCounter
+		s.outputIndexCounter++
+		s.messageItemID = fmt.Sprintf("msg_%d", time.Now().UnixNano())
+	}
+	block := &responsesStreamBlock{
+		kind:        "text",
+		outputIndex: s.messageIndex,
+		itemID:      s.messageItemID,
+	}
+	s.blocks[index] = block
+	return block
 }
 
-// marshalSSE 将事件序列化为 SSE 数据帧，并在 JSON payload 中注入 `"type": eventType` 字段。
-//
-// 输出格式：
-//
-//	event: {type}
-//	data: {"type":"{eventType}",...payloadFields}
-//
-// 参考 bamboo/relay/smooth_parser.go 的 buildResponsesDeltaFrame 模式：
-// codex 的 Rust SSE 解析器依赖 data JSON 的 "type" 字段路由事件。
+func (s *responsesStreamSerializer) ensureReasoningBlock(index int) *responsesStreamBlock {
+	if block := s.blocks[index]; block != nil {
+		return block
+	}
+	if s.reasoningItemID == "" {
+		s.reasoningIndex = s.outputIndexCounter
+		s.outputIndexCounter++
+		s.reasoningItemID = fmt.Sprintf("rs_%d", time.Now().UnixNano())
+	}
+	block := &responsesStreamBlock{
+		kind:        "thinking",
+		outputIndex: s.reasoningIndex,
+		itemID:      s.reasoningItemID,
+	}
+	s.blocks[index] = block
+	return block
+}
+
+func (s *responsesStreamSerializer) ensureToolBlock(index int, callID, name string) *responsesStreamBlock {
+	if block := s.blocks[index]; block != nil {
+		return block
+	}
+	if callID == "" {
+		callID = fmt.Sprintf("call_%d", time.Now().UnixNano())
+	}
+	itemID := fmt.Sprintf("fc_%d", time.Now().UnixNano())
+	block := &responsesStreamBlock{
+		kind:        "tool_use",
+		outputIndex: s.outputIndexCounter,
+		itemID:      itemID,
+		callID:      callID,
+		name:        name,
+	}
+	s.outputIndexCounter++
+	s.blocks[index] = block
+
+	s.currentCallID = callID
+	s.currentCallName = name
+	s.functionCallItem = itemID
+	s.functionCallIdx = block.outputIndex
+	s.currentCallArgs.Reset()
+	return block
+}
+
+func buildResponsesUsage(usage *bamboo.Usage) *responsesUsage {
+	if usage == nil {
+		return &responsesUsage{
+			InputTokensDetails:  &responsesInputTokensDet{},
+			OutputTokensDetails: &responsesOutputTokensDet{},
+		}
+	}
+	return &responsesUsage{
+		InputTokens:         usage.InputTokens,
+		OutputTokens:        usage.OutputTokens,
+		TotalTokens:         usage.InputTokens + usage.OutputTokens,
+		InputTokensDetails:  &responsesInputTokensDet{CachedTokens: usage.CacheReadInputTokens},
+		OutputTokensDetails: &responsesOutputTokensDet{},
+	}
+}
+
 func (s *responsesStreamSerializer) marshalSSE(eventType string, payload any) ([]byte, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal %s event: %w", eventType, err)
 	}
 
-	// 将 payload 反序列化为 map 以注入 type 字段（保持原字段完整）
 	merged := make(map[string]any, 8)
 	if err := json.Unmarshal(raw, &merged); err != nil {
-		// 非 object payload（理论上不会发生），回退为直接包装
 		return []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, raw)), nil
 	}
-	merged["type"] = eventType
+	s.injectCommonFields(eventType, merged)
 
 	data, err := json.Marshal(merged)
 	if err != nil {
@@ -568,12 +539,6 @@ func (s *responsesStreamSerializer) marshalSSE(eventType string, payload any) ([
 	return []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, data)), nil
 }
 
-// marshalSSEWithResponse 将生命周期事件序列化为带 response 嵌套包装的 SSE 数据帧。
-//
-// 输出格式（codex serde_json::from_value::<ResponseCompleted> 期望的嵌套结构）：
-//
-//	event: {eventType}
-//	data: {"type":"{eventType}","response":{...responseObj}}
 func (s *responsesStreamSerializer) marshalSSEWithResponse(eventType string, resp responseObj) ([]byte, error) {
 	respRaw, err := json.Marshal(resp)
 	if err != nil {
@@ -586,13 +551,20 @@ func (s *responsesStreamSerializer) marshalSSEWithResponse(eventType string, res
 	}
 
 	payload := map[string]any{
-		"type":     eventType,
 		"response": respMap,
 	}
+	s.injectCommonFields(eventType, payload)
 
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal %s event payload: %w", eventType, err)
 	}
 	return []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, data)), nil
+}
+
+func (s *responsesStreamSerializer) injectCommonFields(eventType string, payload map[string]any) {
+	s.sequenceNumber++
+	payload["type"] = eventType
+	payload["sequence_number"] = s.sequenceNumber
+	payload["response_id"] = s.responseID
 }
