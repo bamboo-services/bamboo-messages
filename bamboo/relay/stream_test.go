@@ -289,7 +289,7 @@ func TestRelayStream_UnsupportedFormat(t *testing.T) {
 	}
 }
 
-// TestRelayStream_EmptyStream 空流事件序列（只有 done）应正常关闭 channel。
+// TestRelayStream_EmptyStream 空流事件序列（只有 Done，无 Start/内容）应返回错误。
 func TestRelayStream_EmptyStream(t *testing.T) {
 	mp := &mockProvider{
 		streamEvents: []provider.StreamEvent{
@@ -299,21 +299,11 @@ func TestRelayStream_EmptyStream(t *testing.T) {
 	body := []byte(`{"model":"gpt-4","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
 
 	ch, err := RelayStream(context.Background(), mp, body, codec.FormatOpenAI, codec.FormatAnthropic)
-	if err != nil {
-		t.Fatalf("RelayStream() error: %v", err)
+	if err == nil {
+		t.Fatal("expected error for empty stream (Done without Start), got nil")
 	}
-
-	// 应至少收到 flush 数据（[DONE] 或终止标记）
-	count := 0
-	for data := range ch {
-		count++
-		_ = data
-	}
-
-	// Flush 数据应存在
-	if count == 0 {
-		// Anthropic Flush 可能返回 nil，这是可以接受的
-		t.Log("no data frames in empty stream (flush may return nil)")
+	if ch != nil {
+		t.Error("expected nil channel for empty stream error")
 	}
 }
 

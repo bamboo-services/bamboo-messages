@@ -90,11 +90,14 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 	if firstEvent.Type == provider.StreamTypeError && firstEvent.Err != nil {
 		return nil, fmt.Errorf("bamboo: provider chat failed: %w", firstEvent.Err)
 	}
+	if firstEvent.Type == provider.StreamTypeDone {
+		return nil, fmt.Errorf("bamboo: provider stream closed with no content")
+	}
 
 	// 创建 bamboo 输出 channel 并启动转换 goroutine
-	// buffer=64 容纳完整工具调用序列（start+block_start+deltas+stop+done），
+	// buffer=256 容纳完整工具调用序列及长文本积压（约 500-1250 token），
 	// 防止消费端因 HTTP write 阻塞导致 out channel 满后终止事件被丢弃。
-	out := make(chan StreamEvent, 64)
+	out := make(chan StreamEvent, 256)
 	converter := NewStreamConverter()
 
 	go func() {

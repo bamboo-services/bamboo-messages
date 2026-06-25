@@ -98,6 +98,11 @@ func (p *Provider) contentBlockDelta(event anthropic.BetaRawMessageStreamEventUn
 			Type:  provider.StreamTypeDelta,
 			Delta: provider.NewToolCallDeltaData(delta.Delta.PartialJSON),
 		}}
+	case "signature_delta":
+		return []provider.StreamEvent{{
+			Type:  provider.StreamTypeDelta,
+			Delta: provider.NewSignatureDelta(delta.Delta.Signature),
+		}}
 	default:
 		return nil
 	}

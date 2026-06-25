@@ -592,6 +592,9 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		})
 		return events
 	case provider.StreamDeltaTypeSignature:
+		if !sc.thinkingBlockStarted {
+			return nil
+		}
 		sigData, ok := delta.Data.(provider.SignatureData)
 		if !ok {
 			return nil

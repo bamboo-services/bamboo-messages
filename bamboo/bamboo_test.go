@@ -337,3 +337,25 @@ func TestChat_MultipleErrorsOnlyOneStop(t *testing.T) {
 		}
 	}
 }
+
+// TestChat_EmptyStreamReturnsError 验证 provider 返回 0 chunk（只有 Done）时 Chat 返回错误。
+//
+// 场景：provider channel 立即关闭，第一个也是唯一一个事件是 Done。
+// 预期：Chat 返回 (nil, error)，而非给消费者一个空 channel 导致静默失败。
+func TestChat_EmptyStreamReturnsError(t *testing.T) {
+	p := &mockProviderWithEvents{
+		events: []provider.StreamEvent{
+			{Type: provider.StreamTypeDone},
+		},
+	}
+	c := NewClient(p)
+	ctx := context.Background()
+
+	ch, err := c.Chat(ctx, []BambooMessage{NewUserMessage("hi")}, "", nil)
+	if err == nil {
+		t.Fatal("expected error for empty stream (Done as first event), got nil")
+	}
+	if ch != nil {
+		t.Errorf("expected nil channel for empty stream, got non-nil")
+	}
+}

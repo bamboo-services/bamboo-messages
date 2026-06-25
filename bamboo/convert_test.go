@@ -1653,3 +1653,59 @@ func TestStreamConverter_FinishReasonPriority(t *testing.T) {
 		t.Fatalf("StopReason = %q, want %q (tool_use must win over stop)", stopReason, FinishReasonToolUse)
 	}
 }
+
+// TestStreamConverter_SignatureDeltaWithoutThinkingBlock 验证无 thinking block 时的 SignatureDelta 被忽略。
+//
+// 防御性：若 Provider 在未开启 thinking block 的情况下发出 SignatureDelta，
+// 不应将签名附加到错误的 block index（0 通常是 text block）。
+func TestStreamConverter_SignatureDeltaWithoutThinkingBlock(t *testing.T) {
+	sc := NewStreamConverter()
+
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+
+	events := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewSignatureDelta("some_signature"),
+	})
+
+	if len(events) != 0 {
+		t.Errorf("expected 0 events for signature_delta without thinking block, got %d — should be silently ignored", len(events))
+	}
+}
+
+// TestStreamConverter_SignatureDeltaWithThinkingBlock 验证 thinking block 活跃时的 SignatureDelta 正确输出。
+func TestStreamConverter_SignatureDeltaWithThinkingBlock(t *testing.T) {
+	sc := NewStreamConverter()
+
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+	sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStartDelta("thinking"),
+	})
+
+	events := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewSignatureDelta("valid_sig"),
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event for signature_delta with active thinking block, got %d", len(events))
+	}
+
+	if events[0].Type != EventContentBlockDelta {
+		t.Errorf("event type = %q, want %q", events[0].Type, EventContentBlockDelta)
+	}
+
+	delta, ok := events[0].Delta.(*StreamDelta)
+	if !ok {
+		t.Fatalf("delta is not *StreamDelta")
+	}
+
+	if delta.Type != DeltaSignature {
+		t.Errorf("delta type = %q, want %q", delta.Type, DeltaSignature)
+	}
+
+	if delta.Signature != "valid_sig" {
+		t.Errorf("signature = %q, want %q", delta.Signature, "valid_sig")
+	}
+}

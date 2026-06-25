@@ -85,6 +85,27 @@ func (p *Provider) handlePart(part *genai.Part, textBlockStarted *bool, thinking
 			Type:  provider.StreamTypeDelta,
 			Delta: provider.NewThinkingDelta(part.Text),
 		})
+		if len(part.ThoughtSignature) > 0 {
+			events = append(events, provider.StreamEvent{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewSignatureDelta(string(part.ThoughtSignature)),
+			})
+		}
+		return events
+	}
+
+	if len(part.ThoughtSignature) > 0 {
+		if !*thinkingBlockStarted {
+			events = append(events, provider.StreamEvent{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewBlockStartDelta("thinking"),
+			})
+			*thinkingBlockStarted = true
+		}
+		events = append(events, provider.StreamEvent{
+			Type:  provider.StreamTypeDelta,
+			Delta: provider.NewSignatureDelta(string(part.ThoughtSignature)),
+		})
 		return events
 	}
 
