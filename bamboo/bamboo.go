@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/bamboo-services/bamboo-messages/internal/xerr"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -91,7 +92,9 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 	}
 
 	// 创建 bamboo 输出 channel 并启动转换 goroutine
-	out := make(chan StreamEvent)
+	// buffer=8 保证 ctx 取消/错误终止时终止事件（EventError+EventMessageDelta+EventMessageStop）
+	// 能写入 buffer 不被 select ctx.Done 抢占丢弃。消费者读取后自然 close。
+	out := make(chan StreamEvent, 8)
 	converter := NewStreamConverter()
 
 	go func() {
@@ -109,9 +112,16 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 		for event := range providerCh {
 			select {
 			case <-ctx.Done():
-				out <- StreamEvent{
-					Type:  EventError,
-					Error: NewBambooError(ErrorTypeProvider, ctx.Err().Error()),
+				// ctx 取消：通过 converter 触发 handleError → 自动补发 handleStop 终止序列。
+				// 终止事件必须无条件写入 buffer channel（不 select ctx.Done），
+				// 否则 Go select 在两 case 都 ready 时随机选择，可能永远丢弃终止信号。
+				cancelErr := xerr.NewError(context.Background(), nil,
+					fmt.Sprintf("bamboo: chat cancelled: %s", ctx.Err()), false)
+				for _, be := range converter.Convert(provider.StreamEvent{
+					Type: provider.StreamTypeError,
+					Err:  cancelErr,
+				}) {
+					out <- be
 				}
 				return
 			default:
@@ -125,6 +135,12 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 					return
 				}
 			}
+		}
+
+		// provider channel 正常关闭（未收到 Done），补发终止信号。
+		// Convert 内部有幂等防御（stopHandled），重复调用安全。
+		for _, be := range converter.Convert(provider.StreamEvent{Type: provider.StreamTypeDone}) {
+			out <- be
 		}
 	}()
 

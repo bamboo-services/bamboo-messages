@@ -1,0 +1,339 @@
+package bamboo
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/bamboo-services/bamboo-messages/internal/xerr"
+	"github.com/bamboo-services/bamboo-messages/provider"
+)
+
+// ──────────────────────────────────────────────────────────────────────
+// 终止序列回归测试 — 验证 bamboo.go goroutine 修复的三种终止路径
+// ──────────────────────────────────────────────────────────────────────
+
+// mockProviderWithEvents 可配置事件序列的 Provider 模拟实现。
+//
+// 用于测试各种流式终止场景：channel 提前关闭、ctx 取消、provider 错误等。
+// events 为预设事件序列，delay 为事件间延迟（用于 ctx 取消测试）。
+type mockProviderWithEvents struct {
+	events []provider.StreamEvent
+	delay  time.Duration
+}
+
+func (m *mockProviderWithEvents) Chat(_ context.Context, _ []provider.Message, _ *provider.ChatConfig) <-chan provider.StreamEvent {
+	return m.sendEvents()
+}
+
+func (m *mockProviderWithEvents) ChatWithSystem(_ context.Context, _ string, _ []provider.Message, _ *provider.ChatConfig) <-chan provider.StreamEvent {
+	return m.sendEvents()
+}
+
+func (m *mockProviderWithEvents) sendEvents() <-chan provider.StreamEvent {
+	ch := make(chan provider.StreamEvent, 64)
+	go func() {
+		defer close(ch)
+		for _, e := range m.events {
+			ch <- e
+			if m.delay > 0 {
+				time.Sleep(m.delay)
+			}
+		}
+	}()
+	return ch
+}
+
+func (m *mockProviderWithEvents) Complete(_ context.Context, _ []provider.Message, _ *provider.ChatConfig) (*provider.CompletionResult, error) {
+	return &provider.CompletionResult{
+		Content:      "mock",
+		FinishReason: provider.FinishReasonStop,
+		Usage:        provider.UsageData{InputTokens: 1, OutputTokens: 1},
+	}, nil
+}
+
+func (m *mockProviderWithEvents) CompleteWithSystem(_ context.Context, _ string, _ []provider.Message, _ *provider.ChatConfig) (*provider.CompletionResult, error) {
+	return m.Complete(nil, nil, nil)
+}
+
+func (m *mockProviderWithEvents) GetProviderType() provider.ProviderType {
+	return provider.ProviderAnthropic
+}
+
+func (m *mockProviderWithEvents) GetAvailableModels() []string {
+	return []string{"mock-model"}
+}
+
+// TestChat_ChannelCloseTriggersTermination 验证 provider channel 提前关闭时的终止行为。
+//
+// 场景：provider 发送 [Start, Delta(text)] 后直接 close channel（不发 Done）。
+// 预期：bamboo.go 循环结束后通过 converter.Convert(StreamTypeDone) 兜底，
+// 触发 handleStop → EventMessageStop + EventMessageDelta。
+func TestChat_ChannelCloseTriggersTermination(t *testing.T) {
+	p := &mockProviderWithEvents{
+		events: []provider.StreamEvent{
+			{Type: provider.StreamTypeStart},
+			{Type: provider.StreamTypeDelta, Delta: provider.NewTextDelta("hello")},
+			// channel 将在此处被 close，无 Done 事件
+		},
+	}
+	c := NewClient(p)
+	ctx := context.Background()
+
+	ch, err := c.Chat(ctx, []BambooMessage{NewUserMessage("hi")}, "", nil)
+	if err != nil {
+		t.Fatalf("Chat 返回错误: %v", err)
+	}
+
+	var events []StreamEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+
+	// 验证包含 EventMessageStop — 证明 handleStop 被兜底触发
+	var hasStop bool
+	for _, e := range events {
+		if e.Type == EventMessageStop {
+			hasStop = true
+			break
+		}
+	}
+	if !hasStop {
+		t.Error("期望包含 EventMessageStop（handleStop 兜底），实际未收到")
+		t.Logf("收到事件序列:")
+		for i, e := range events {
+			t.Logf("  [%d] type=%s", i, e.Type)
+		}
+	}
+
+	// 验证包含 EventMessageDelta — 证明 StopReason 被传递
+	var hasDelta bool
+	for _, e := range events {
+		if e.Type == EventMessageDelta {
+			hasDelta = true
+			break
+		}
+	}
+	if !hasDelta {
+		t.Error("期望包含 EventMessageDelta（携带 StopReason），实际未收到")
+	}
+}
+
+// TestChat_CtxCancelTriggersTermination 验证 ctx 取消时的终止行为。
+//
+// 场景：provider 慢速发送事件（delay 50ms），接收 2 个事件后 cancel ctx。
+// 预期：bamboo.go 的 ctx 取消路径通过 converter.Convert(StreamTypeError) →
+// handleError 自动补发 handleStop，输出 EventError + EventMessageStop。
+func TestChat_CtxCancelTriggersTermination(t *testing.T) {
+	// 构造足够多的事件，确保 cancel 时仍在流式传输中
+	events := []provider.StreamEvent{
+		{Type: provider.StreamTypeStart},
+		{Type: provider.StreamTypeDelta, Delta: provider.NewTextDelta("a")},
+		{Type: provider.StreamTypeDelta, Delta: provider.NewTextDelta("b")},
+		{Type: provider.StreamTypeDelta, Delta: provider.NewTextDelta("c")},
+		{Type: provider.StreamTypeDelta, Delta: provider.NewTextDelta("d")},
+		{Type: provider.StreamTypeDelta, Delta: provider.NewTextDelta("e")},
+		{Type: provider.StreamTypeStop},
+		{Type: provider.StreamTypeDone},
+	}
+	p := &mockProviderWithEvents{
+		events: events,
+		delay:  50 * time.Millisecond,
+	}
+	c := NewClient(p)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := c.Chat(ctx, []BambooMessage{NewUserMessage("hi")}, "", nil)
+	if err != nil {
+		t.Fatalf("Chat 返回错误: %v", err)
+	}
+
+	var collected []StreamEvent
+	received := 0
+	for e := range ch {
+		collected = append(collected, e)
+		received++
+		if received == 2 {
+			cancel() // 接收 2 个事件后取消
+		}
+	}
+
+	// 验证事件序列包含终止信号（EventMessageStop 或 EventError）
+	var hasStop, hasError bool
+	for _, e := range collected {
+		switch e.Type {
+		case EventMessageStop:
+			hasStop = true
+		case EventError:
+			hasError = true
+		}
+	}
+
+	if !hasStop && !hasError {
+		t.Error("期望包含 EventMessageStop 或 EventError（ctx 取消终止），实际未收到")
+		t.Logf("收到 %d 个事件:", len(collected))
+		for i, e := range collected {
+			t.Logf("  [%d] type=%s", i, e.Type)
+		}
+	}
+}
+
+// TestChat_ProviderErrorTriggersTermination 验证 provider 错误事件的终止行为。
+//
+// 场景：provider 发送 [Start, Error] 后 close channel。
+// 预期：handleError 检测到 started && !stopHandled，自动补发 handleStop →
+// EventError + EventMessageStop。
+func TestChat_ProviderErrorTriggersTermination(t *testing.T) {
+	providerErr := xerr.NewError(context.Background(), nil, "upstream 500 error", false)
+	p := &mockProviderWithEvents{
+		events: []provider.StreamEvent{
+			{Type: provider.StreamTypeStart},
+			{Type: provider.StreamTypeError, Err: providerErr},
+			// channel 将在此处被 close
+		},
+	}
+	c := NewClient(p)
+	ctx := context.Background()
+
+	ch, err := c.Chat(ctx, []BambooMessage{NewUserMessage("hi")}, "", nil)
+	if err != nil {
+		t.Fatalf("Chat 返回错误: %v", err)
+	}
+
+	var events []StreamEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+
+	// 验证包含 EventError
+	var hasError bool
+	for _, e := range events {
+		if e.Type == EventError {
+			hasError = true
+			break
+		}
+	}
+	if !hasError {
+		t.Error("期望包含 EventError，实际未收到")
+		t.Logf("收到事件序列:")
+		for i, e := range events {
+			t.Logf("  [%d] type=%s", i, e.Type)
+		}
+	}
+
+	// 验证包含 EventMessageStop — handleError 的兜底补发
+	var hasStop bool
+	for _, e := range events {
+		if e.Type == EventMessageStop {
+			hasStop = true
+			break
+		}
+	}
+	if !hasStop {
+		t.Error("期望包含 EventMessageStop（handleError 兜底补发），实际未收到")
+		t.Logf("收到事件序列:")
+		for i, e := range events {
+			t.Logf("  [%d] type=%s", i, e.Type)
+		}
+	}
+}
+
+// TestChat_NormalStreamTermination 验证正常流式传输的终止序列。
+//
+// 场景：provider 发送完整的 [Start, Delta, Stop, Done] 序列。
+// 预期：StreamTypeDone 触发 handleStop，输出 EventMessageStop。
+// 同时验证 StreamTypeDone 的幂等安全性（stopHandled 防御）。
+func TestChat_NormalStreamTermination(t *testing.T) {
+	p := &mockProviderWithEvents{
+		events: []provider.StreamEvent{
+			{Type: provider.StreamTypeStart},
+			{Type: provider.StreamTypeDelta, Delta: provider.NewTextDelta("hello")},
+			{Type: provider.StreamTypeStop, FinishReason: provider.FinishReasonStop},
+			{Type: provider.StreamTypeDone},
+		},
+	}
+	c := NewClient(p)
+	ctx := context.Background()
+
+	ch, err := c.Chat(ctx, []BambooMessage{NewUserMessage("hi")}, "", nil)
+	if err != nil {
+		t.Fatalf("Chat 返回错误: %v", err)
+	}
+
+	var events []StreamEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+
+	// 验证以 EventMessageStop 结尾
+	if len(events) == 0 {
+		t.Fatal("期望至少收到一个事件")
+	}
+	last := events[len(events)-1]
+	if last.Type != EventMessageStop {
+		t.Errorf("最后事件类型 = %q, 期望 EventMessageStop", last.Type)
+	}
+
+	// 验证包含 EventMessageDelta
+	var hasDelta bool
+	for _, e := range events {
+		if e.Type == EventMessageDelta {
+			hasDelta = true
+			// 验证 StopReason 被正确传递
+			if md, ok := e.Delta.(*MessageDelta); ok {
+			if md.StopReason != FinishReasonEndTurn {
+				t.Errorf("StopReason = %q, 期望 %q", md.StopReason, FinishReasonEndTurn)
+				}
+			}
+			break
+		}
+	}
+	if !hasDelta {
+		t.Error("期望包含 EventMessageDelta，实际未收到")
+	}
+}
+
+// TestChat_MultipleErrorsOnlyOneStop 验证多个错误事件只产生一次终止序列。
+//
+// 场景：provider 发送 [Start, Error, Error] 后 close。
+// 预期：handleError 第一次调用时补发 handleStop（stopHandled=true），
+// 第二次 handleError 不再补发。最终只收到一次 EventMessageStop。
+func TestChat_MultipleErrorsOnlyOneStop(t *testing.T) {
+	err1 := xerr.NewError(context.Background(), nil, "error 1", false)
+	err2 := xerr.NewError(context.Background(), nil, "error 2", false)
+	p := &mockProviderWithEvents{
+		events: []provider.StreamEvent{
+			{Type: provider.StreamTypeStart},
+			{Type: provider.StreamTypeError, Err: err1},
+			{Type: provider.StreamTypeError, Err: err2},
+		},
+	}
+	c := NewClient(p)
+	ctx := context.Background()
+
+	ch, err := c.Chat(ctx, []BambooMessage{NewUserMessage("hi")}, "", nil)
+	if err != nil {
+		t.Fatalf("Chat 返回错误: %v", err)
+	}
+
+	var events []StreamEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+
+	// 统计 EventMessageStop 出现次数 — 应恰好为 1
+	stopCount := 0
+	for _, e := range events {
+		if e.Type == EventMessageStop {
+			stopCount++
+		}
+	}
+	if stopCount != 1 {
+		t.Errorf("EventMessageStop 出现 %d 次, 期望恰好 1 次", stopCount)
+		t.Logf("收到事件序列:")
+		for i, e := range events {
+			t.Logf("  [%d] type=%s", i, e.Type)
+		}
+	}
+}
