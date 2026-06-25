@@ -8,7 +8,7 @@ OpenAI Chat Completions 协议适配器，将 OpenAI Chat Completions API 转换
 
 ```text
 provider/openai/completions/
-├── provider.go              # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithLegacyCompat/WithDebug) + legacyCompat 标志
+├── provider.go              # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithLegacyCompat/WithDebug/WithInterceptor) + legacyCompat 标志 + 拦截器 Transport 注入
 ├── params.go                # buildParams — 共享参数构建（含 Legacy 分支 + Prediction JSON 回退）
 ├── chat.go                  # 流式对话实现
 ├── complete.go              # 非流式对话实现 — 含 reasoning_content 提取
@@ -21,6 +21,7 @@ provider/openai/completions/
 ├── provider_test.go         # 集成测试
 ├── legacy_compat_test.go    # Legacy 兼容模式单元测试
 ├── message_test.go          # 空 tool_calls 序列化测试
+├── integration_cross_protocol_test.go # 跨协议集成测试
 └── params_audit_test.go     # Prediction 类型断言 + ResponseFormat 审计测试
 ```
 
@@ -29,6 +30,7 @@ provider/openai/completions/
 | 任务 | 位置 | 说明 |
 |------|------|------|
 | 创建 Provider 实例 | `provider.go` | `NewCompletionsProvider(apiKey)` 或 `NewCompletionsProviderWithOptions(opts...)` |
+| 注册请求拦截器 | `provider.go` | `WithInterceptor(fn)` — 在 HTTP Transport 层改写已序列化的请求 body |
 | 修改参数构建逻辑 | `params.go` | `buildParams` — Chat/Complete 共享入口，含 Legacy 分支 |
 | 修改流式请求流程 | `chat.go` | 调用 `buildParams` 后发起流式请求 |
 | 修改非流式请求流程 | `complete.go` | 调用 `buildParams` 后发起同步请求 |
@@ -45,6 +47,7 @@ provider/openai/completions/
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
 | `CompletionsProvider` | 结构体 | provider.go | 嵌入 `BaseProvider[openai.Client]` + `legacyCompat bool` |
+| `WithInterceptor` | 函数 | provider.go | 注册请求拦截器（转发到 `provider.WithInterceptor`） |
 | `buildParams` | 方法 | params.go | Chat/Complete 共享参数构建（含 Prediction JSON 回退） |
 | `buildAssistantMessage` | 方法 | message.go | provider.Message → OpenAI Assistant 消息（空 tool_calls 防御） |
 | `handleChoice` | 方法 | stream.go | 处理单个 choice 的 delta + FinishReason |
@@ -65,6 +68,7 @@ provider/openai/completions/
 - **参数透传** — FrequencyPenalty / PresencePenalty / Seed / Prediction 通过 `OpenaiCompletionsOption` 设置，合并到 ProviderExtra 后透传；ToolChoice / ResponseFormat 通过 `ChatConfig` 类型化字段传递
 - **ReasoningEffort 映射** — `ThinkingConfig.Effort` → `shared.ReasoningEffort`（Legacy 模式跳过）
 - **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
+- **拦截器 Transport 注入** — 构造函数中调用 `provider.NewInterceptorHTTPClient(nil, cfg.interceptors)`，非 nil 时通过 `option.WithHTTPClient(httpCli)` 注入 SDK；无拦截器时返回 nil，保留 SDK 默认 client
 
 ## 反模式
 

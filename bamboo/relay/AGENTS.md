@@ -8,16 +8,17 @@
 
 ```text
 bamboo/relay/
-├── config.go              # Config + Option + WithUsageCallback/WithErrorCallback/WithDebug + applyOptions
-├── relay.go               # Relay() 非流式互转 + RelayStream() 流式互转
+├── config.go              # Config + Option + WithUsageCallback/WithErrorCallback/WithDebug/WithRateSampleCallback + applyOptions
+├── relay.go               # Relay() 非流式互转（含 SerializeError） + RelayStream() 流式互转（含速率采样集成）
 ├── debug.go               # shouldDebug + debugRelayInput/debugRelayParsed + FormatRelayInput/FormatRelayParsed + 长文本截断
 ├── smooth.go              # SmoothLevel/SmoothParams/SmoothConfig + WithSmoothBuffer/WithSmoothBufferCustom Option
-├── smooth_pacer.go        # SmoothPacer 流式平滑缓冲器（三模式状态机：NORMAL/DRAIN/FLUSH）
+├── smooth_pacer.go        # SmoothPacer 流式平滑缓冲器（三模式状态机：NORMAL/DRAIN/FLUSH）+ SetRateSampleCallback + Close
 ├── smooth_parser.go       # TokenSplitter token 切分器 + FrameParser SSE 帧解析器（支持 4 种协议格式）
 ├── relay_test.go          # 非流式互转单元测试
 ├── stream_test.go         # 流式互转单元测试
 ├── cross_format_test.go   # 跨格式组合测试（N-to-N 矩阵）
-└── smooth_test.go         # 平滑缓冲器单元测试（TokenSplitter/FrameParser/SmoothPacer/集成测试）
+├── smooth_test.go         # 平滑缓冲器单元测试（TokenSplitter/FrameParser/SmoothPacer/集成测试）
+└── usage_fallback_test.go # Usage 回退路径单元测试
 ```
 
 ## 导航指南
@@ -26,7 +27,7 @@ bamboo/relay/
 |------|------|------|
 | 非流式协议互转 | `relay.go` | `Relay(ctx, p, body, inFormat, outFormat, opts...)` |
 | 流式协议互转 | `relay.go` | `RelayStream(ctx, p, body, inFormat, outFormat, opts...)` |
-| 配置回调 | `config.go` | `WithUsageCallback(fn)` / `WithErrorCallback(fn)` / `WithDebug(bool)` |
+| 配置回调 | `config.go` | `WithUsageCallback(fn)` / `WithErrorCallback(fn)` / `WithDebug(bool)` / `WithRateSampleCallback(fn)` |
 | 启用 debug 日志 | `config.go` | `WithDebug(true)` Option 或环境变量 `BAMBOO_DEBUG=1` |
 | 理解内部流程 | `relay.go` | Relay: ParseRequest -> Complete -> SerializeResponse；RelayStream: ParseRequest -> Chat -> Serialize -> channel |
 | 查看 debug 输出格式 | `debug.go` | `debugRelayInput` (原始 body) + `debugRelayParsed` (解析后的 RelayRequest) |
@@ -52,6 +53,8 @@ bamboo/relay/
 | `SmoothPacer.Push` | 方法 | smooth_pacer.go | 非阻塞推送 SSE 帧到 pacer（input channel 128 缓冲） |
 | `SmoothPacer.SignalEnd` | 方法 | smooth_pacer.go | 通知 pacer 上游已结束，切换到 DRAIN 模式 |
 | `SmoothPacer.Wait` | 方法 | smooth_pacer.go | 等待 pacer goroutine 完全退出 |
+| `SmoothPacer.Close` | 方法 | smooth_pacer.go | 语义清理别名（等同 `Wait()`） |
+| `SmoothPacer.SetRateSampleCallback` | 方法 | smooth_pacer.go | 设置速率采样回调（thinking vs output token/s） |
 | `TokenSplitter` | 结构体 | smooth_parser.go | token 切分器，维护跨帧 pendingTail |
 | `TokenSplitter.Split` | 方法 | smooth_parser.go | 切分文本为 token 列表，保留不完整的尾部片段 |
 | `TokenSplitter.Flush` | 方法 | smooth_parser.go | 返回 pendingTail 残余并清空 |
@@ -63,6 +66,8 @@ bamboo/relay/
 | `effectiveInterval` | 函数 | smooth_pacer.go | 积压感知间隔缩减（queueLen 10->100 线性映射到 factor 1.0->0.0） |
 | `effectiveTokensPerFrame` | 函数 | smooth_pacer.go | interval 到 floor 后 token 扩容（每 20 帧额外积压 -> multiplier +1，上限 8） |
 | `effectiveDrainInterval` | 函数 | smooth_pacer.go | DRAIN 模式输出间隔（两级：高于 DrainTier2Ratio -> minIntervalFloor，低于 -> 0） |
+| `Config.OnRateSample` | 字段 | config.go | 速率采样回调 `func(elapsedSec, tokensPerSec float64, kind provider.RateSampleKind)` |
+| `WithRateSampleCallback` | Option | config.go | 设置速率采样回调（仅 SmoothBuffer 启用时生效） |
 
 ## 约定
 
@@ -85,6 +90,9 @@ bamboo/relay/
 - **积压感知间隔缩减** — queueLen 10->100 线性映射到 factor 1.0->0.0，effective 从 baseInterval 线性缩减到 minIntervalFloor(2ms)；queueLen <= 10 时无积压感知
 - **token 扩容机制** — 仅当 intervalAtFloor=true 且 queueLen > 20 时扩容；每 20 帧额外积压 -> multiplier +1，上限 8
 - **Barrier 帧语义** — 遇到 barrier 时，先排空前面所有积压的数据帧，然后输出 barrier 本身（保证时序：barrier 前的数据必须先到达）
+- **速率采样回调** — `Config.OnRateSample` 在 SmoothPacer 每次输出 tick 时触发，区分 thinking 阶段（`RateSampleKindThinking`）和 output 阶段（`RateSampleKindOutput`）；仅 SmoothBuffer 启用时生效
+- **Relay 失败返回协议格式错误** — `Relay` 在 provider 失败时调用 `outCodec.SerializeError(err)` 返回协议格式化的错误 body，而非 nil body
+- **Usage 触发守卫** — `RelayStream` 中 `usageTriggered` 标志防止 Usage 回调重复触发
 
 ## 反模式
 
@@ -112,6 +120,8 @@ bamboo/relay/
 11. FrameParser 解析失败 -> 检查 SSE 帧格式是否符合协议规范（Anthropic/Responses 有 event 行，OpenAI/Gemini 只有 data 行）；解析失败时回退为 frameControl 透传
 12. Barrier 时序错乱 -> 检查 `outputBatch()` 中 barrier 处理逻辑：遇到 barrier 时应先排空前面所有积压的数据帧，再输出 barrier 本身
 13. 平滑缓冲内容不完整 -> 检查 `FlushRemaining()` 是否在流结束时被调用，确保 pendingTail 残余帧被输出
+14. 速率采样回调不触发 -> 检查 `WithRateSampleCallback` 是否设置，且 `WithSmoothBuffer` 是否启用（速率采样仅在 SmoothBuffer 激活时生效）
+15. Relay 返回错误格式不对 -> 检查 `outCodec.SerializeError` 是否正确格式化了 provider 错误
 
 ## 引用
 

@@ -8,11 +8,12 @@ Google Gemini 协议适配器，将 Google Gemini API（`google.golang.org/genai
 
 ```text
 provider/gemini/
-├── provider.go      # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithDebug) + 类型别名
+├── provider.go      # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithDebug/WithInterceptor) + 类型别名 + 拦截器 HTTPClient 注入
 ├── params.go        # buildContentConfig — 共享参数构建（Chat/Complete 统一入口）+ mapThinkingConfig/mapToolChoice + MaxTokens 溢出保护 + UserID→Labels
 ├── chat.go          # 流式对话实现 (Chat/ChatWithSystem) — GenerateContentStream
 ├── complete.go      # 非流式对话实现 (Complete/CompleteWithSystem) — 含 thinking parts 提取
 ├── stream.go        # 流式响应 → StreamEvent 转换 + handleStreamEvent + FinishReason 携带
+├── stream_test.go   # 流式事件单元测试
 ├── message.go       # 消息格式双向转换 (buildMessages) — ToolName/ToolCallID 分离映射
 ├── models.go        # 模型常量 (gemini-2.5 系列等)
 ├── option.go        # GeminiOption + WithAPIKey/WithBaseURL/WithHeader
@@ -26,6 +27,7 @@ provider/gemini/
 | 任务 | 位置 | 说明 |
 |------|------|------|
 | 创建 Provider 实例 | `provider.go` | `NewProvider(apiKey)` 或 `NewProviderWithOptions(opts...)` |
+| 注册请求拦截器 | `provider.go` | `WithInterceptor(fn)` — 在 HTTP Transport 层改写已序列化的请求 body |
 | 修改参数构建逻辑 | `params.go` | `buildContentConfig` — Chat/Complete 共享的 `GenerateContentConfig` 构建入口 |
 | 修改流式请求构建 | `chat.go` | `ChatWithSystem` → `GenerateContentStream` |
 | 修改非流式请求构建 | `complete.go` | `CompleteWithSystem` → `GenerateContent` |
@@ -42,6 +44,7 @@ provider/gemini/
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
 | `Provider` | 类型别名 | provider.go | `BaseProvider[genai.Client]` |
+| `WithInterceptor` | 函数 | provider.go | 注册请求拦截器（转发到 `provider.WithInterceptor`） |
 | `buildContentConfig` | 方法 | params.go | Chat/Complete 共享参数构建入口（含 MaxTokens 溢出保护） |
 | `mapThinkingConfig` | 函数 | params.go | Effort → genai.ThinkingConfig + ThinkingLevel 映射 |
 | `mapToolChoice` | 函数 | params.go | 字符串 → genai.FunctionCallingConfig 映射 |
@@ -71,6 +74,7 @@ provider/gemini/
 - **TopK / SafetySettings / CachedContent** — 通过 ProviderExtra 提取（Gemini 特有参数）
 - **ParallelToolCalls 不支持** — Gemini 不支持此参数，当设置时仅输出 debug 日志，不报错
 - **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
+- **拦截器 HTTPClient 注入** — 构造函数中调用 `provider.NewInterceptorHTTPClient(nil, cfg.interceptors)`，非 nil 时通过 `clientCfg.HTTPClient = httpCli` 注入 genai SDK；无拦截器时返回 nil，保留 SDK 默认 client
 
 ## 反模式
 

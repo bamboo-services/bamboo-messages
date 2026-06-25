@@ -8,7 +8,7 @@ Anthropic Messages 协议适配器，将 Anthropic Claude 系列模型的原生�
 
 ```text
 provider/anthropic/
-├── provider.go      # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithDebug) + 类型别名
+├── provider.go      # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithDebug/WithInterceptor) + 类型别名 + 拦截器 Transport 注入
 ├── params.go        # buildParams — 共享参数构建（Chat/Complete 统一入口）+ ResponseFormat/ParallelToolCalls 处理
 ├── chat.go          # 流式对话实现 (Chat/ChatWithSystem) + finishReason 跨事件追踪
 ├── complete.go      # 非流式对话实现 (Complete/CompleteWithSystem) — 含 thinking content block 处理
@@ -17,6 +17,9 @@ provider/anthropic/
 ├── models.go        # 模型常量 + GetAvailableModels
 ├── option.go        # AnthropicMessagesOption + WithTopK/WithBudgetTokens
 ├── tools.go         # 工具定义转换 (buildTools)
+├── interceptor_test.go  # 拦截器注入集成测试
+├── message_test.go  # 消息转换单元测试
+├── stream_test.go   # 流式事件单元测试
 ├── params_test.go   # buildParams 单元测试
 ├── params_audit_test.go  # ResponseFormat/ParallelToolCalls/SystemCacheControl 审计测试
 └── provider_test.go # 集成测试
@@ -27,6 +30,7 @@ provider/anthropic/
 | 任务 | 位置 | 说明 |
 |------|------|------|
 | 创建 Provider 实例 | `provider.go` | `NewProvider(apiKey)` 或 `NewProviderWithOptions(opts...)` |
+| 注册请求拦截器 | `provider.go` | `WithInterceptor(fn)` — 在 HTTP Transport 层改写已序列化的请求 body |
 | 修改参数构建逻辑 | `params.go` | `buildParams` — Chat/Complete 共享的参数构建入口 |
 | 修改流式请求流程 | `chat.go` | 调用 `buildParams` 构建 `anthropic.BetaMessageNewParams` 后发起流式请求 |
 | 修改非流式请求流程 | `complete.go` | 调用 `buildParams` 后发起同步请求 |
@@ -44,7 +48,8 @@ provider/anthropic/
 |------|------|------|------|
 | `Provider` | 类型别名 | provider.go | `BaseProvider[anthropic.Client]` |
 | `NewProvider` | 函数 | provider.go | 最简构造函数 |
-| `NewProviderWithOptions` | 函数 | provider.go | 完整构造函数 (WithAPIKey/WithBaseURL/WithHeader/WithDebug) |
+| `NewProviderWithOptions` | 函数 | provider.go | 完整构造函数 (WithAPIKey/WithBaseURL/WithHeader/WithDebug/WithInterceptor) |
+| `WithInterceptor` | 函数 | provider.go | 注册请求拦截器（转发到 `provider.WithInterceptor`） |
 | `buildParams` | 方法 | params.go | Chat/Complete 共享参数构建入口 |
 | `handleStreamEvent` | 方法 | stream.go | SSE 事件分发（含 `finishReason *provider.FinishReason` 参数） |
 | `contentBlockStart` | 方法 | stream.go | 内容块开始事件处理（text/thinking/tool_use） |
@@ -68,6 +73,7 @@ provider/anthropic/
 - **UserAgent 统一** — 构造函数中通过 `option.WithHeader("User-Agent", provider.GetUserAgent())` 设置
 - **Prompt Caching 原生支持** — Anthropic 是唯一使用显式缓存断点的 Provider；`Message.CacheControl` / `Tool.CacheControl` / `ChatConfig.SystemCacheControl` 通过 `provider.NewEphemeralCacheControl()` 创建标记，直接映射到 SDK 的 cache_control 字段
 - **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；启用后调用 `provider.SetDebug(true)`，请求前输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
+- **拦截器 Transport 注入** — 构造函数中调用 `provider.NewInterceptorHTTPClient(nil, cfg.interceptors)`，非 nil 时通过 `option.WithHTTPClient(httpCli)` 注入 SDK；无拦截器时返回 nil，保留 SDK 默认 client（零包装开销）
 
 ## 反模式
 

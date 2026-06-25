@@ -8,7 +8,7 @@ OpenAI Responses 协议适配器，将 OpenAI Responses API 转换为统一的 `
 
 ```text
 provider/openai/responses/
-├── provider.go       # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithDebug) + 类型别名
+├── provider.go       # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithDebug/WithInterceptor) + 类型别名 + 拦截器 Transport 注入
 ├── params.go         # buildParams — 共享参数构建（Chat/Complete 统一入口）
 ├── chat.go           # 流式对话实现
 ├── complete.go       # 非流式对话实现 — 含 reasoning items 提取 + incomplete 状态处理
@@ -27,6 +27,7 @@ provider/openai/responses/
 | 任务 | 位置 | 说明 |
 |------|------|------|
 | 创建 Provider 实例 | `provider.go` | `NewResponsesProvider(apiKey)` 或 `NewResponsesProviderWithOptions(opts...)` |
+| 注册请求拦截器 | `provider.go` | `WithInterceptor(fn)` — 在 HTTP Transport 层改写已序列化的请求 body |
 | 修改参数构建逻辑 | `params.go` | `buildParams` — Chat/Complete 共享的参数构建入口 |
 | 修改流式请求流程 | `chat.go` | 调用 `buildParams` 构建 `responses.ResponseNewParams` 后发起流式请求 |
 | 修改非流式请求流程 | `complete.go` | 调用 `buildParams` 后发起同步请求 |
@@ -43,6 +44,7 @@ provider/openai/responses/
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
 | `ResponsesProvider` | 类型别名 | provider.go | `BaseProvider[openai.Client]` |
+| `WithInterceptor` | 函数 | provider.go | 注册请求拦截器（转发到 `provider.WithInterceptor`） |
 | `buildParams` | 方法 | params.go | Chat/Complete 共享参数构建入口 |
 | `handleStreamEvent` | 方法 | stream.go | Responses 事件分发 |
 | `contentResponseCompleted` | 方法 | stream.go | 响应完成事件 — 提取 usage + 发送 StreamTypeStop(含 FinishReason) |
@@ -62,6 +64,7 @@ provider/openai/responses/
 - **ToolChoice 字符串模式** — 支持 `"auto"` / `"none"` / `"required"` 等值
 - **输入格式差异** — 使用 `ResponseInputItemUnionParam` 而非 `Message` 数组，支持更丰富的输入类型
 - **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
+- **拦截器 Transport 注入** — 构造函数中调用 `provider.NewInterceptorHTTPClient(nil, cfg.interceptors)`，非 nil 时通过 `option.WithHTTPClient(httpCli)` 注入 SDK；无拦截器时返回 nil，保留 SDK 默认 client
 
 ## 反模式
 

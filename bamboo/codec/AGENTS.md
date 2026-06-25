@@ -29,7 +29,8 @@ bamboo/codec/
 ├── responses/              # OpenAI Responses 协议编解码（结构同 anthropic/）
 │   ├── codec.go / request.go / response.go / stream.go / error.go
 │   ├── request_test.go / response_test.go
-│   └── request_audit_test.go  # N-to-N 转换安全性审计测试（含 input_image/input_file、metadata 测试）
+│   ├── request_audit_test.go  # N-to-N 转换安全性审计测试（含 input_image/input_file、metadata 测试）
+│   └── usage_regression_test.go # Usage 透传回归测试
 └── gemini/                 # Google Gemini 协议编解码（结构同 anthropic/）
     ├── codec.go / request.go / response.go / stream.go / error.go
     ├── request_test.go / response_test.go
@@ -75,6 +76,8 @@ bamboo/codec/
 - **Gemini ThinkingBlock 序列化** — `buildResponseParts` 将 `ThinkingBlock` 序列化为 `{text: "...", thought: true}`（此前被忽略）
 - **Gemini inlineData / fileData 映射** — `buildInlineDataPart` 将 `ContentSource` 映射为 Gemini part：base64→`{inlineData}`、url→`{fileData}`
 - **Gemini ToolResultBlock.ToolName** — 解析 `functionResponse` 时将 `Name` 写入 `ToolResultBlock.ToolName`
+- **Responses 流式序列器重大重写** — `responses/stream.go` 完全重写为 `responsesStreamSerializer` 状态机模型，追踪 output_item 生命周期（added/done）、自动注入 `sequence_number` 和 `response_id`、双轨 reasoning（raw `reasoning_text.*` + summary `reasoning_summary_text.*` 并行发射）、支持 `encrypted_content` 透传、完整覆盖 `response.created/output_item.added/content_part.added/output_text.delta/output_text.done/content_part.done/reasoning_text.delta/reasoning_summary_text.delta/reasoning_text.done/reasoning_summary_text.done/function_call_arguments.delta/function_call_arguments.done/output_item.done/response.completed/response.failed` 事件
+- **Responses SerializeResponse 签名变更** — `serializeResponse` 返回值从 `[]byte` 变为 `([]byte, error)`，与 Codec 接口保持一致；新增 `EncryptedContent` 和 `StopSequence` 字段支持
 
 ## 反模式
 
@@ -101,6 +104,9 @@ bamboo/codec/
 11. Gemini model 为空 → model 在 URL 路径中，codec 层无法获取，relay 层需从 URL 提取
 12. Responses metadata 丢失 → 全 string metadata 现存入 `config.Metadata`；混合类型存入 `ProviderExtra["metadata"]`；检查是否读取了正确的字段
 13. input_image / input_file 未解析 → Responses codec 现支持 `input_image`（→ ImageBlock）和 `input_file`（→ DocumentBlock），检查 content part 的 type 字段
+14. Responses 流式事件缺失 → 检查 `responsesStreamSerializer` 是否正确追踪 output_item 状态（added/done）；检查 `sequence_number` 是否自动递增
+15. Responses reasoning 双轨不完整 → 检查 raw `reasoning_text.*` 和 summary `reasoning_summary_text.*` 是否并行发射
+16. Responses encrypted_content 丢失 → 检查 `response.output_item.done` 事件是否携带 `encrypted_content` 字段
 
 ## 引用
 

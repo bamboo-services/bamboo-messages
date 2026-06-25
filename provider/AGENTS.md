@@ -2,7 +2,7 @@
 
 ## 概述
 
-`provider/` 是 Bamboo Messages 的核心抽象层（公共包），定义统一的 AI 对话接口、通用类型系统和流式事件模型。所有协议适配器（Anthropic、OpenAI Completions、OpenAI Responses、Gemini）都基于该层构建，确保上层业务零改动切换 AI 后端。
+`provider/` 是 Bamboo Messages 的核心抽象层（公共包），定义统一的 AI 对话接口、通用类型系统、流式事件模型、请求拦截器链和流式耗时统计。所有协议适配器（Anthropic、OpenAI Completions、OpenAI Responses、Gemini）都基于该层构建，确保上层业务零改动切换 AI 后端。
 
 > **架构变更**：此包已从 `internal/provider/` 提升为公共包 `provider/`，使得上层业务可以直接 import 具体适配器。
 
@@ -10,18 +10,28 @@
 
 ```text
 provider/
-├── provider.go      # Provider 接口 (6 方法) + BaseProvider[T] 泛型基座
-├── type.go          # Message / ChatConfig / ThinkingConfig / Tool / CompletionResult / CacheControl / ProviderExtra helpers
-├── stream.go        # StreamEvent / StreamDelta[E] + 7 种 Delta 构造函数 (含 NewUsageDeltaWithCache)
-├── debug.go         # Debug 全局开关 + DebugRequest / FormatDebugRequest + 敏感字段脱敏 + 长文本截断
-├── version.go       # SDKName + GetUserAgent() + GetSDKVersion() (sync.Once 并发安全)
-├── stream_test.go   # 流模型单元测试
-├── type_test.go     # 类型单元测试
-├── anthropic/       # Anthropic Messages 协议适配器
+├── provider.go              # Provider 接口 (6 方法) + BaseProvider[T] 泛型基座
+├── type.go                  # Message / ChatConfig / ThinkingConfig / Tool / CompletionResult / CacheControl / ProviderExtra helpers
+├── stream.go                # StreamEvent / StreamDelta[E] + 7 种 Delta 构造函数 (含 NewUsageDeltaWithCache) + IndexedToolCallDeltaData
+├── debug.go                 # Debug 全局开关 + DebugRequest / FormatDebugRequest + 敏感字段脱敏 + 长文本截断
+├── version.go               # SDKName + GetUserAgent() + GetSDKVersion() (sync.Once 并发安全)
+├── interceptor.go           # RequestInterceptor 函数类型 + ApplyInterceptors 链式执行
+├── interceptor_transport.go # NewInterceptorHTTPClient — HTTP Transport 层拦截器注入
+├── options.go               # 公共 Options 结构体 + Option 函数类型 + WithInterceptor + ApplyOptions
+├── timing.go                # TimingCollector / TimingStats / TokenRates / RateSample — 流式耗时统计与 Token 速率测量
+├── stream_test.go           # 流模型单元测试
+├── type_test.go             # 类型单元测试
+├── options_test.go          # 公共 Options 单元测试
+├── interceptor_test.go      # 拦截器链单元测试
+├── interceptor_transport_test.go # 拦截器 Transport 集成测试
+├── timing_test.go           # 耗时收集器单元测试
+├── debug_test.go            # Debug 机制单元测试
+├── testutil_test.go         # 测试辅助工具
+├── anthropic/               # Anthropic Messages 协议适配器
 ├── openai/
-│   ├── completions/ # OpenAI Chat Completions 协议适配器
-│   └── responses/   # OpenAI Responses 协议适配器
-└── gemini/          # Google Gemini 协议适配器
+│   ├── completions/         # OpenAI Chat Completions 协议适配器
+│   └── responses/           # OpenAI Responses 协议适配器
+└── gemini/                  # Google Gemini 协议适配器
 ```
 
 ## 导航指南
@@ -30,9 +40,12 @@ provider/
 |------|------|------|
 | 理解核心接口 | `provider.go` | 6 个方法：Chat, ChatWithSystem, Complete, CompleteWithSystem, GetProviderType, GetAvailableModels |
 | 理解通用类型 | `type.go` | Message, ChatConfig, Tool, CompletionResult, ThinkingConfig, CacheControl, ProviderExtra |
-| 理解流式模型 | `stream.go` | StreamEvent channel + 6 种 DeltaData 类型 + 构造函数 |
+| 理解流式模型 | `stream.go` | StreamEvent channel + 6 种 DeltaData 类型 + 构造函数 + IndexedToolCallDeltaData |
 | 理解 Debug 机制 | `debug.go` | `DebugEnabled` 全局开关 + `SetDebug()` + `DebugRequest()` + 环境变量 `BAMBOO_DEBUG` |
 | 理解版本/UserAgent | `version.go` | `GetUserAgent()` 返回 `"BM-SDK/{version}"`，基于 `runtime/debug.ReadBuildInfo()` |
+| 理解请求拦截器 | `interceptor.go` + `interceptor_transport.go` | `RequestInterceptor` 函数类型 + `ApplyInterceptors` 链式执行 + `NewInterceptorHTTPClient` Transport 注入 |
+| 理解公共 Options | `options.go` | `Options` 结构体 + `WithInterceptor` + `ApplyOptions` — 各适配器 config 可匿名嵌入 |
+| 理解流式耗时统计 | `timing.go` | `TimingCollector` 零侵入 Observe 模式 + `TimingStats` + `TokenRates` + `RateSample` |
 | 添加新 Delta 类型 | `stream.go` | 新增 StreamDeltaType 常量 + DeltaData 类型 + 构造函数 |
 | 添加 ProviderExtra 键 | `type.go` | 添加常量 + 在适配器中使用 GetExtra* 提取 |
 | 添加缓存控制 | `type.go` | `CacheControl` / `NewEphemeralCacheControl()` + Message/Tool/SystemCacheControl 字段 |
@@ -40,34 +53,89 @@ provider/
 | 理解 Thinking 内容 | `type.go` | `Message.ThinkingContent` / `Message.ThinkingSignature` / `CompletionResult.Thinking` |
 | 理解 FinishReason 流式传递 | `stream.go` | `StreamEvent.FinishReason` — 仅在 `StreamTypeStop` 事件中填充 |
 | 理解 ToolName 字段 | `type.go` | `Message.ToolName` — Gemini FunctionResponse 需要函数名与 ToolCallID 分离 |
+| 理解带索引工具调用 | `stream.go` | `IndexedToolCallDeltaData` + `NewToolCallDeltaWithIndex` / `NewToolCallDeltaDataWithIndex` — OpenAI 并行工具调用 |
+| 理解 ReasoningID | `type.go` | `Message.ReasoningID` — OpenAI Responses reasoning item ID（如 `"rs_xxx"`） |
 
 ## 代码地图
+
+### 核心接口与类型
 
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
 | `BaseProvider[T]` | 泛型结构体 | provider.go:14 | 适配器基座，嵌入底层 SDK Client |
 | `Provider` | 接口 | provider.go:23 | 6 方法统一接口（GetProviderType 返回 `ProviderType` 类型） |
-| `Message` | 结构体 | type.go:97 | 统一消息模型 (Role + Content + ContentBlocks + ThinkingContent + ThinkingSignature + ToolCalls + ToolCallID + ToolName + IsError + CacheControl) |
-| `ChatConfig` | 结构体 | type.go:221 | 请求配置 (Model, Temperature, MaxTokens, Tools, Metadata, UserID, ToolChoice, ResponseFormat, ParallelToolCalls, ThinkingConfig, SystemCacheControl, PromptCacheKey, ProviderExtra) |
-| `CompletionResult` | 结构体 | type.go:80 | 非流式完整响应 (Content + Thinking + ToolCalls + FinishReason + Usage) |
-| `ThinkingConfig` | 结构体 | type.go:212 | 思考/推理配置 (Effort: none/low/medium/high) |
-| `CacheControl` | 结构体 | type.go:60 | 缓存控制标记 (Type + TTL)，用于 Anthropic prompt caching |
-| `CacheControlEphemeralTTL` | 类型 | type.go:52 | TTL 类型 (`CacheTTL5m` / `CacheTTL1h`) |
-| `NewEphemeralCacheControl` | 函数 | type.go:68 | 创建 ephemeral CacheControl 标记，默认 5m |
-| `ProviderExtra` | map[string]any | type.go (ChatConfig.ProviderExtra) | Provider 特有参数透传 |
-| `GetExtraFloat64/Int64/String/Bool/Any` | 函数 | type.go:246-310 | ProviderExtra 安全取值 helpers |
-| `ContentBlock` | 接口 | type.go:155 | 多媒体内容块接口 (BlockType() string) |
-| `ImageContentBlock` | 结构体 | type.go:162 | 图片内容块 (Source: ImageSource) |
-| `DocumentContentBlock` | 结构体 | type.go:183 | 文档内容块 (Source: DocumentSource) |
-| `StreamEvent` | 结构体 | stream.go:10 | 流事件 (Type + Delta + Err + FinishReason)，值类型，Err 为 `*xerr.Error`，FinishReason 仅在 StreamTypeStop 中填充 |
-| `StreamDelta[E]` | 泛型结构体 | stream.go:18 | 流增量 (Type + Data) |
-| `UsageData` | 结构体 | stream.go:83 | Token 用量（含 CacheCreationInputTokens / CacheReadInputTokens） |
-| `BlockStartData` | 结构体 | stream.go:94 | 内容块开始数据 |
-| `NewUsageDeltaWithCache` | 构造函数 | stream.go:177 | 带缓存统计的 Usage Delta 工厂函数 |
-| `DebugEnabled` | 变量 | debug.go:17 | Debug 全局开关，通过环境变量 `BAMBOO_DEBUG` 初始化 |
-| `SetDebug` | 函数 | debug.go:23 | 全局开启/关闭 Provider 层 debug 日志 |
-| `DebugRequest` | 函数 | debug.go:50 | 输出请求 debug 日志（providerType/endpoint/headers/body） |
-| `FormatDebugRequest` | 函数 | debug.go:67 | 返回格式化 debug 字符串（不受开关限制） |
+| `Message` | 结构体 | type.go | 统一消息模型 (Role + Content + ContentBlocks + ThinkingContent + ThinkingSignature + ReasoningID + ToolCalls + ToolCallID + ToolName + IsError + CacheControl) |
+| `ChatConfig` | 结构体 | type.go | 请求配置 (Model, Temperature, TopP, MaxTokens, Stop, Tools, Metadata, UserID, ToolChoice, ResponseFormat, ParallelToolCalls, ThinkingConfig, SystemCacheControl, PromptCacheKey, ProviderExtra) |
+| `CompletionResult` | 结构体 | type.go | 非流式完整响应 (Content + Thinking + ThinkingSignature + ResponseID + ToolCalls + FinishReason + Usage) |
+| `ThinkingConfig` | 结构体 | type.go | 思考/推理配置 (Effort: none/low/medium/high) |
+| `CacheControl` | 结构体 | type.go | 缓存控制标记 (Type + TTL)，用于 Anthropic prompt caching |
+| `CacheControlEphemeralTTL` | 类型 | type.go | TTL 类型 (`CacheTTL5m` / `CacheTTL1h`) |
+| `NewEphemeralCacheControl` | 函数 | type.go | 创建 ephemeral CacheControl 标记，默认 5m |
+| `ProviderExtra` | map[string]any | type.go (ChatConfig 字段) | Provider 特有参数透传 |
+| `GetExtraFloat64/Int64/String/Bool/Any` | 函数 | type.go | ProviderExtra 安全取值 helpers |
+| `ContentBlock` | 接口 | type.go | 多媒体内容块接口 (BlockType() string) |
+| `ImageContentBlock` | 结构体 | type.go | 图片内容块 (Source: ImageSource) |
+| `DocumentContentBlock` | 结构体 | type.go | 文档内容块 (Source: DocumentSource) |
+
+### 流式模型
+
+| 符号 | 类型 | 位置 | 作用 |
+|------|------|------|------|
+| `StreamEvent` | 结构体 | stream.go | 流事件 (Type + Delta + Err + FinishReason)，值类型，Err 为 `*xerr.Error`，FinishReason 仅在 StreamTypeStop 中填充 |
+| `StreamDelta[E]` | 泛型结构体 | stream.go | 流增量 (Type + Data) |
+| `UsageData` | 结构体 | stream.go | Token 用量（含 CacheCreationInputTokens / CacheReadInputTokens） |
+| `BlockStartData` | 结构体 | stream.go | 内容块开始数据 |
+| `IndexedToolCallDeltaData` | 结构体 | stream.go | 带 Provider 原生索引的工具调用参数增量 (PartialJSON + Index + HasIndex) — OpenAI 并行工具调用支持 |
+| `NewUsageDeltaWithCache` | 构造函数 | stream.go | 带缓存统计的 Usage Delta 工厂函数 |
+| `NewBlockStartDelta` / `NewBlockStartDeltaWithID` | 构造函数 | stream.go | BlockStart Delta 工厂函数 |
+| `NewToolCallDeltaWithIndex` | 构造函数 | stream.go | 带 Index 的工具调用开始事件 |
+| `NewToolCallDeltaDataWithIndex` | 构造函数 | stream.go | 带 Index 的工具调用参数增量事件 |
+| `NewTextDelta` 等 | 构造函数 | stream.go | 7 种 Delta 工厂函数 |
+
+### 请求拦截器
+
+| 符号 | 类型 | 位置 | 作用 |
+|------|------|------|------|
+| `RequestInterceptor` | 函数类型 | interceptor.go | `func(ctx, body []byte) ([]byte, error)` — 对已序列化的上游请求 body 进行任意修改 |
+| `ApplyInterceptors` | 函数 | interceptor.go | 按注册顺序依次应用拦截器链，任意一个返回 error 立即停止 |
+| `NewInterceptorHTTPClient` | 函数 | interceptor_transport.go | 构造注入拦截器的 `*http.Client`；无拦截器时返回 nil（零包装） |
+
+### 公共 Options 体系
+
+| 符号 | 类型 | 位置 | 作用 |
+|------|------|------|------|
+| `Options` | 结构体 | options.go | 公共运行时选项 (`Interceptors []RequestInterceptor`)，各 Provider 私有 config 可匿名嵌入 |
+| `Option` | 函数类型 | options.go | `func(*Options)` — 配置公共选项 |
+| `WithInterceptor` | 函数 | options.go | 注册一个请求拦截器，多次调用按调用顺序追加 |
+| `ApplyOptions` | 函数 | options.go | 将公共 Option 列表应用到默认 Options |
+
+### 流式耗时统计
+
+| 符号 | 类型 | 位置 | 作用 |
+|------|------|------|------|
+| `RateSampleKind` | 类型 | timing.go | 速率采样类型: `"thinking"` / `"output"` |
+| `RateSampleKindThinking` | 常量 | timing.go | 思考阶段速率采样 |
+| `RateSampleKindOutput` | 常量 | timing.go | 输出阶段速率采样 |
+| `TimingStats` | 结构体 | timing.go | 流式耗时统计 (TotalDuration, FirstByteDuration/TTFT, ThinkingDuration, ContentDuration, ToolDuration) |
+| `TokenRates` | 结构体 | timing.go | Token 生成速率 (.2f 精度): ThinkingTokensPerSec, OutputTokensPerSec |
+| `RateSample` | 结构体 | timing.go | 速率采样点 (ElapsedSec, TokensPerSec, Kind) |
+| `TimingCollector` | 结构体 | timing.go | 流式请求耗时收集器（零侵入 Observe 模式） |
+| `NewTimingCollector` | 函数 | timing.go | 创建耗时收集器实例 |
+| `(*TimingCollector).Observe` | 方法 | timing.go | 观察一个 StreamEvent，更新内部计时状态（驱动 4 阶段状态机） |
+| `(*TimingCollector).RecordRateSample` | 方法 | timing.go | 记录速率采样点（由 SmoothPacer 回调触发） |
+| `(*TimingCollector).Stats` | 方法 | timing.go | 返回 TimingStats（取消场景使用 lastEventTime 回退） |
+| `(*TimingCollector).Rates` | 方法 | timing.go | 返回 TokenRates（CJK 1 tok/char, Latin 4 chars/tok, Other 2 chars/tok） |
+| `(*TimingCollector).RateSeries` | 方法 | timing.go | 返回速率采样序列副本（仅 SmoothBuffer 启用时非 nil） |
+| `(*TimingCollector).Usage` | 方法 | timing.go | 返回最后收到的 UsageDelta 数据 |
+
+### Debug 与版本
+
+| 符号 | 类型 | 位置 | 作用 |
+|------|------|------|------|
+| `DebugEnabled` | 变量 | debug.go | Debug 全局开关，通过环境变量 `BAMBOO_DEBUG` 初始化 |
+| `SetDebug` | 函数 | debug.go | 全局开启/关闭 Provider 层 debug 日志 |
+| `DebugRequest` | 函数 | debug.go | 输出请求 debug 日志（providerType/endpoint/headers/body） |
+| `FormatDebugRequest` | 函数 | debug.go | 返回格式化 debug 字符串（不受开关限制） |
 | `GetUserAgent` | 函数 | version.go | 生成统一 User-Agent 字符串 |
 | `GetSDKVersion` | 函数 | version.go | 读取 SDK 版本号 |
 
@@ -76,19 +144,28 @@ provider/
 - **值类型传递** — `Message`, `StreamEvent` 为值类型，通过 channel 安全传递，传递后视为只读
 - **泛型基座** — `BaseProvider[T any]` 通过泛型参数嵌入不同 SDK Client，适配器通过类型别名使用（如 `type Provider = BaseProvider[anthropic.Client]`）
 - **Channel 模式** — 流式通过 `make(chan StreamEvent)` 返回，在 goroutine 中发送，发送完 close
-- **参数透传三层方案** — Layer 1: `ChatConfig` 类型化字段 (UserID/ToolChoice/ResponseFormat/ParallelToolCalls/SystemCacheControl/PromptCacheKey/Metadata)；Layer 2: Provider 包独立的 Options 体系 (AnthropicMessagesOption / OpenaiCompletionsOption / OpenaiResponsesOption)；Layer 3: `WithExtra()` 兜底
+- **参数透传三层方案** — Layer 1: `ChatConfig` 类型化字段 (UserID/ToolChoice/ResponseFormat/ParallelToolCalls/TopP/Stop/SystemCacheControl/PromptCacheKey/Metadata)；Layer 2: Provider 包独立的 Options 体系 (AnthropicMessagesOption / OpenaiCompletionsOption / OpenaiResponsesOption) + 公共 `provider.Options` (拦截器)；Layer 3: `WithExtra()` 兜底
 - **ProviderExtra 安全取值** — 适配器中使用 GetExtra* 类型安全 helper，不做裸类型断言
 - **统一 UserAgent** — 所有适配器通过 `provider.GetUserAgent()` 获取 `"BM-SDK/{version}"` 格式 UserAgent
 - **版本读取策略** — `GetSDKVersion()` 优先 `info.Main.Version`，回退到依赖列表查找，最终 `"dev"`
 - **sync.Once 并发安全** — `GetUserAgent()` 和 `GetSDKVersion()` 使用 sync.Once 保证只初始化一次
 - **ContentBlock 接口** — 多媒体内容块统一实现 `BlockType() string` 方法，`ContentBlocks` 字段优先于 `Content` 字符串字段
 - **Thinking 内容双向支持** — `Message.ThinkingContent` / `ThinkingSignature` 用于多轮对话中保留 thinking block（Anthropic extended thinking 验证签名）；`CompletionResult.Thinking` 用于非流式响应中的思考过程内容
+- **ReasoningID 独立追踪** — `Message.ReasoningID` 用于 OpenAI Responses API 的 reasoning item 标识（如 `"rs_xxx"`），与 `ThinkingSignature`（加密内容）分离
 - **ToolName/ToolCallID 分离** — `Message.ToolName` 存储函数名（Gemini FunctionResponse 需要），`Message.ToolCallID` 存储调用 ID；其他 Provider 通常只需 ToolCallID
 - **FinishReason 流式透传** — `StreamEvent.FinishReason` 仅在 `StreamTypeStop` 事件中由适配器填充，标识流结束的具体原因（stop/tool_calls/length/content_filter 等），上层可通过此字段判断流结束状态
 - **Debug 三入口** — 环境变量 `BAMBOO_DEBUG=1/true/on` / `provider.SetDebug(true)` / 适配器 `WithDebug()` Option；三者任一启用即生效，适配器在发起请求前调用 `DebugRequest()` 输出实际参数
 - **Debug 敏感字段脱敏** — `Authorization` / `X-API-Key` / `API-Key` / `X-Goog-API-Key` 等敏感 header 自动脱敏（仅保留前 4 和后 4 字符）
 - **Debug 长文本截断** — `content` / `text` / `system` / `thinking` / `reasoning_content` / `arguments` 等长文本字段超过 `MaxDebugBodyLen` (500) 时自动截断
 - **Prompt Caching 统一抽象** — `CacheControl` 统一结构体表达缓存断点：Anthropic 显式标记、OpenAI 自动缓存（`PromptCacheKey` 仅作路由粘性键）、Gemini 通过 `cached_content` ProviderExtra 引用外部资源
+- **拦截器链契约** — `RequestInterceptor` 接收已 marshal 完成的上游请求 body（`[]byte`），返回处理后的 body；nil 拦截器被防御性跳过；nil/空切片零开销原样返回
+- **拦截器 Transport 零包装** — `NewInterceptorHTTPClient` 无拦截器时返回 nil，Provider 保留 SDK 默认 client（避免无谓包装）
+- **拦截器 Content-Length 重算** — Transport 修改 body 后自动重算 `Content-Length`
+- **公共 Options 嵌入模式** — `provider.Options` 通过匿名嵌入为各 Provider 提供统一的拦截器注册能力；`Interceptors` 字段首字母大写保证嵌入子包后仍可访问
+- **TimingCollector 零侵入** — 用户代码主动创建 `TimingCollector` 并在事件循环中调用 `Observe(event)`，不修改 StreamEvent 结构；非并发安全（单 goroutine 使用）
+- **TimingCollector 阶段状态机** — 内部 `collectorPhase` (init → thinking → content → tool) 驱动耗时计算
+- **Token 估算规则标准化** — CJK 1:1, Latin 4:1, Other 2:1（与 `SmoothPacer.TokenSplitter` 的 CJK 切分规则互补）
+- **带索引工具调用** — `IndexedToolCallDeltaData` + `ToolCallData.HasIndex/Index` 支持 OpenAI 并行工具调用的原生索引
 
 ## 反模式
 
@@ -98,6 +175,7 @@ provider/
 - **禁止** 在 stream.go 中不关闭 channel — 必须在 goroutine 结束时 close
 - **禁止** 适配器之间互相引用 — 每个适配器独立，零耦合
 - **禁止** 将 `ThinkingContent` 与 `Content` 混淆 — 前者是 thinking block 的内容，后者是 text block 的内容
+- **禁止** 将 `ReasoningID` 与 `ThinkingSignature` 混用 — 前者是 OpenAI Responses reasoning item 标识，后者是加密内容
 
 ## 调试路径
 
@@ -110,6 +188,9 @@ provider/
 7. Prompt caching 不生效 → 检查 `CacheControl` 标记位置（system / messages / tools）和 TTL 值
 8. FinishReason 缺失 → 检查适配器是否在 `StreamTypeStop` 事件中正确填充 `StreamEvent.FinishReason`
 9. Thinking 内容丢失 → 检查适配器是否正确提取 thinking/reasoning content 并填充到 `CompletionResult.Thinking` 或 `Message.ThinkingContent`
+10. 拦截器不生效 → 检查 `NewInterceptorHTTPClient` 是否返回 nil（空拦截器列表），确认适配器构造函数正确注入
+11. 耗时统计不准 → 确认 `TimingCollector.Observe` 在单 goroutine 中调用，检查阶段状态机是否正确切换
+12. 并行工具调用索引丢失 → 检查适配器是否使用 `NewToolCallDeltaWithIndex` / `NewToolCallDeltaDataWithIndex` 而非无索引版本
 
 ## 引用
 
