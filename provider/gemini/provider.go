@@ -30,6 +30,10 @@ type config struct {
 	baseURL string
 	headers map[string]string
 	debug   bool
+	// interceptors 请求拦截器链，通过 WithInterceptor 注册。
+	// 构造 Provider 时若非空，会用 interceptorTransport 包装 HTTP client，
+	// 让所有上游请求都先经过拦截器链。
+	interceptors []provider.RequestInterceptor
 }
 
 // WithAPIKey 设置 API 密钥。
@@ -71,6 +75,20 @@ func WithDebug() Option {
 	return func(c *config) { c.debug = true }
 }
 
+// WithInterceptor 注册一个请求拦截器。
+//
+// 多次调用按调用顺序追加。拦截器在 Provider 发起上游 HTTP 请求前执行，
+// 可对已序列化的 JSON body 做任意修改（如参数覆盖、字段删除、签名注入）。
+// 拦截器返回 error 时立即中止请求并向上冒泡。
+func WithInterceptor(fn provider.RequestInterceptor) Option {
+	return func(c *config) {
+		if fn == nil {
+			return
+		}
+		c.interceptors = append(c.interceptors, fn)
+	}
+}
+
 // ============================================
 // 构造函数
 // ============================================
@@ -103,6 +121,10 @@ func NewProviderWithOptions(opts ...Option) *Provider {
 	}
 	for k, v := range cfg.headers {
 		clientCfg.HTTPOptions.Headers.Set(k, v)
+	}
+	// 若注册了拦截器，用 interceptorTransport 包装 HTTP client 并注入到 genai
+	if httpCli := provider.NewInterceptorHTTPClient(nil, cfg.interceptors); httpCli != nil {
+		clientCfg.HTTPClient = httpCli
 	}
 
 	client, err := genai.NewClient(context.Background(), clientCfg)
