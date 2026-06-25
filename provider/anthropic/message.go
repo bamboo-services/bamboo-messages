@@ -1,6 +1,8 @@
 package anthropic
 
 import (
+	"encoding/json"
+
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
@@ -102,7 +104,13 @@ func (p *Provider) buildMessages(messages []provider.Message) []anthropic.BetaMe
 			}
 
 			for _, tc := range msg.ToolCalls {
-				blocks = append(blocks, anthropic.NewBetaToolUseBlock(tc.ID, tc.Function.Arguments, tc.Function.Name))
+				var input any
+				if tc.Function.Arguments != "" {
+					input = json.RawMessage(tc.Function.Arguments)
+				} else {
+					input = map[string]any{}
+				}
+				blocks = append(blocks, anthropic.NewBetaToolUseBlock(tc.ID, input, tc.Function.Name))
 			}
 
 			if len(blocks) == 0 {
