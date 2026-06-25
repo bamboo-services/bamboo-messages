@@ -33,6 +33,7 @@ Thumbs.db
 
 # Develop
 develop/
+_debug/
 
 ### AI ###
 .omo/
