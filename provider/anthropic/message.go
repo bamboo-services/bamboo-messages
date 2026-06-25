@@ -91,29 +91,29 @@ func (p *Provider) buildMessages(messages []provider.Message) []anthropic.BetaMe
 				result = append(result, anthropic.NewBetaUserMessage(block))
 			}
 		case provider.RoleAssistant:
-			if len(msg.ToolCalls) > 0 {
-				blocks := make([]anthropic.BetaContentBlockParamUnion, 0, len(msg.ToolCalls)+1)
-				if msg.Content != "" {
-					blocks = append(blocks, anthropic.NewBetaTextBlock(msg.Content))
-				}
-				for _, tc := range msg.ToolCalls {
-					blocks = append(blocks, anthropic.NewBetaToolUseBlock(tc.ID, tc.Function.Arguments, tc.Function.Name))
-				}
-				applyMsgCacheControl(blocks, msg.CacheControl)
-				result = append(result, anthropic.BetaMessageParam{
-					Role:    anthropic.BetaMessageParamRoleAssistant,
-					Content: blocks,
-				})
-			} else {
-				block := anthropic.NewBetaTextBlock(msg.Content)
-				if msg.CacheControl != nil && block.OfText != nil {
-					block.OfText.CacheControl = toAnthropicCacheControl(msg.CacheControl)
-				}
-				result = append(result, anthropic.BetaMessageParam{
-					Role:    anthropic.BetaMessageParamRoleAssistant,
-					Content: []anthropic.BetaContentBlockParamUnion{block},
-				})
+			blocks := make([]anthropic.BetaContentBlockParamUnion, 0, len(msg.ToolCalls)+2)
+
+			if msg.ThinkingSignature != "" {
+				blocks = append(blocks, anthropic.NewBetaThinkingBlock(msg.ThinkingSignature, msg.ThinkingContent))
 			}
+
+			if msg.Content != "" {
+				blocks = append(blocks, anthropic.NewBetaTextBlock(msg.Content))
+			}
+
+			for _, tc := range msg.ToolCalls {
+				blocks = append(blocks, anthropic.NewBetaToolUseBlock(tc.ID, tc.Function.Arguments, tc.Function.Name))
+			}
+
+			if len(blocks) == 0 {
+				blocks = append(blocks, anthropic.NewBetaTextBlock(""))
+			}
+
+			applyMsgCacheControl(blocks, msg.CacheControl)
+			result = append(result, anthropic.BetaMessageParam{
+				Role:    anthropic.BetaMessageParamRoleAssistant,
+				Content: blocks,
+			})
 		case provider.RoleTool:
 			block := anthropic.NewBetaToolResultBlock(msg.ToolCallID, msg.Content, msg.IsError)
 			if msg.CacheControl != nil && block.OfToolResult != nil {

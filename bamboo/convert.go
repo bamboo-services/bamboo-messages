@@ -390,7 +390,32 @@ func (sc *StreamConverter) nextIndex() int {
 	return idx
 }
 
-func (sc *StreamConverter) stopTextOrThinkingBlock() []StreamEvent {
+// stopForNewBlock 在开始新内容块前关闭异类已活跃的块。
+//
+// 仅在类型切换时关闭对方类型（如开始 text 时关闭 thinking，反之亦然），
+// 允许同一类型的增量在已有 block 上继续追加。
+// startToolBlock 和 handleStop 仍通过 stopAllTextOrThinking 关闭全部。
+func (sc *StreamConverter) stopForNewBlock(newType ContentBlockType) []StreamEvent {
+	var events []StreamEvent
+	if newType == ContentBlockText && sc.thinkingBlockStarted {
+		sc.thinkingBlockStarted = false
+		events = append(events, StreamEvent{
+			Type:  EventContentBlockStop,
+			Index: sc.thinkingBlockIndex,
+		})
+	}
+	if newType == ContentBlockThinking && sc.textBlockStarted {
+		sc.textBlockStarted = false
+		events = append(events, StreamEvent{
+			Type:  EventContentBlockStop,
+			Index: sc.textBlockIndex,
+		})
+	}
+	return events
+}
+
+// stopAllTextOrThinking 关闭所有活跃的 text/thinking 块，用于 tool block 开始和流结束。
+func (sc *StreamConverter) stopAllTextOrThinking() []StreamEvent {
 	var events []StreamEvent
 	if sc.thinkingBlockStarted {
 		sc.thinkingBlockStarted = false
@@ -433,7 +458,7 @@ func (sc *StreamConverter) startThinkingBlock() StreamEvent {
 
 func (sc *StreamConverter) startToolBlock(data provider.ToolCallData) []StreamEvent {
 	var events []StreamEvent
-	events = append(events, sc.stopTextOrThinkingBlock()...)
+	events = append(events, sc.stopAllTextOrThinking()...)
 
 	if data.HasIndex {
 		if idx, ok := sc.toolBlockByProviderIndex[data.Index]; ok {
@@ -516,22 +541,28 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 
 		switch mapBlockType(data.BlockType) {
 		case ContentBlockText:
-			events = append(events, sc.stopTextOrThinkingBlock()...)
-			events = append(events, sc.startTextBlock())
+			if !sc.textBlockStarted {
+				events = append(events, sc.stopForNewBlock(ContentBlockText)...)
+				events = append(events, sc.startTextBlock())
+			}
 		case ContentBlockThinking:
-			events = append(events, sc.stopTextOrThinkingBlock()...)
-			events = append(events, sc.startThinkingBlock())
+			if !sc.thinkingBlockStarted {
+				events = append(events, sc.stopForNewBlock(ContentBlockThinking)...)
+				events = append(events, sc.startThinkingBlock())
+			}
 		case ContentBlockToolUse:
 			events = append(events, sc.startToolBlock(provider.ToolCallData{ID: data.ID, Name: data.Name})...)
 		default:
-			events = append(events, sc.stopTextOrThinkingBlock()...)
-			events = append(events, sc.startTextBlock())
+			if !sc.textBlockStarted {
+				events = append(events, sc.stopForNewBlock(ContentBlockText)...)
+				events = append(events, sc.startTextBlock())
+			}
 		}
 		return events
 	case provider.StreamDeltaTypeTextOutput:
 		var events []StreamEvent
 		if !sc.textBlockStarted {
-			events = append(events, sc.stopTextOrThinkingBlock()...)
+			events = append(events, sc.stopForNewBlock(ContentBlockText)...)
 			events = append(events, sc.startTextBlock())
 		}
 		textData, ok := delta.Data.(provider.TextData)
@@ -547,7 +578,7 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 	case provider.StreamDeltaTypeThinking:
 		var events []StreamEvent
 		if !sc.thinkingBlockStarted {
-			events = append(events, sc.stopTextOrThinkingBlock()...)
+			events = append(events, sc.stopForNewBlock(ContentBlockThinking)...)
 			events = append(events, sc.startThinkingBlock())
 		}
 		thinkingData, ok := delta.Data.(provider.ThinkingData)
@@ -591,10 +622,12 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 			CacheCreationInputTokens: data.CacheCreationInputTokens,
 			CacheReadInputTokens:     data.CacheReadInputTokens,
 		}
-		// 立即返回 usage 事件，确保流中断时 usage 不丢失
+		// 通过 Ping 事件携带 usage，确保流中断时 relay 层仍可提取 usage。
+		// 不使用 EventMessageDelta 以避免在 finish_reason 之前产生携带 usage 的终止语义 chunk，
+		// 导致部分客户端（如 Vercel AI SDK）误判流结束。
+		// 最终 usage 统一由 handleStop() 在 message_delta 中输出。
 		return []StreamEvent{{
-			Type:  EventMessageDelta,
-			Delta: &MessageDelta{},
+			Type:  EventPing,
 			Usage: &Usage{
 				InputTokens:              data.InputTokens,
 				OutputTokens:             data.OutputTokens,
@@ -620,7 +653,7 @@ func (sc *StreamConverter) handleStop() []StreamEvent {
 	}
 
 	var events []StreamEvent
-	events = append(events, sc.stopTextOrThinkingBlock()...)
+	events = append(events, sc.stopAllTextOrThinking()...)
 	for _, idx := range sc.openToolBlockIndexes {
 		events = append(events, StreamEvent{Type: EventContentBlockStop, Index: idx})
 	}

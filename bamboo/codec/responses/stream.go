@@ -90,6 +90,20 @@ type functionCallArgsDone struct {
 	Arguments   string `json:"arguments"`
 }
 
+type contentPartAddedEvent struct {
+	OutputIndex  int    `json:"output_index"`
+	ContentIndex int    `json:"content_index"`
+	ItemID       string `json:"item_id"`
+	Part         any    `json:"part"`
+}
+
+type contentPartDoneEvent struct {
+	OutputIndex  int    `json:"output_index"`
+	ContentIndex int    `json:"content_index"`
+	ItemID       string `json:"item_id"`
+	Part         any    `json:"part"`
+}
+
 type responsesStreamSerializer struct {
 	responseID string
 	model      string
@@ -194,7 +208,21 @@ func (s *responsesStreamSerializer) handleContentBlockStart(event bamboo.StreamE
 			Role:   "assistant",
 			Status: "in_progress",
 		}
-		return s.marshalSSE("response.output_item.added", outputItemAdded{OutputIndex: s.messageIndex, Item: item})
+		itemAddedBytes, err := s.marshalSSE("response.output_item.added", outputItemAdded{OutputIndex: s.messageIndex, Item: item})
+		if err != nil {
+			return nil, err
+		}
+		partAdded := contentPartAddedEvent{
+			OutputIndex:  s.messageIndex,
+			ContentIndex: 0,
+			ItemID:       s.messageItemID,
+			Part:         map[string]any{"type": "output_text", "text": ""},
+		}
+		partAddedBytes, err := s.marshalSSE("response.content_part.added", partAdded)
+		if err != nil {
+			return nil, err
+		}
+		return append(itemAddedBytes, partAddedBytes...), nil
 
 	case bamboo.ContentBlockThinking:
 		block := s.ensureReasoningBlock(event.Index)
@@ -204,7 +232,11 @@ func (s *responsesStreamSerializer) handleContentBlockStart(event bamboo.StreamE
 			Status:  "in_progress",
 			Summary: []outputReasoningSummary{},
 		}
-		return s.marshalSSE("response.output_item.added", outputItemAdded{OutputIndex: block.outputIndex, Item: item})
+		itemAddedBytes, err := s.marshalSSE("response.output_item.added", outputItemAdded{OutputIndex: block.outputIndex, Item: item})
+		if err != nil {
+			return nil, err
+		}
+		return itemAddedBytes, nil
 
 	case bamboo.ContentBlockToolUse:
 		toolUse, ok := event.ContentBlock.(*bamboo.ToolUseBlock)
@@ -292,7 +324,13 @@ func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamE
 func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEvent) ([]byte, error) {
 	block := s.blocks[event.Index]
 	if block == nil {
-		return nil, nil
+		if s.messageAdded {
+			block = s.ensureMessageBlock(event.Index)
+		} else if s.reasoningItemID != "" {
+			block = s.ensureReasoningBlock(event.Index)
+		} else {
+			return nil, nil
+		}
 	}
 	delete(s.blocks, event.Index)
 
@@ -306,7 +344,17 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 			Text:         text,
 			Logprobs:     []any{},
 		}
-		contentDoneBytes, err := s.marshalSSE("response.output_text.done", done)
+		textDoneBytes, err := s.marshalSSE("response.output_text.done", done)
+		if err != nil {
+			return nil, err
+		}
+		partDone := contentPartDoneEvent{
+			OutputIndex:  block.outputIndex,
+			ContentIndex: 0,
+			ItemID:       block.itemID,
+			Part:         map[string]any{"type": "output_text", "text": text},
+		}
+		partDoneBytes, err := s.marshalSSE("response.content_part.done", partDone)
 		if err != nil {
 			return nil, err
 		}
@@ -324,7 +372,8 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 		if err != nil {
 			return nil, err
 		}
-		return append(contentDoneBytes, itemDoneBytes...), nil
+		out := append(textDoneBytes, partDoneBytes...)
+		return append(out, itemDoneBytes...), nil
 
 	case "thinking":
 		text := s.reasoningText.String()

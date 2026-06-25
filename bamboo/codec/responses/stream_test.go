@@ -199,8 +199,8 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 		t.Fatalf("Serialize(content_block_stop) error = %v", err)
 	}
 	frames := parseAllResponsesSSE(t, data)
-	if len(frames) != 2 {
-		t.Fatalf("content_block_stop should produce 2 SSE frames, got %d", len(frames))
+	if len(frames) != 3 {
+		t.Fatalf("content_block_stop should produce 3 SSE frames, got %d", len(frames))
 	}
 	// 第一帧：output_text.done
 	if frames[0].eventType != "response.output_text.done" {
@@ -214,17 +214,21 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 	if frames[0].payload["text"] != "Hello" {
 		t.Errorf("frame[0] text = %v, want %q", frames[0].payload["text"], "Hello")
 	}
-	// 第二帧：output_item.done（携带完整 message item，status=completed）
-	if frames[1].eventType != "response.output_item.done" {
-		t.Errorf("frame[1] event type = %q, want %q", frames[1].eventType, "response.output_item.done")
+	// 第二帧：content_part.done
+	if frames[1].eventType != "response.content_part.done" {
+		t.Errorf("frame[1] event type = %q, want %q", frames[1].eventType, "response.content_part.done")
 	}
-	requireSequenceNumber(t, frames[1].payload)
-	item, ok := frames[1].payload["item"].(map[string]any)
+	// 第三帧：output_item.done（携带完整 message item，status=completed）
+	if frames[2].eventType != "response.output_item.done" {
+		t.Errorf("frame[2] event type = %q, want %q", frames[2].eventType, "response.output_item.done")
+	}
+	requireSequenceNumber(t, frames[2].payload)
+	item, ok := frames[2].payload["item"].(map[string]any)
 	if !ok {
-		t.Fatal("frame[1] missing item in output_item.done")
+		t.Fatal("frame[2] missing item in output_item.done")
 	}
 	if item["status"] != "completed" {
-		t.Errorf("frame[1] item.status = %v, want %q", item["status"], "completed")
+		t.Errorf("frame[2] item.status = %v, want %q", item["status"], "completed")
 	}
 
 	// 5. message_delta → response.completed（嵌套在 response 字段中）
@@ -766,19 +770,17 @@ func TestStreamSerializer_CombinedStream(t *testing.T) {
 		Index: 1,
 	})
 	frames := parseAllResponsesSSE(t, data6)
-	if len(frames) != 2 {
-		t.Fatalf("content_block_stop should produce 2 SSE frames, got %d", len(frames))
+	if len(frames) != 3 {
+		t.Fatalf("content_block_stop should produce 3 SSE frames, got %d", len(frames))
 	}
-	// 第一帧验证累积文本
 	if frames[0].eventType != "response.output_text.done" {
 		t.Errorf("frame[0] event type = %q, want %q", frames[0].eventType, "response.output_text.done")
 	}
 	if frames[0].payload["text"] != "Answer: 42" {
 		t.Errorf("frame[0] accumulated text = %v, want %q", frames[0].payload["text"], "Answer: 42")
 	}
-	// 第二帧验证 output_item.done
-	if frames[1].eventType != "response.output_item.done" {
-		t.Errorf("frame[1] event type = %q, want %q", frames[1].eventType, "response.output_item.done")
+	if frames[2].eventType != "response.output_item.done" {
+		t.Errorf("frame[2] event type = %q, want %q", frames[2].eventType, "response.output_item.done")
 	}
 }
 

@@ -664,12 +664,12 @@ func TestConvertStreamUsage(t *testing.T) {
 		Delta: provider.NewUsageDelta(100, 50),
 	})
 
-	// Usage 被立即发射为 MessageDelta 事件（回归修复后行为）
+	// Usage 通过 Ping 事件携带，relay 层可提取 usage 但不产生终止语义 chunk
 	if len(events) != 1 {
-		t.Fatalf("expected 1 event (immediate usage emit), got %d", len(events))
+		t.Fatalf("expected 1 event (ping with usage), got %d", len(events))
 	}
-	if events[0].Type != EventMessageDelta {
-		t.Errorf("events[0].Type = %q, want message_delta", events[0].Type)
+	if events[0].Type != EventPing {
+		t.Errorf("events[0].Type = %q, want ping", events[0].Type)
 	}
 	if events[0].Usage == nil {
 		t.Fatal("events[0].Usage is nil")
@@ -792,13 +792,13 @@ func TestConvertStreamFullLifecycle(t *testing.T) {
 	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})...)
 
 	// message_start, content_block_start, delta, delta,
-	// message_delta(usage立即发射), content_block_stop, message_delta, message_stop
+	// ping(usage), content_block_stop, message_delta, message_stop
 	expectedTypes := []StreamEventType{
 		EventMessageStart,
 		EventContentBlockStart,
 		EventContentBlockDelta,
 		EventContentBlockDelta,
-		EventMessageDelta,
+		EventPing,
 		EventContentBlockStop,
 		EventMessageDelta,
 		EventMessageStop,
@@ -1309,7 +1309,7 @@ func TestStreamConverter_TextOnly(t *testing.T) {
 		EventMessageStart,
 		EventContentBlockStart,
 		EventContentBlockDelta,
-		EventMessageDelta,
+		EventPing,
 		EventContentBlockStop,
 		EventMessageDelta,
 		EventMessageStop,
@@ -1555,7 +1555,7 @@ func TestStreamConverter_UsageImmediateEmit(t *testing.T) {
 		Delta: provider.NewBlockStartDelta("text"),
 	})
 
-	// 发 Usage Delta — 应立即返回 MessageDelta + Usage
+	// 发 Usage Delta — 应立即返回 Ping + Usage（不产生终止语义 chunk）
 	events := sc.Convert(provider.StreamEvent{
 		Type: provider.StreamTypeDelta,
 		Delta: provider.NewUsageDeltaWithCache(
@@ -1568,8 +1568,8 @@ func TestStreamConverter_UsageImmediateEmit(t *testing.T) {
 	}
 
 	first := events[0]
-	if first.Type != EventMessageDelta {
-		t.Errorf("first event Type = %v, want %v", first.Type, EventMessageDelta)
+	if first.Type != EventPing {
+		t.Errorf("first event Type = %v, want %v", first.Type, EventPing)
 	}
 	if first.Usage == nil {
 		t.Fatal("first event Usage is nil — usage should be emitted immediately")
