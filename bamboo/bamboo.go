@@ -8,10 +8,18 @@ package bamboo
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/bamboo-services/bamboo-messages/internal/xerr"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
+
+// terminateWriteTimeout 终止事件写入 out channel 的最大等待时间。
+//
+// 终止事件（message_stop 等）不能用 default 丢弃（消费者会永久挂起），
+// 也不能无限阻塞（消费端死透时会泄漏 goroutine）。
+// 5 秒覆盖 GC 停顿 + 网络抖动 + pacer 积压感知加速生效的典型时间。
+const terminateWriteTimeout = 5 * time.Second
 
 // BambooClient Bamboo Messages SDK 核心接口，定义流式对话和非流式对话两种交互模式。
 //
@@ -95,9 +103,9 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 	}
 
 	// 创建 bamboo 输出 channel 并启动转换 goroutine
-	// buffer=256 容纳完整工具调用序列及长文本积压（约 500-1250 token），
-	// 防止消费端因 HTTP write 阻塞导致 out channel 满后终止事件被丢弃。
-	out := make(chan StreamEvent, 256)
+	// buffer=64 吸收短突发流量（Preto.ai 5000+ req/s 生产验证）。
+	// 终止事件通过 terminateWriteTimeout 超时机制保障，不依赖 buffer 大小。
+	out := make(chan StreamEvent, 64)
 	converter := NewStreamConverter()
 
 	go func() {
@@ -123,7 +131,8 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 				}) {
 					select {
 					case out <- be:
-					default:
+					case <-time.After(terminateWriteTimeout):
+						return
 					}
 				}
 				return
@@ -140,12 +149,10 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 			}
 		}
 
-		// provider channel 正常关闭（未收到 Done），补发终止信号。
-		// Convert 内部有幂等防御（stopHandled），重复调用安全。
 		for _, be := range converter.Convert(provider.StreamEvent{Type: provider.StreamTypeDone}) {
 			select {
 			case out <- be:
-			default:
+			case <-time.After(terminateWriteTimeout):
 			}
 		}
 	}()
