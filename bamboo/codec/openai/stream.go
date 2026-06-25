@@ -3,6 +3,7 @@ package openai
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
@@ -220,8 +221,8 @@ func (s *openaiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 		return s.marshalChunk(chunk)
 
 	case bamboo.DeltaSignature:
-		// signature_delta 为 Anthropic Extended Thinking 特有的签名增量，
-		// OpenAI Chat Completions 协议无对应字段，跨协议转换时丢弃。
+		// OpenAI Chat Completions 无 signature 字段，跨协议转换时记录 warning 后跳过
+		log.Printf("[codec/openai] warning: signature_delta has no equivalent in OpenAI Chat Completions protocol, dropped")
 		return nil, nil
 	}
 

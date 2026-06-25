@@ -43,6 +43,7 @@ type StreamDeltaType string
 const (
 	StreamDeltaTypeTextOutput    StreamDeltaType = "text_output"     // 文本输出事件，表示 AI 模型生成的文本响应
 	StreamDeltaTypeThinking      StreamDeltaType = "thinking"        // 思考事件，表示 AI 模型的推理或思考过程内容（如 Claude 的 extended thinking）
+	StreamDeltaTypeSignature     StreamDeltaType = "signature"       // 签名事件，表示推理内容的加密签名/密文（OpenAI encrypted_content / Anthropic signature）
 	StreamDeltaTypeToolCall      StreamDeltaType = "tool_call"       // 工具调用事件，表示 AI 模型请求调用某个工具
 	StreamDeltaTypeToolCallDelta StreamDeltaType = "tool_call_delta" // 工具调用增量事件，表示工具调用 JSON 参数的增量部分
 	StreamDeltaTypeUsage         StreamDeltaType = "usage"           // 用量统计事件，表示本次对话的 Token 使用量统计信息
@@ -62,6 +63,13 @@ type TextData string
 //
 // 用于 AI 模型的推理过程内容，如 Claude 的 extended thinking。
 type ThinkingData string
+
+// SignatureData 推理签名数据。
+//
+// 用于推理内容的加密签名或密文：
+// - Anthropic: extended thinking 的验证签名
+// - OpenAI Responses: encrypted_content（服务端加密的不透明 token）
+type SignatureData string
 
 // ToolCallData 工具调用开始数据。
 //
@@ -135,6 +143,17 @@ func NewThinkingDelta(thinking string) StreamDelta[any] {
 	return StreamDelta[any]{
 		Type: StreamDeltaTypeThinking,
 		Data: ThinkingData(thinking),
+	}
+}
+
+// NewSignatureDelta 创建推理签名增量事件。
+//
+// 参数:
+//   - signature - 签名/加密内容（Anthropic signature 或 OpenAI encrypted_content）
+func NewSignatureDelta(signature string) StreamDelta[any] {
+	return StreamDelta[any]{
+		Type: StreamDeltaTypeSignature,
+		Data: SignatureData(signature),
 	}
 }
 

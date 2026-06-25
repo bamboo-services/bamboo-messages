@@ -71,11 +71,10 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 				Err:  xError.NewError(ctx, nil, "Anthropic 流式对话失败", false, err),
 			}:
 			case <-ctx.Done():
+				return
 			}
-			return
 		}
 
-		// 发送完成事件
 		select {
 		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone}:
 		case <-ctx.Done():

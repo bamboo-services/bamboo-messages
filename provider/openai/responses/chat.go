@@ -74,11 +74,10 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 				Err:  xError.NewError(ctx, nil, "OpenAI 流式对话失败", false, err),
 			}:
 			case <-ctx.Done():
+				return
 			}
-			return
 		}
 
-		// 发送完成事件
 		select {
 		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone}:
 		case <-ctx.Done():

@@ -3,6 +3,7 @@ package gemini
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
@@ -192,8 +193,7 @@ func (s *geminiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 		return nil, nil
 
 	case bamboo.DeltaSignature:
-		// signature_delta 为 Anthropic Extended Thinking 特有的签名增量，
-		// Gemini 协议无对应字段，跨协议转换时丢弃。
+		log.Printf("[codec/gemini] warning: signature_delta has no equivalent in Gemini protocol, dropped")
 		return nil, nil
 	}
 

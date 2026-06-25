@@ -63,10 +63,16 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 		},
 	}
 
-	// 提取 reasoning_content（从 ExtraFields）
+	// 推理内容提取：兼容 reasoning_content 和 reasoning 两种字段名
+	reasoningRaw := ""
 	if field, ok := choice.Message.JSON.ExtraFields["reasoning_content"]; ok && field.Raw() != "" {
+		reasoningRaw = field.Raw()
+	} else if field, ok := choice.Message.JSON.ExtraFields["reasoning"]; ok && field.Raw() != "" {
+		reasoningRaw = field.Raw()
+	}
+	if reasoningRaw != "" {
 		var reasoning string
-		if err := json.Unmarshal([]byte(field.Raw()), &reasoning); err == nil && reasoning != "" {
+		if err := json.Unmarshal([]byte(reasoningRaw), &reasoning); err == nil && reasoning != "" {
 			result.Thinking = reasoning
 		}
 	}

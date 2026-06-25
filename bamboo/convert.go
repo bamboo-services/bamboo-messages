@@ -591,6 +591,16 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 			Delta: &StreamDelta{Type: DeltaThinkingDelta, Thinking: string(thinkingData)},
 		})
 		return events
+	case provider.StreamDeltaTypeSignature:
+		sigData, ok := delta.Data.(provider.SignatureData)
+		if !ok {
+			return nil
+		}
+		return []StreamEvent{{
+			Type:  EventContentBlockDelta,
+			Index: sc.thinkingBlockIndex,
+			Delta: &StreamDelta{Type: DeltaSignature, Signature: string(sigData)},
+		}}
 	case provider.StreamDeltaTypeToolCall:
 		data, ok := delta.Data.(provider.ToolCallData)
 		if !ok {
@@ -646,10 +656,16 @@ func (sc *StreamConverter) handleStop() []StreamEvent {
 	if usage == nil {
 		usage = &Usage{}
 	}
-	// 使用适配器提供的完成原因，若未提供则默认为 FinishReasonEndTurn
+	// 使用适配器提供的完成原因，若未提供则根据流状态推断。
+	// 关键兜底：当流被中断（stream.Err）但已收到 tool_call 增量时，
+	// openToolBlockIndexes 非空 → 推断为 tool_use，避免 agent loop 误判为正常结束。
 	stopReason := sc.finishReason
 	if stopReason == "" {
-		stopReason = FinishReasonEndTurn
+		if len(sc.openToolBlockIndexes) > 0 {
+			stopReason = FinishReasonToolUse
+		} else {
+			stopReason = FinishReasonEndTurn
+		}
 	}
 
 	var events []StreamEvent
@@ -687,8 +703,15 @@ func (sc *StreamConverter) handleError(err *xError.Error) []StreamEvent {
 	if err != nil {
 		msg = err.Error()
 	}
-	return []StreamEvent{{
+	events := []StreamEvent{{
 		Type:  EventError,
 		Error: NewBambooError(ErrorTypeProvider, msg),
 	}}
+
+	// 流中断兜底：若尚未发出终止序列，自动补发。
+	// 参考 Vercel AI SDK flush 机制 — 无论流是否出错，客户端都必须收到完整终止信号。
+	if sc.started && !sc.stopHandled {
+		events = append(events, sc.handleStop()...)
+	}
+	return events
 }

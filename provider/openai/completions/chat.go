@@ -66,17 +66,18 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 		}
 
 		if err := stream.Err(); err != nil {
+			// 发送错误事件后仍需发送 Done 事件，确保 StreamConverter 触发 handleStop 终止序列。
+			// 参考 Vercel AI SDK flush 机制 — 无论流是否出错都发出 finish 事件。
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
 				Err:  xError.NewError(ctx, nil, formatUpstreamError(err), false, err),
 			}:
 			case <-ctx.Done():
+				return
 			}
-			return
 		}
 
-		// 发送完成事件
 		select {
 		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone}:
 		case <-ctx.Done():

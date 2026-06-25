@@ -55,8 +55,9 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 					Err:  xError.NewError(ctx, nil, "Gemini 流式对话失败", false, err),
 				}:
 				case <-ctx.Done():
+					return
 				}
-				return
+				break
 			}
 
 			// 延迟发送 StreamTypeStart：首次成功读取数据后确认连接正常才发送

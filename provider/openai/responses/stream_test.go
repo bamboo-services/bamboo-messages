@@ -203,7 +203,7 @@ func TestContentOutputItemAdded_UsesCallIDForToolCallID(t *testing.T) {
 	}`
 	event := unmarshalResponseEvent(t, rawJSON)
 
-	events := p.contentOutputItemAdded(event)
+	events := p.contentOutputItemAdded(event, new(bool))
 	if len(events) != 1 {
 		t.Fatalf("events len = %d, want 1", len(events))
 	}

@@ -82,12 +82,23 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 		}
 	}
 
-	// 设置完成原因
+	// 设置完成原因（与流式 mapResponseFinishReason 逻辑一致）
 	if response.Status == "incomplete" {
-		if len(result.ToolCalls) > 0 {
-			result.FinishReason = provider.FinishReasonToolCalls
-		} else {
+		switch response.IncompleteDetails.Reason {
+		case "max_output_tokens":
 			result.FinishReason = provider.FinishReasonLength
+		case "content_filter":
+			if len(result.ToolCalls) > 0 {
+				result.FinishReason = provider.FinishReasonToolCalls
+			} else {
+				result.FinishReason = provider.FinishReasonStop
+			}
+		default:
+			if len(result.ToolCalls) > 0 {
+				result.FinishReason = provider.FinishReasonToolCalls
+			} else {
+				result.FinishReason = provider.FinishReasonLength
+			}
 		}
 	} else if len(result.ToolCalls) > 0 {
 		result.FinishReason = provider.FinishReasonToolCalls

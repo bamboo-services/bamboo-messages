@@ -136,12 +136,13 @@ type responsesStreamSerializer struct {
 }
 
 type responsesStreamBlock struct {
-	kind        string
-	outputIndex int
-	itemID      string
-	callID      string
-	name        string
-	args        strings.Builder
+	kind             string
+	outputIndex      int
+	itemID           string
+	callID           string
+	name             string
+	args             strings.Builder
+	encryptedContent string
 }
 
 func newStreamSerializer() *responsesStreamSerializer {
@@ -315,6 +316,8 @@ func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamE
 		return s.marshalSSE("response.function_call_arguments.delta", ev)
 
 	case bamboo.DeltaSignature:
+		block := s.ensureReasoningBlock(event.Index)
+		block.encryptedContent = delta.Signature
 		return nil, nil
 	default:
 		return nil, nil
@@ -398,13 +401,12 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 			return nil, err
 		}
 		item := outputItem{
-			Type:    "reasoning",
-			ID:      block.itemID,
-			Status:  "completed",
-			Content: []outputContent{},
-			Summary: []outputReasoningSummary{
-				{Type: "summary_text", Text: text},
-			},
+			Type:             "reasoning",
+			ID:               block.itemID,
+			Status:           "completed",
+			Content:          []outputContent{},
+			Summary:          []outputReasoningSummary{{Type: "summary_text", Text: text}},
+			EncryptedContent: block.encryptedContent,
 		}
 		s.completedOutput = append(s.completedOutput, item)
 		itemDoneBytes, err := s.marshalSSE("response.output_item.done", outputItemAdded{OutputIndex: block.outputIndex, Item: item})

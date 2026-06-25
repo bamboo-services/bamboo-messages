@@ -30,7 +30,8 @@ type outputItem struct {
 	Status  string          `json:"status,omitempty"`
 	Content []outputContent `json:"content,omitempty"`
 	// reasoning 专用 — OpenAI SDK ResponseReasoningItem.Summary 标记 api:"required"
-	Summary []outputReasoningSummary `json:"summary"`
+	Summary          []outputReasoningSummary `json:"summary"`
+	EncryptedContent string                   `json:"encrypted_content,omitempty"`
 	// function_call 专用
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`

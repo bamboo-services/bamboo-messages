@@ -34,9 +34,17 @@ func (p *CompletionsProvider) handleChoice(choice openai.ChatCompletionChunkChoi
 	delta := choice.Delta
 	var events []provider.StreamEvent
 
+	// 推理内容提取：兼容 reasoning_content（DeepSeek/智谱等）和 reasoning（xAI/Grok 等）两种字段名。
+	// 参考 Vercel AI SDK: delta.reasoning_content ?? delta.reasoning
+	reasoningRaw := ""
 	if field, ok := delta.JSON.ExtraFields["reasoning_content"]; ok && field.Raw() != "" {
+		reasoningRaw = field.Raw()
+	} else if field, ok := delta.JSON.ExtraFields["reasoning"]; ok && field.Raw() != "" {
+		reasoningRaw = field.Raw()
+	}
+	if reasoningRaw != "" {
 		var reasoning string
-		if err := json.Unmarshal([]byte(field.Raw()), &reasoning); err == nil && reasoning != "" {
+		if err := json.Unmarshal([]byte(reasoningRaw), &reasoning); err == nil && reasoning != "" {
 			if !*thinkingBlockStarted {
 				events = append(events, provider.StreamEvent{
 					Type:  provider.StreamTypeDelta,
