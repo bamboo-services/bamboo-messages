@@ -50,8 +50,17 @@ bamboo/
 
 | 符号 | 类型 | 文件 | 作用 |
 |------|------|------|------|
+| `MessageRole` | 类型 | message.go | 消息角色类型 (string) |
+| `RoleUser` / `RoleAssistant` | 常量 | message.go | `"user"` / `"assistant"` 消息角色 |
 | `BambooMessage` | 结构体 | message.go | 上层消息模型 (Role + ContentBlock 数组 + ReasoningID) |
 | `BambooMessage.UnmarshalJSON` | 方法 | message.go | 使用 `ContentBlocks` 包装实现类型多态反序列化 |
+| `NewUserMessage` | 函数 | message.go | 创建用户文本消息 |
+| `NewUserMessageBlocks` | 函数 | message.go | 创建用户多 ContentBlock 消息 |
+| `NewAssistantMessage` | 函数 | message.go | 创建助手文本消息 |
+| `NewAssistantMessageBlocks` | 函数 | message.go | 创建助手多 ContentBlock 消息 |
+| `ContentBlockType` | 类型 | content.go | 内容块类型标识 (string) |
+| `ContentBlockText` / `Thinking` / `ToolUse` / `ToolResult` / `Image` / `Document` | 常量 | content.go | 6 种 ContentBlockType 常量 |
+| `ContentSource` | 结构体 | content.go | 统一来源类型 (Type + MediaType + Data + URL + Content) |
 | `ContentBlock` | 接口 | content.go | 内容块接口 (`BlockType() ContentBlockType`) |
 | `TextBlock` | 结构体 | content.go | 文本内容块 |
 | `ThinkingBlock` | 结构体 | content.go | 思考过程内容块 (Thinking + Signature) |
@@ -69,6 +78,7 @@ bamboo/
 | `NewTextBlock` / `NewTextBlockWithCache` | 函数 | content.go | 文本内容块（普通 / 带 CacheControl） |
 | `NewThinkingBlock` / `NewThinkingBlockWithCache` | 函数 | content.go | 思考过程内容块（普通 / 带 CacheControl） |
 | `NewToolUseBlock` / `NewToolUseBlockWithCache` | 函数 | content.go | 工具调用内容块（普通 / 带 CacheControl） |
+| `NewToolUseBlockWithRawInput` | 函数 | content.go | 工具调用内容块（原始 JSON 字符串输入，避免双重编码） |
 | `NewToolResultBlock` / `NewToolResultBlockWithCache` | 函数 | content.go | 工具结果内容块（普通 / 带 CacheControl） |
 | `NewImageBlock` / `NewImageBlockWithCache` | 函数 | content.go | 图片内容块（普通 / 带 CacheControl） |
 | `NewDocumentBlock` / `NewDocumentBlockWithCache` | 函数 | content.go | 文档内容块（普通 / 带 CacheControl） |
@@ -93,10 +103,27 @@ bamboo/
 
 | 符号 | 类型 | 文件 | 作用 |
 |------|------|------|------|
+| `FinishReason` | 类型 | response.go | 响应完成原因 (string) |
+| `FinishReasonEndTurn` / `MaxTokens` / `ToolUse` / `StopSequence` | 常量 | response.go | 4 种完成原因常量 |
 | `Response` | 结构体 | response.go | 非流式响应 (Content + StopReason + Usage + ProviderType + RequestID + ResponseID + CreatedAt) |
 | `Response.UnmarshalJSON` | 方法 | response.go | 使用 `ContentBlocks` 包装实现类型多态反序列化 |
-| `StreamEvent` | 结构体 | stream.go | 流事件 (Type + Delta + Usage + Error 等) |
-| `EventPing` | 常量 | stream.go | `"ping"` — 心跳/Usage relay 事件类型 |
+| `Usage` | 结构体 | response.go | Token 用量 (InputTokens + OutputTokens + CacheCreationInputTokens + CacheReadInputTokens) |
+| `StreamEventType` | 类型 | stream.go | 流事件类型标识 (string) |
+| `EventMessageStart` / `ContentBlockStart` / `ContentBlockDelta` / `ContentBlockStop` / `MessageDelta` / `MessageStop` / `Ping` / `Error` | 常量 | stream.go | 8 种流事件类型常量 |
+| `StreamDeltaType` | 类型 | stream.go | 流增量数据类型标识 (string) |
+| `DeltaTextDelta` / `DeltaThinkingDelta` / `DeltaInputJSON` / `DeltaSignature` | 常量 | stream.go | 4 种流增量类型常量 |
+| `StreamDelta` | 结构体 | stream.go | 流增量数据 (Type + Text + Thinking + Signature + PartialJSON) |
+| `MessageDelta` | 结构体 | stream.go | 消息增量 (StopReason + StopSequence) |
+| `StreamEvent` | 结构体 | stream.go | 流事件 (Type + Message + Index + ContentBlock + Delta + Usage + Error) |
+
+### 错误类型
+
+| 符号 | 类型 | 文件 | 作用 |
+|------|------|------|------|
+| `BambooError` | 结构体 | errors.go | Bamboo SDK 统一错误类型 (Type + Message + Code + ProviderType) |
+| `ErrorTypeInvalidRequest` / `Authentication` / `RateLimit` / `API` / `Provider` | 常量 | errors.go | 5 种错误类型常量 |
+| `NewBambooError` | 函数 | errors.go | 创建 BambooError 实例 |
+| `NewBambooErrorWithCode` | 函数 | errors.go | 创建带 Code 的 BambooError |
 
 ### 类型转换
 
@@ -127,7 +154,8 @@ bamboo/
 - **Usage 缓存字段透传** — `Usage` 结构体包含 `CacheCreationInputTokens` / `CacheReadInputTokens`
 - **Block 类型注册表** — `RegisterBlockType` + `ContentBlocks.UnmarshalJSON` 实现 JSON 多态反序列化；所有 6 种标准类型在 `init()` 中自动注册
 - **Chat 首事件 peek 模式** — `Chat` 同步 peek 首个 provider 事件，若为 Error（无 Start 前缀）立即返回 `(nil, error)`，防止空流挂起
-- **Chat channel 缓冲** — Chat channel 缓冲为 256
+- **Chat channel 缓冲** — Chat channel 缓冲为 64（吸收短突发流量，Preto.ai 5000+ req/s 生产验证）；终止事件不依赖 buffer 容量，通过超时保障
+- **终止事件超时保障** — `terminateWriteTimeout` (5s) 确保终止事件（message_stop 等）写入 out channel 时既不被 `default` 丢弃，也不会因消费端卡死而无限阻塞 goroutine
 - **ctx 取消合成错误** — 流式中途 ctx 取消时，发送合成 `xerr.Error` 到 converter 后退出
 - **Complete 部分成功** — `Complete` 在 provider 返回 error + 部分结果时返回 `(resp, error)`
 

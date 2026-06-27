@@ -40,7 +40,7 @@ provider/
 |------|------|------|
 | 理解核心接口 | `provider.go` | 6 个方法：Chat, ChatWithSystem, Complete, CompleteWithSystem, GetProviderType, GetAvailableModels |
 | 理解通用类型 | `type.go` | Message, ChatConfig, Tool, CompletionResult, ThinkingConfig, CacheControl, ProviderExtra |
-| 理解流式模型 | `stream.go` | StreamEvent channel + 6 种 DeltaData 类型 + 构造函数 + IndexedToolCallDeltaData |
+| 理解流式模型 | `stream.go` | StreamEvent channel + 7 种 DeltaData 类型 + 11 个构造函数 + IndexedToolCallDeltaData |
 | 理解 Debug 机制 | `debug.go` | `DebugEnabled` 全局开关 + `SetDebug()` + `DebugRequest()` + 环境变量 `BAMBOO_DEBUG` |
 | 理解版本/UserAgent | `version.go` | `GetUserAgent()` 返回 `"BM-SDK/{version}"`，基于 `runtime/debug.ReadBuildInfo()` |
 | 理解请求拦截器 | `interceptor.go` + `interceptor_transport.go` | `RequestInterceptor` 函数类型 + `ApplyInterceptors` 链式执行 + `NewInterceptorHTTPClient` Transport 注入 |
@@ -64,9 +64,19 @@ provider/
 |------|------|------|------|
 | `BaseProvider[T]` | 泛型结构体 | provider.go:14 | 适配器基座，嵌入底层 SDK Client |
 | `Provider` | 接口 | provider.go:23 | 6 方法统一接口（GetProviderType 返回 `ProviderType` 类型） |
+| `ProviderType` | 类型 | type.go | 协议类型标识 (string) |
+| `ProviderAnthropic` / `ProviderOpenAIResponses` / `ProviderOpenAICompletions` | 常量 | type.go | 3 种 ProviderType 常量 |
+| `MessageRole` | 类型 | type.go | 消息角色标识 (string) |
+| `RoleSystem` / `RoleUser` / `RoleAssistant` / `RoleTool` | 常量 | type.go | 4 种消息角色常量 |
+| `FinishReason` | 类型 | type.go | 完成原因标识 (string) |
+| `FinishReasonStop` / `FinishReasonLength` / `FinishReasonToolCalls` | 常量 | type.go | 3 种完成原因常量 |
 | `Message` | 结构体 | type.go | 统一消息模型 (Role + Content + ContentBlocks + ThinkingContent + ThinkingSignature + ReasoningID + ToolCalls + ToolCallID + ToolName + IsError + CacheControl) |
 | `ChatConfig` | 结构体 | type.go | 请求配置 (Model, Temperature, TopP, MaxTokens, Stop, Tools, Metadata, UserID, ToolChoice, ResponseFormat, ParallelToolCalls, ThinkingConfig, SystemCacheControl, PromptCacheKey, ProviderExtra) |
 | `CompletionResult` | 结构体 | type.go | 非流式完整响应 (Content + Thinking + ThinkingSignature + ResponseID + ToolCalls + FinishReason + Usage) |
+| `ToolCall` | 结构体 | type.go | 工具调用 (ID + Type + Function) |
+| `FunctionCall` | 结构体 | type.go | 函数调用详情 (Name + Arguments) |
+| `Tool` | 结构体 | type.go | 工具定义 (Type + Function + CacheControl) |
+| `FunctionDef` | 结构体 | type.go | 函数定义 (Name + Description + Parameters) |
 | `ThinkingConfig` | 结构体 | type.go | 思考/推理配置 (Effort: none/low/medium/high) |
 | `CacheControl` | 结构体 | type.go | 缓存控制标记 (Type + TTL)，用于 Anthropic prompt caching |
 | `CacheControlEphemeralTTL` | 类型 | type.go | TTL 类型 (`CacheTTL5m` / `CacheTTL1h`) |
@@ -75,7 +85,9 @@ provider/
 | `GetExtraFloat64/Int64/String/Bool/Any` | 函数 | type.go | ProviderExtra 安全取值 helpers |
 | `ContentBlock` | 接口 | type.go | 多媒体内容块接口 (BlockType() string) |
 | `ImageContentBlock` | 结构体 | type.go | 图片内容块 (Source: ImageSource) |
+| `ImageSource` | 结构体 | type.go | 图片来源 (Type + MediaType + Data + URL) |
 | `DocumentContentBlock` | 结构体 | type.go | 文档内容块 (Source: DocumentSource) |
+| `DocumentSource` | 结构体 | type.go | 文档来源 (Type + MediaType + Data + URL) |
 
 ### 流式模型
 
@@ -83,14 +95,23 @@ provider/
 |------|------|------|------|
 | `StreamEvent` | 结构体 | stream.go | 流事件 (Type + Delta + Err + FinishReason)，值类型，Err 为 `*xerr.Error`，FinishReason 仅在 StreamTypeStop 中填充 |
 | `StreamDelta[E]` | 泛型结构体 | stream.go | 流增量 (Type + Data) |
+| `StreamType` | 类型 | stream.go | 流事件类型 (string): `StreamTypeStart`/`Stop`/`Done`/`Error`/`Delta` |
+| `StreamDeltaType` | 类型 | stream.go | 流增量数据类型 (string): 7 种常量 (TextOutput/Thinking/Signature/ToolCall/ToolCallDelta/Usage/BlockStart) |
+| `TextData` | 类型 | stream.go | 文本数据 (string) |
+| `ThinkingData` | 类型 | stream.go | 思考数据 (string) |
+| `SignatureData` | 类型 | stream.go | 推理签名/密文数据 (Anthropic signature / OpenAI encrypted_content) |
+| `ToolCallData` | 结构体 | stream.go | 工具调用开始数据 (ID + Name + Index + HasIndex) |
+| `ToolCallDeltaData` | 类型 | stream.go | 工具调用参数增量 (string) |
 | `UsageData` | 结构体 | stream.go | Token 用量（含 CacheCreationInputTokens / CacheReadInputTokens） |
-| `BlockStartData` | 结构体 | stream.go | 内容块开始数据 |
+| `BlockStartData` | 结构体 | stream.go | 内容块开始数据 (BlockType + ID + Name) |
 | `IndexedToolCallDeltaData` | 结构体 | stream.go | 带 Provider 原生索引的工具调用参数增量 (PartialJSON + Index + HasIndex) — OpenAI 并行工具调用支持 |
-| `NewUsageDeltaWithCache` | 构造函数 | stream.go | 带缓存统计的 Usage Delta 工厂函数 |
-| `NewBlockStartDelta` / `NewBlockStartDeltaWithID` | 构造函数 | stream.go | BlockStart Delta 工厂函数 |
-| `NewToolCallDeltaWithIndex` | 构造函数 | stream.go | 带 Index 的工具调用开始事件 |
-| `NewToolCallDeltaDataWithIndex` | 构造函数 | stream.go | 带 Index 的工具调用参数增量事件 |
-| `NewTextDelta` 等 | 构造函数 | stream.go | 7 种 Delta 工厂函数 |
+| `NewTextDelta` | 构造函数 | stream.go | 文本增量 |
+| `NewThinkingDelta` | 构造函数 | stream.go | 思考增量 |
+| `NewSignatureDelta` | 构造函数 | stream.go | 签名/密文增量 |
+| `NewToolCallDelta` / `NewToolCallDeltaWithIndex` | 构造函数 | stream.go | 工具调用开始（无索引 / 带索引） |
+| `NewToolCallDeltaData` / `NewToolCallDeltaDataWithIndex` | 构造函数 | stream.go | 工具调用参数增量（无索引 / 带索引） |
+| `NewUsageDelta` / `NewUsageDeltaWithCache` | 构造函数 | stream.go | 用量统计（不含缓存 / 含缓存） |
+| `NewBlockStartDelta` / `NewBlockStartDeltaWithID` | 构造函数 | stream.go | 内容块开始（无 ID/Name / 含 ID/Name） |
 
 ### 请求拦截器
 
@@ -133,10 +154,13 @@ provider/
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
 | `DebugEnabled` | 变量 | debug.go | Debug 全局开关，通过环境变量 `BAMBOO_DEBUG` 初始化 |
+| `MaxDebugBodyLen` | 常量 | debug.go | debug 日志中请求体最大长度 (500) |
 | `SetDebug` | 函数 | debug.go | 全局开启/关闭 Provider 层 debug 日志 |
 | `DebugRequest` | 函数 | debug.go | 输出请求 debug 日志（providerType/endpoint/headers/body） |
 | `FormatDebugRequest` | 函数 | debug.go | 返回格式化 debug 字符串（不受开关限制） |
-| `GetUserAgent` | 函数 | version.go | 生成统一 User-Agent 字符串 |
+| `SummarizeTools` | 函数 | debug.go | 简化 tools 数组的 debug 输出（供 relay 层复用） |
+| `SDKName` | 常量 | version.go | SDK 名称标识 `"BM-SDK"`，User-Agent 前缀 |
+| `GetUserAgent` | 函数 | version.go | 生成统一 User-Agent 字符串 `"BM-SDK/{version}"` |
 | `GetSDKVersion` | 函数 | version.go | 读取 SDK 版本号 |
 
 ## 约定

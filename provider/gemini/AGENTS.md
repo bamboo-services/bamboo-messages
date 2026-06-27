@@ -44,7 +44,11 @@ provider/gemini/
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
 | `Provider` | 类型别名 | provider.go | `BaseProvider[genai.Client]` |
+| `Option` | 函数类型 | provider.go | `func(*config)` — Provider 配置选项 |
+| `GeminiProviderOption` | 函数类型 | option.go | `func(*geminiRequestConfig)` — 请求级配置选项 |
+| `ModelGemini25Flash` / `ModelGemini25Pro` / `ModelGemini20Flash` | 常量 | models.go | Gemini 模型常量 |
 | `WithInterceptor` | 函数 | provider.go | 注册请求拦截器（转发到 `provider.WithInterceptor`） |
+| `WithTopK` / `WithSafetySettings` | 函数 | option.go | GeminiProviderOption 请求级参数 |
 | `buildContentConfig` | 方法 | params.go | Chat/Complete 共享参数构建入口（含 MaxTokens 溢出保护） |
 | `mapThinkingConfig` | 函数 | params.go | Effort → genai.ThinkingConfig + ThinkingLevel 映射 |
 | `mapToolChoice` | 函数 | params.go | 字符串 → genai.FunctionCallingConfig 映射 |

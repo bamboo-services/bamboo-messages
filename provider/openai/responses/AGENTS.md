@@ -44,7 +44,10 @@ provider/openai/responses/
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
 | `ResponsesProvider` | 类型别名 | provider.go | `BaseProvider[openai.Client]` |
+| `Option` | 函数类型 | provider.go | `func(*config)` — Provider 配置选项 |
+| `OpenaiResponsesOption` | 函数类型 | option.go | `func(*responsesRequestConfig)` — 请求级配置选项 |
 | `WithInterceptor` | 函数 | provider.go | 注册请求拦截器（转发到 `provider.WithInterceptor`） |
+| `WithStore` / `WithModalities` / `WithPreviousResponseID` / `WithTruncation` | 函数 | option.go | OpenaiResponsesOption 请求级参数 |
 | `buildParams` | 方法 | params.go | Chat/Complete 共享参数构建入口 |
 | `handleStreamEvent` | 方法 | stream.go | Responses 事件分发 |
 | `contentResponseCompleted` | 方法 | stream.go | 响应完成事件 — 提取 usage + 发送 StreamTypeStop(含 FinishReason) |

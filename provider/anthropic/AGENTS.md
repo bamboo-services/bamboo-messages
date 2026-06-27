@@ -47,9 +47,12 @@ provider/anthropic/
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
 | `Provider` | 类型别名 | provider.go | `BaseProvider[anthropic.Client]` |
+| `Option` | 函数类型 | provider.go | `func(*config)` — Provider 配置选项 |
+| `AnthropicMessagesOption` | 函数类型 | option.go | `func(*anthropicRequestConfig)` — 请求级配置选项 |
 | `NewProvider` | 函数 | provider.go | 最简构造函数 |
 | `NewProviderWithOptions` | 函数 | provider.go | 完整构造函数 (WithAPIKey/WithBaseURL/WithHeader/WithDebug/WithInterceptor) |
 | `WithInterceptor` | 函数 | provider.go | 注册请求拦截器（转发到 `provider.WithInterceptor`） |
+| `WithTopK` / `WithBudgetTokens` | 函数 | option.go | AnthropicMessagesOption: TopK 采样 / 思考 token 预算（后者已废弃） |
 | `buildParams` | 方法 | params.go | Chat/Complete 共享参数构建入口 |
 | `handleStreamEvent` | 方法 | stream.go | SSE 事件分发（含 `finishReason *provider.FinishReason` 参数） |
 | `contentBlockStart` | 方法 | stream.go | 内容块开始事件处理（text/thinking/tool_use） |

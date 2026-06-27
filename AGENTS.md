@@ -1,7 +1,7 @@
 # 项目知识库
 
-**生成日期:** 2026-06-26
-**提交:** e0d0b9f
+**生成日期:** 2026-06-28
+**提交:** 1cecf62
 **分支:** master
 
 ## 概述
@@ -15,7 +15,7 @@ bamboo-messages/
 ├── provider/                       # 核心抽象层（公共包）— 接口 + 通用类型 + 流模型 + Debug + 拦截器 + 耗时统计
 │   ├── provider.go                # Provider 接口 (6 methods) + BaseProvider[T] 泛型基座
 │   ├── type.go                    # Message / ChatConfig / ThinkingConfig / Tool / CompletionResult / CacheControl / ContentBlock / ProviderExtra helpers
-│   ├── stream.go                  # StreamEvent / StreamDelta[E] + 7 种 Delta 构造函数 (含 NewUsageDeltaWithCache) + IndexedToolCallDeltaData
+│   ├── stream.go                  # StreamEvent / StreamDelta[E] + 11 种 Delta 构造函数 (含 NewUsageDeltaWithCache) + IndexedToolCallDeltaData
 │   ├── debug.go                   # Debug 全局开关 + DebugRequest/FormatDebugRequest + 敏感字段脱敏 + 长文本截断
 │   ├── version.go                 # SDKName + GetUserAgent() + GetSDKVersion()
 │   ├── interceptor.go             # RequestInterceptor 函数类型 + ApplyInterceptors 链式执行
@@ -246,10 +246,13 @@ bamboo-messages/
 | `WithHeader` | 函数 | option/option.go | 添加自定义 HTTP 请求头 |
 | `WithDebug` | 函数 | option/option.go | 启用 debug 日志 |
 | `ApplyOptions` | 函数 | option/option.go | 将选项列表应用到默认配置 |
+| `Config.GetAPIKey/GetBaseURL/GetHeaders/IsDebug` | 方法 | option/option.go | Config Getter 方法 |
+| `Config.SetAPIKey/SetBaseURL/SetHeader/SetDebug` | 方法 | option/option.go | Config Setter 方法 |
 | `PtrFloat64/PtrBool/PtrInt64/PtrString` | 函数 | helpers/helpers.go | 指针辅助函数 |
 | `GetExtraFloat64/Int64/String/Bool/Any` | 函数 | helpers/helpers.go | ProviderExtra 安全取值 helpers |
 | `Error` | 结构体 | errors/errors.go | 内部最小错误类型 (err + Message) |
 | `BambooError` | 结构体 | errors/errors.go | Bamboo SDK 统一错误类型 |
+| `ErrorTypeInvalidRequest` / `Authentication` / `RateLimit` / `API` / `Provider` | 常量 | errors/errors.go | 5 种错误类型常量 |
 | `NewBambooError/NewBambooErrorWithCode` | 函数 | errors/errors.go | BambooError 构造函数 |
 
 ## 模块架构

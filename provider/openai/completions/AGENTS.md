@@ -47,7 +47,11 @@ provider/openai/completions/
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
 | `CompletionsProvider` | 结构体 | provider.go | 嵌入 `BaseProvider[openai.Client]` + `legacyCompat bool` |
+| `Option` | 函数类型 | provider.go | `func(*config)` — Provider 配置选项 |
+| `OpenaiCompletionsOption` | 函数类型 | option.go | `func(*completionsRequestConfig)` — 请求级配置选项 |
 | `WithInterceptor` | 函数 | provider.go | 注册请求拦截器（转发到 `provider.WithInterceptor`） |
+| `WithLegacyCompat` | 函数 | provider.go | Option: 启用 Legacy 兼容模式 |
+| `WithFrequencyPenalty` / `WithPresencePenalty` / `WithSeed` / `WithPrediction` | 函数 | option.go | OpenaiCompletionsOption 请求级参数 |
 | `buildParams` | 方法 | params.go | Chat/Complete 共享参数构建（含 Prediction JSON 回退） |
 | `buildAssistantMessage` | 方法 | message.go | provider.Message → OpenAI Assistant 消息（空 tool_calls 防御） |
 | `handleChoice` | 方法 | stream.go | 处理单个 choice 的 delta + FinishReason |

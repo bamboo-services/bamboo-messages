@@ -56,18 +56,27 @@ bamboo/relay/
 | `SmoothPacer.Close` | 方法 | smooth_pacer.go | 语义清理别名（等同 `Wait()`） |
 | `SmoothPacer.SetRateSampleCallback` | 方法 | smooth_pacer.go | 设置速率采样回调（thinking vs output token/s） |
 | `TokenSplitter` | 结构体 | smooth_parser.go | token 切分器，维护跨帧 pendingTail |
+| `NewTokenSplitter` | 构造函数 | smooth_parser.go | 创建 token 切分器实例 |
 | `TokenSplitter.Split` | 方法 | smooth_parser.go | 切分文本为 token 列表，保留不完整的尾部片段 |
 | `TokenSplitter.Flush` | 方法 | smooth_parser.go | 返回 pendingTail 残余并清空 |
 | `FrameParser` | 结构体 | smooth_parser.go | SSE 帧解析器，将原始 SSE 帧解析为 microFrame 列表 |
+| `NewFrameParser` | 构造函数 | smooth_parser.go | 创建帧解析器实例 |
 | `FrameParser.Parse` | 方法 | smooth_parser.go | 解析 SSE 帧，根据 outFormat 分派到对应协议格式的解析函数 |
-| `FrameParser.FlushRemaining` | 方法 | smooth_parser.go | 输出 text/thinking splitter 的 pendingTail 残余帧 |
+| `FrameParser.FlushText` | 方法 | smooth_parser.go | 输出 text splitter 的 pendingTail 残余帧 |
+| `FrameParser.FlushThinking` | 方法 | smooth_parser.go | 输出 thinking splitter 的 pendingTail 残余帧 |
+| `FrameParser.FlushRemaining` | 方法 | smooth_parser.go | 输出 text+thinking splitter 的全部残余帧 |
+| `Config.OnRateSample` | 字段 | config.go | 速率采样回调 `func(elapsedSec, tokensPerSec float64, kind provider.RateSampleKind)` |
+| `WithRateSampleCallback` | Option | config.go | 设置速率采样回调（仅 SmoothBuffer 启用时生效） |
+
+### 内部实现（未导出）
+
+| 符号 | 类型 | 文件 | 作用 |
+|------|------|------|------|
 | `microFrame` | 结构体 | smooth_parser.go | 微帧 — 切分后的最小输出单元（kind/data/tokenCount/isBarrier） |
 | `pacerMode` | 类型 | smooth_pacer.go | pacer 运行模式：modeNormal/modeDrain/modeFlush |
 | `effectiveInterval` | 函数 | smooth_pacer.go | 积压感知间隔缩减（queueLen 10->100 线性映射到 factor 1.0->0.0） |
 | `effectiveTokensPerFrame` | 函数 | smooth_pacer.go | interval 到 floor 后 token 扩容（每 20 帧额外积压 -> multiplier +1，上限 8） |
 | `effectiveDrainInterval` | 函数 | smooth_pacer.go | DRAIN 模式输出间隔（两级：高于 DrainTier2Ratio -> minIntervalFloor，低于 -> 0） |
-| `Config.OnRateSample` | 字段 | config.go | 速率采样回调 `func(elapsedSec, tokensPerSec float64, kind provider.RateSampleKind)` |
-| `WithRateSampleCallback` | Option | config.go | 设置速率采样回调（仅 SmoothBuffer 启用时生效） |
 
 ## 约定
 

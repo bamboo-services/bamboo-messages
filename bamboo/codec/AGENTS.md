@@ -45,8 +45,8 @@ bamboo/codec/
 | 理解 Codec 接口 | `codec.go` | `Codec` 接口（5 方法）+ `StreamSerializer` 接口（2 方法） |
 | 添加新协议格式 | 子包目录 | 新建子包，实现 Codec + StreamSerializer，在 `init()` 中注册到全局变量 |
 | 理解请求中间表示 | `types.go` | `RelayRequest` — 解析后的统一请求结构 |
-| 查找已注册 Codec | `registry.go` | `Get(format)` 函数 + 4 个全局 Codec 变量 |
-| 错误分类 | `errors.go` | `CodecError` + 5 种 `ErrorType` |
+| 查找已注册 Codec | `registry.go` | `Get(format)` 函数返回 `(Codec, error)` + 4 个全局 Codec 变量 |
+| 错误分类 | `errors.go` | `CodecError` + 5 种 `ErrorType` + `NewError` / `NewErrorWithCause` |
 | 修改 Anthropic 编解码 | `anthropic/` | `request.go`(解析) / `response.go`(序列化) / `stream.go`(流式) |
 | 修改 OpenAI 编解码 | `openai/` | 结构与 `anthropic/` 完全一致 |
 | 修改 Responses 编解码 | `responses/` | 结构与 `anthropic/` 完全一致 |
@@ -60,7 +60,7 @@ bamboo/codec/
 - **Codec 无状态** — `Codec` 接口本身无状态，可安全并发使用；有状态操作通过 `NewSerializer()` 创建独立的 `StreamSerializer` 实例
 - **init() 自动注册** — 每个格式子包在 `init()` 中将自身 Codec 赋值到 `registry.go` 的全局变量，只要 import 了对应子包即自动注册
 - **RelayRequest 中间表示** — 所有外部协议的请求体先解析为 `RelayRequest`（包含 `Messages`/`System`/`Config`/`IsStream`），再由 relay 层交给 Provider 处理
-- **错误分类标准化** — 使用 `CodecError` + `ErrorType` 分类错误（invalid_request / provider_error / authentication_error / rate_limit_exceeded / internal_error），每个子包的 `SerializeError` 负责将错误映射为对应协议的错误响应格式
+- **错误分类标准化** — 使用 `CodecError` + `ErrorType` 分类错误（invalid_request / provider_error / authentication_error / rate_limit_exceeded / internal_error），每个子包的 `SerializeError` 负责将错误映射为对应协议的错误响应格式；`NewError` / `NewErrorWithCause` 创建 CodecError；`CodecError.Unwrap()` 支持 `errors.Is/As` 链式追踪
 - **子包结构一致** — 四个格式子包（anthropic / openai / responses / gemini）内部文件分工完全一致：`codec.go` + `request.go` + `response.go` + `stream.go` + `error.go`
 - **cache_creation_input_tokens 已知限制** — OpenAI / Responses / Gemini 协议无原生 `cache_creation_input_tokens` 字段，仅映射 `CacheReadInputTokens`；`CacheCreationInputTokens` 在跨协议转换（Anthropic→其他）中会丢失，此为已知限制
 - **DeltaSignature 跨协议丢弃** — `signature_delta` 为 Anthropic Extended Thinking 特有的签名增量，OpenAI / Responses / Gemini 协议无对应字段，在流式序列化中静默丢弃（返回 nil）
