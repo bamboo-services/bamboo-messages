@@ -334,10 +334,18 @@ func TestProvider_handleStreamEvent(t *testing.T) {
 			},
 		},
 		{
-			name:     "content_block_stop returns nil",
+			name:     "content_block_stop emits BlockStop delta",
 			rawJSON:  `{"type":"content_block_stop","index":0}`,
-			wantLen:  0,
-			wantType: "",
+			wantLen:  1,
+			wantType: provider.StreamTypeDelta,
+			check: func(t *testing.T, events []provider.StreamEvent) {
+				if events[0].Delta.Type != provider.StreamDeltaTypeBlockStop {
+					t.Errorf("expected block_stop delta, got %v", events[0].Delta.Type)
+				}
+				if data, ok := events[0].Delta.Data.(provider.BlockStopData); !ok || data.Index != 0 || !data.HasIndex {
+					t.Errorf("expected BlockStopData{Index:0, HasIndex:true}, got %v", events[0].Delta.Data)
+				}
+			},
 		},
 		{
 			name:     "message_delta with usage",

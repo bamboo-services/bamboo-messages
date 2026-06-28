@@ -232,32 +232,38 @@ func (s *openaiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 
 // handleMessageDelta 处理 message_delta 事件。
 //
-// 注意：仅当 StopReason 非空时才设置 finish_reason 字段。
-// UsageDelta 会产生 StopReason 为空的 EventMessageDelta（仅携带 usage），
-// 此时不应输出 finish_reason，避免产生多个终止事件。
-// 真正的 finish_reason 仅由 handleStop 产生的非空 StopReason 事件决定。
+// 行为规范（对齐真实 OpenAI API）：
+//   - finish_reason 和 usage 必须分离为独立的 SSE data 行；
+//   - finish_reason chunk: {"choices":[{"index":0,"delta":{},"finish_reason":"..."}]}
+//   - usage chunk:         {"choices":[],"usage":{...}}
+//   - 仅 StopReason 非空时才输出 finish_reason chunk；
+//   - 仅 Usage 非空时才输出 usage chunk；
+//   - 两者皆空时返回 nil（不产生任何输出）。
+//
+// 背景：UsageDelta 会产生 StopReason 为空的 EventMessageDelta（仅携带 usage），
+// 不应输出 finish_reason，避免产生多个终止事件。真正的 finish_reason 仅由
+// 非空 StopReason 决定。
 func (s *openaiStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([]byte, error) {
 	msgDelta, ok := event.Delta.(*bamboo.MessageDelta)
 	if !ok {
 		return nil, nil
 	}
 
-	chunk := openaiChunk{
-		ID:      s.id,
-		Object:  "chat.completion.chunk",
-		Created: s.created,
-		Choices: []openaiDelta{{
-			Index: 0,
-			Delta: openaiDeltaMsg{},
-		}},
-	}
+	var chunks []openaiChunk
 
-	// 仅当 StopReason 非空时才映射 finish_reason
+	// finish_reason chunk（仅当 StopReason 非空）
 	if msgDelta.StopReason != "" {
 		finishReason := mapFinishReason(msgDelta.StopReason)
-		chunk.Choices[0].FinishReason = &finishReason
+		chunks = append(chunks, openaiChunk{
+			Choices: []openaiDelta{{
+				Index:        0,
+				Delta:        openaiDeltaMsg{},
+				FinishReason: &finishReason,
+			}},
+		})
 	}
 
+	// usage chunk（仅当 Usage 非空），choices 为空数组
 	if event.Usage != nil {
 		usage := &openaiStreamUsage{
 			PromptTokens:     event.Usage.InputTokens,
@@ -271,10 +277,16 @@ func (s *openaiStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([
 				CachedTokens: event.Usage.CacheReadInputTokens,
 			}
 		}
-		chunk.Usage = usage
+		chunks = append(chunks, openaiChunk{
+			Choices: []openaiDelta{},
+			Usage:   usage,
+		})
 	}
 
-	return s.marshalChunk(chunk)
+	if len(chunks) == 0 {
+		return nil, nil
+	}
+	return s.marshalChunks(chunks)
 }
 
 // handleError 处理 error 事件。
@@ -293,11 +305,36 @@ func (s *openaiStreamSerializer) handleError(event bamboo.StreamEvent) ([]byte, 
 	return []byte(fmt.Sprintf("data: %s\n\n", data)), nil
 }
 
-// marshalChunk 将 chunk 序列化为 SSE data 行。
+// marshalChunk 将单个 chunk 序列化为 SSE data 行。
+//
+// 统一注入 s.model / s.id / s.created / object，保证所有 chunk 携带完整的元信息，
+// 与真实 OpenAI API 行为一致（每个 chunk 都含 model 字段）。
 func (s *openaiStreamSerializer) marshalChunk(chunk openaiChunk) ([]byte, error) {
+	chunk.ID = s.id
+	chunk.Object = "chat.completion.chunk"
+	chunk.Created = s.created
+	chunk.Model = s.model
 	data, err := json.Marshal(chunk)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal stream chunk: %w", err)
 	}
 	return []byte(fmt.Sprintf("data: %s\n\n", data)), nil
+}
+
+// marshalChunks 将多个 chunk 序列化为连续的 SSE data 行。
+//
+// 用于 message_delta 事件中 finish_reason 和 usage 分离输出的场景：
+// 真实 OpenAI API 将 finish_reason 和 usage 拆分为两个独立的 chunk，
+// 分别为 {"choices":[{"index":0,"delta":{},"finish_reason":"..."}]} 和
+// {"choices":[],"usage":{...}}。
+func (s *openaiStreamSerializer) marshalChunks(chunks []openaiChunk) ([]byte, error) {
+	var output []byte
+	for _, c := range chunks {
+		data, err := s.marshalChunk(c)
+		if err != nil {
+			return nil, err
+		}
+		output = append(output, data...)
+	}
+	return output, nil
 }

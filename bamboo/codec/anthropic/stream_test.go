@@ -346,3 +346,36 @@ func TestStreamSerializer_MessageDeltaUsage(t *testing.T) {
 		t.Errorf("output_tokens = %v", usage["output_tokens"])
 	}
 }
+
+func TestMessageStartModelID(t *testing.T) {
+	model := "claude-sonnet-4-20250514"
+	s := newStreamSerializer(model)
+
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(message_start) error = %v", err)
+	}
+	if data == nil {
+		t.Fatal("message_start should produce output")
+	}
+
+	_, payload := parseSSEEvent(t, data)
+	msg, ok := payload["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("message field should be object")
+	}
+	if msg["model"] != model {
+		t.Errorf("message.model = %q, want %q", msg["model"], model)
+	}
+
+	id, ok := msg["id"].(string)
+	if !ok {
+		t.Fatalf("message.id should be string, got %T", msg["id"])
+	}
+	if id == "" {
+		t.Errorf("message.id should not be empty")
+	}
+}

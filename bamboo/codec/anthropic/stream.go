@@ -3,6 +3,7 @@ package anthropic
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 )
@@ -73,6 +74,10 @@ func (s *anthropicStreamSerializer) Flush() ([]byte, error) {
 //	data: {"type":"message_start","message":{"id":"...","type":"message","role":"assistant","content":[],"model":"...","stop_reason":null,"usage":{"input_tokens":0,"output_tokens":0}}}
 func (s *anthropicStreamSerializer) handleMessageStart(event bamboo.StreamEvent) ([]byte, error) {
 	s.started = true
+
+	if s.messageID == "" {
+		s.messageID = fmt.Sprintf("msg_bamboo_%d", time.Now().UnixNano())
+	}
 
 	if event.Message != nil {
 		// 从 message 中提取 id 和 model（若有）

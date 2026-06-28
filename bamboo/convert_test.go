@@ -1709,3 +1709,92 @@ func TestStreamConverter_SignatureDeltaWithThinkingBlock(t *testing.T) {
 		t.Errorf("signature = %q, want %q", delta.Signature, "valid_sig")
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// BlockStop delta 消费测试
+// ──────────────────────────────────────────────────────────────────────
+
+// TestStreamConverterBlockStopImmediate 验证 BlockStop delta 到达时立即输出 EventContentBlockStop，
+// 而非等到 handleStop（StreamTypeDone）才统一关闭。
+//
+// 流程: Start → BlockStart(tool_use) → ToolCallDeltaData → BlockStop(index=0)
+// 断言: BlockStop 事件本身应产生 content_block_stop（index=0），无需等待 Done。
+func TestStreamConverterBlockStopImmediate(t *testing.T) {
+	sc := NewStreamConverter()
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+
+	// BlockStart(tool_use, id=tool_1) → content_block_start(index=0)
+	startEvents := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStartDeltaWithID("tool_use", "tool_1", "get_weather"),
+	})
+	if len(startEvents) != 1 || startEvents[0].Type != EventContentBlockStart {
+		t.Fatalf("expected 1 content_block_start, got %#v", startEvents)
+	}
+	toolIndex := startEvents[0].Index
+
+	// ToolCallDeltaData → content_block_delta(index=toolIndex)
+	sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewToolCallDeltaData(`{"city":"Tokyo"}`),
+	})
+
+	// BlockStop(index=toolIndex) — 应立即输出 content_block_stop
+	stopEvents := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStopDelta(toolIndex),
+	})
+
+	var hasBlockStop bool
+	for _, ev := range stopEvents {
+		if ev.Type == EventContentBlockStop && ev.Index == toolIndex {
+			hasBlockStop = true
+		}
+	}
+	if !hasBlockStop {
+		t.Fatalf("BlockStop delta should immediately emit content_block_stop(index=%d), got events: %#v", toolIndex, stopEvents)
+	}
+}
+
+// TestStreamConverterBlockStopNoDuplicate 验证 BlockStop 消费后 handleStop 不再重复输出
+// 同一 index 的 content_block_stop。
+//
+// 流程: Start → BlockStart(tool_use) → ToolCallDeltaData → BlockStop(index=0) → Done
+// 断言: index=0 的 content_block_stop 在整个流中只出现恰好一次。
+func TestStreamConverterBlockStopNoDuplicate(t *testing.T) {
+	sc := NewStreamConverter()
+	var allEvents []StreamEvent
+
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})...)
+
+	startEvents := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStartDeltaWithID("tool_use", "tool_1", "get_weather"),
+	})
+	allEvents = append(allEvents, startEvents...)
+	toolIndex := startEvents[0].Index
+
+	sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewToolCallDeltaData(`{"city":"Tokyo"}`),
+	})
+
+	// BlockStop 立即关闭
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStopDelta(toolIndex),
+	})...)
+
+	// Done 触发 handleStop — 不得重复关闭已 stop 的 index
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})...)
+
+	stopCount := 0
+	for _, ev := range allEvents {
+		if ev.Type == EventContentBlockStop && ev.Index == toolIndex {
+			stopCount++
+		}
+	}
+	if stopCount != 1 {
+		t.Fatalf("content_block_stop(index=%d) should appear exactly once, got %d times. Events: %#v", toolIndex, stopCount, allEvents)
+	}
+}

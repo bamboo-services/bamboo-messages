@@ -297,6 +297,7 @@ type StreamConverter struct {
 	toolBlockByID            map[string]int
 	finishReason             FinishReason
 	stopHandled              bool
+	stoppedBlockIndexes      map[int]bool // 已发送 content_block_stop 的 block index 集合（防重复）
 }
 
 func NewStreamConverter() *StreamConverter { return &StreamConverter{} }
@@ -374,6 +375,7 @@ func (sc *StreamConverter) handleStart() []StreamEvent {
 	sc.toolBlockByID = make(map[string]int)
 	sc.finishReason = ""
 	sc.stopHandled = false
+	sc.stoppedBlockIndexes = make(map[int]bool)
 	return []StreamEvent{
 		{
 			Type:    EventMessageStart,
@@ -624,6 +626,12 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 			Index: idx,
 			Delta: &StreamDelta{Type: DeltaInputJSON, PartialJSON: partialJSON},
 		}}
+	case provider.StreamDeltaTypeBlockStop:
+		data, ok := delta.Data.(provider.BlockStopData)
+		if !ok {
+			return nil
+		}
+		return sc.handleBlockStop(data)
 	case provider.StreamDeltaTypeUsage:
 		data, ok := delta.Data.(provider.UsageData)
 		if !ok {
@@ -653,6 +661,46 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 	}
 }
 
+// handleBlockStop 处理 BlockStop delta，立即输出 content_block_stop 事件。
+//
+// 当 Provider 发出 BlockStop delta（如 Anthropic 的 content_block_stop）时，
+// 立即关闭对应的活跃 block，无需等待 handleStop 统一关闭。
+// 通过 stoppedBlockIndexes 集合防止与 handleStop 产生重复的 content_block_stop。
+func (sc *StreamConverter) handleBlockStop(data provider.BlockStopData) []StreamEvent {
+	if !data.HasIndex {
+		return nil
+	}
+	index := data.Index
+	if sc.stoppedBlockIndexes[index] {
+		return nil
+	}
+
+	var events []StreamEvent
+
+	// 关闭该 index 对应的活跃 block
+	// 1. tool block
+	for i, idx := range sc.openToolBlockIndexes {
+		if idx == index {
+			events = append(events, StreamEvent{Type: EventContentBlockStop, Index: idx})
+			sc.openToolBlockIndexes = append(sc.openToolBlockIndexes[:i], sc.openToolBlockIndexes[i+1:]...)
+			break
+		}
+	}
+	// 2. text block
+	if sc.textBlockStarted && sc.textBlockIndex == index {
+		sc.textBlockStarted = false
+		events = append(events, StreamEvent{Type: EventContentBlockStop, Index: index})
+	}
+	// 3. thinking block
+	if sc.thinkingBlockStarted && sc.thinkingBlockIndex == index {
+		sc.thinkingBlockStarted = false
+		events = append(events, StreamEvent{Type: EventContentBlockStop, Index: index})
+	}
+
+	sc.stoppedBlockIndexes[index] = true
+	return events
+}
+
 func (sc *StreamConverter) handleStop() []StreamEvent {
 	sc.stopHandled = true
 	usage := sc.usage
@@ -672,9 +720,18 @@ func (sc *StreamConverter) handleStop() []StreamEvent {
 	}
 
 	var events []StreamEvent
-	events = append(events, sc.stopAllTextOrThinking()...)
+	if sc.thinkingBlockStarted && !sc.stoppedBlockIndexes[sc.thinkingBlockIndex] {
+		sc.thinkingBlockStarted = false
+		events = append(events, StreamEvent{Type: EventContentBlockStop, Index: sc.thinkingBlockIndex})
+	}
+	if sc.textBlockStarted && !sc.stoppedBlockIndexes[sc.textBlockIndex] {
+		sc.textBlockStarted = false
+		events = append(events, StreamEvent{Type: EventContentBlockStop, Index: sc.textBlockIndex})
+	}
 	for _, idx := range sc.openToolBlockIndexes {
-		events = append(events, StreamEvent{Type: EventContentBlockStop, Index: idx})
+		if !sc.stoppedBlockIndexes[idx] {
+			events = append(events, StreamEvent{Type: EventContentBlockStop, Index: idx})
+		}
 	}
 	sc.openToolBlockIndexes = nil
 	sc.toolBlockStarted = false

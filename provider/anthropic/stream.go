@@ -110,10 +110,14 @@ func (p *Provider) contentBlockDelta(event anthropic.BetaRawMessageStreamEventUn
 
 // contentBlockStop 处理内容块结束事件。
 //
-// Anthropic content_block_stop 事件，无需特殊处理。
-func (p *Provider) contentBlockStop(_ anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
-	// 内容块结束，无需特殊处理
-	return nil
+// 将 Anthropic content_block_stop 事件透传为 BlockStop delta，
+// 携带内容块索引，供下游组件识别内容块边界。
+func (p *Provider) contentBlockStop(event anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
+	block := event.AsContentBlockStop()
+	return []provider.StreamEvent{{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStopDelta(int(block.Index)),
+	}}
 }
 
 // contentMessageDelta 处理消息增量事件（包含 usage 和 stop_reason）。

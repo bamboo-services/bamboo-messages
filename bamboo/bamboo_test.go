@@ -53,7 +53,7 @@ func (m *mockProviderWithEvents) Complete(_ context.Context, _ []provider.Messag
 }
 
 func (m *mockProviderWithEvents) CompleteWithSystem(_ context.Context, _ string, _ []provider.Message, _ *provider.ChatConfig) (*provider.CompletionResult, error) {
-	return m.Complete(nil, nil, nil)
+	return m.Complete(context.TODO(), nil, nil)
 }
 
 func (m *mockProviderWithEvents) GetProviderType() provider.ProviderType {
@@ -151,15 +151,32 @@ func TestChat_CtxCancelTriggersTermination(t *testing.T) {
 
 	var collected []StreamEvent
 	received := 0
-	for e := range ch {
-		collected = append(collected, e)
-		received++
-		if received == 2 {
-			cancel() // 接收 2 个事件后取消
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for e := range ch {
+			collected = append(collected, e)
+			received++
+			if received == 2 {
+				cancel() // 接收 2 个事件后取消
+			}
 		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ctx 取消后 channel 未在超时内关闭，可能存在 goroutine 泄漏")
 	}
 
-	// 验证事件序列包含终止信号（EventMessageStop 或 EventError）
+	// ctx 取消后 goroutine 有两条合法退出路径：
+	//   - 路径 A（bamboo.go L118）：在外层 select 检测到 ctx.Done()，通过 converter
+	//     合成 EventError，自动补发 EventMessageStop。
+	//   - 路径 B（bamboo.go L139）：在写入 out channel 时检测到 ctx.Done()，直接
+	//     return 并关闭 channel，不合成额外终止事件。
+	// 两条路径都是合法的，因为消费者主动取消了 ctx。测试只保证 channel 能关闭、
+	// 不挂起、不 panic；终止事件是否出现取决于竞态，不作为失败条件。
 	var hasStop, hasError bool
 	for _, e := range collected {
 		switch e.Type {
@@ -169,13 +186,12 @@ func TestChat_CtxCancelTriggersTermination(t *testing.T) {
 			hasError = true
 		}
 	}
-
 	if !hasStop && !hasError {
-		t.Error("期望包含 EventMessageStop 或 EventError（ctx 取消终止），实际未收到")
-		t.Logf("收到 %d 个事件:", len(collected))
-		for i, e := range collected {
-			t.Logf("  [%d] type=%s", i, e.Type)
-		}
+		t.Log("未收到 EventMessageStop 或 EventError（走了路径 B，直接关闭 channel）")
+	}
+	t.Logf("收到 %d 个事件:", len(collected))
+	for i, e := range collected {
+		t.Logf("  [%d] type=%s", i, e.Type)
 	}
 }
 
@@ -357,5 +373,73 @@ func TestChat_EmptyStreamReturnsError(t *testing.T) {
 	}
 	if ch != nil {
 		t.Errorf("expected nil channel for empty stream, got non-nil")
+	}
+}
+
+// TestTerminalEventNotDroppedUnderBackpressure 验证消费者慢读（背压）时终止事件不被丢弃。
+//
+// 这是 P0 关键回归测试：旧代码使用 time.After(terminateWriteTimeout) (5s) 作为兜底，
+// 当消费者因背压而慢读超过 5s 时，goroutine 会触发超时分支直接 return，
+// 导致 EventMessageStop（携带 finish_reason）被静默丢弃，下游消费者永久挂起。
+//
+// 修复后两条终止路径（ctx.Done 路径 + StreamTypeDone 路径）均改为 <-ctx.Done()，
+// 仅依赖上层 context 控制生命周期，不再用固定超时丢弃终止事件。
+//
+// 场景：
+//   - provider 快速发送完整序列 [Start, Delta(text), Stop, Done]
+//   - Chat 返回 channel 后，消费者故意睡眠 7s（超过旧 5s 超时）模拟背压
+//   - 7s 后才开始 range channel
+//
+// 预期：消费者最终收到 EventMessageStop（未被 5s 超时丢弃）。
+func TestTerminalEventNotDroppedUnderBackpressure(t *testing.T) {
+	// 使用长 context 超时，确保测试失败原因是断言而非 ctx 取消
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	p := &mockProviderWithEvents{
+		events: []provider.StreamEvent{
+			{Type: provider.StreamTypeStart},
+			{Type: provider.StreamTypeDelta, Delta: provider.NewTextDelta("hello")},
+			{Type: provider.StreamTypeStop, FinishReason: provider.FinishReasonStop},
+			{Type: provider.StreamTypeDone},
+		},
+	}
+	c := NewClient(p)
+
+	ch, err := c.Chat(ctx, []BambooMessage{NewUserMessage("hi")}, "", nil)
+	if err != nil {
+		t.Fatalf("Chat 返回错误: %v", err)
+	}
+
+	// 故意延迟 7s 再读取 — 超过旧 terminateWriteTimeout (5s)。
+	// 旧代码：goroutine 在 t=5s 触发 time.After 分支 return，EventMessageStop 被丢弃，
+	//         channel 关闭后 range 立即结束，hasStop == false → 测试失败。
+	// 新代码：goroutine 在 <-ctx.Done() 上阻塞等待，t=7s 消费者开始读取，
+	//         终止事件被正常消费，hasStop == true → 测试通过。
+	backpressureDelay := 7 * time.Second
+	select {
+	case <-time.After(backpressureDelay):
+	case <-ctx.Done():
+		t.Fatalf("ctx 在背压等待期间提前取消: %v", ctx.Err())
+	}
+
+	var events []StreamEvent
+	for e := range ch {
+		events = append(events, e)
+	}
+
+	var hasStop bool
+	for _, e := range events {
+		if e.Type == EventMessageStop {
+			hasStop = true
+			break
+		}
+	}
+	if !hasStop {
+		t.Error("期望收到 EventMessageStop（背压下终止事件不应被丢弃），实际未收到")
+		t.Logf("收到事件序列（%d 个）:", len(events))
+		for i, e := range events {
+			t.Logf("  [%d] type=%s", i, e.Type)
+		}
 	}
 }

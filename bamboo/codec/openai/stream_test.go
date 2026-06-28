@@ -209,8 +209,11 @@ func TestStreamSerializer_ToolCallStream(t *testing.T) {
 // 背景：上游模型在 finish chunk 中同时返回 usage 和 finish_reason，
 // bamboo 适配器会拆分为 UsageDelta（先）和 StreamTypeStop（后）两个事件。
 // UsageDelta 在 StreamConverter 中生成 EventMessageDelta(StopReason=""),
-// 如果 codec 层把空 StopReason 映射为 "stop"，会产生一个额外的 finish_reason:"stop" chunk，
+// 如果 codec 层把空 StopReason 映射为 "stop"，会产生一个额外的 finish_reason:"stop" chunk,
 // 导致客户端收到两个 finish_reason（先 stop 后 tool_calls）。
+//
+// 新行为（chunk 分离）：usage-only 事件输出单条 chunk，choices 为空数组 []，
+// 仅含 usage 字段，无任何 finish_reason。
 func TestStreamSerializer_UsageDeltaNoFinishReason(t *testing.T) {
 	s := newStreamSerializer("")
 
@@ -236,8 +239,9 @@ func TestStreamSerializer_UsageDeltaNoFinishReason(t *testing.T) {
 	}
 	chunk := parseSSEChunk(t, data)
 
-	if chunk.Choices[0].FinishReason != nil {
-		t.Errorf("FinishReason should be nil for empty StopReason, got %q", *chunk.Choices[0].FinishReason)
+	// usage-only chunk 的 choices 必须为空数组（无 finish_reason）
+	if len(chunk.Choices) != 0 {
+		t.Fatalf("Choices len = %d, want 0 (usage-only chunk has empty choices)", len(chunk.Choices))
 	}
 	if chunk.Usage == nil {
 		t.Fatal("Usage should be present")
@@ -378,6 +382,167 @@ func TestStreamSerializer_ToolCallIndexConsistency_NoPrecedingText(t *testing.T)
 		t.Errorf("tool_call index mismatch: block_start=%d, delta=%d — "+
 			"downstream client will treat delta as a new tool_call and fail "+
 			"with 'Expected id to be a string'", startIndex, deltaIndex)
+	}
+}
+
+// TestModelFieldInChunks 验证所有 SSE chunk 携带 newStreamSerializer 设置的 model 字段。
+//
+// 背景：真实 OpenAI API 每个 chunk 都携带 "model" 字段，客户端依赖此字段
+// 做路由、统计与展示。codec 层之前未把 s.model 写入 chunk.Model，导致 model
+// 字段始终为空字符串。
+func TestModelFieldInChunks(t *testing.T) {
+	s := newStreamSerializer("gpt-4o")
+
+	// message_start chunk
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(message_start) error = %v", err)
+	}
+	chunk := parseSSEChunk(t, data)
+	if chunk.Model != "gpt-4o" {
+		t.Errorf("message_start Model = %q, want %q", chunk.Model, "gpt-4o")
+	}
+
+	// text_delta chunk
+	data, err = s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 0,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaTextDelta, Text: "hi"},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(text_delta) error = %v", err)
+	}
+	chunk = parseSSEChunk(t, data)
+	if chunk.Model != "gpt-4o" {
+		t.Errorf("text_delta Model = %q, want %q", chunk.Model, "gpt-4o")
+	}
+
+	// message_delta chunk (finish_reason only)
+	data, err = s.Serialize(bamboo.StreamEvent{
+		Type: bamboo.EventMessageDelta,
+		Delta: &bamboo.MessageDelta{
+			StopReason: bamboo.FinishReasonEndTurn,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(message_delta finish) error = %v", err)
+	}
+	// 此事件可能产生多个 chunk，逐行解析
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n\n")
+	for _, line := range lines {
+		c := parseSSEChunk(t, []byte(line))
+		if c.Model != "gpt-4o" {
+			t.Errorf("message_delta Model = %q, want %q", c.Model, "gpt-4o")
+		}
+	}
+}
+
+// TestFinishReasonUsageSeparated 验证 message_delta 事件同时携带 StopReason 和 Usage 时，
+// finish_reason 与 usage 被拆分为两个独立的 SSE data 行。
+//
+// 背景：真实 OpenAI API 的 finish_reason chunk 是
+//   {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+// usage chunk 是
+//   {"choices":[],"usage":{...}}
+// 两者独立发送，不应合并到同一个 chunk。合并会导致部分客户端（如 Vercel AI SDK）
+// 解析 usage 时丢失 finish_reason，或反之。
+func TestFinishReasonUsageSeparated(t *testing.T) {
+	s := newStreamSerializer("gpt-4o")
+
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type: bamboo.EventMessageDelta,
+		Delta: &bamboo.MessageDelta{
+			StopReason: bamboo.FinishReasonToolUse,
+		},
+		Usage: &bamboo.Usage{
+			InputTokens:  100,
+			OutputTokens: 200,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(message_delta) error = %v", err)
+	}
+
+	// 必须拆分为两条 data 行
+	raw := string(data)
+	if cnt := strings.Count(raw, "data: "); cnt != 2 {
+		t.Fatalf("expected 2 data lines (finish_reason + usage), got %d\nraw: %s", cnt, raw)
+	}
+
+	segments := strings.Split(strings.TrimRight(raw, "\n"), "\n\n")
+	if len(segments) != 2 {
+		t.Fatalf("expected 2 segments, got %d", len(segments))
+	}
+
+	// 第一条：finish_reason，无 usage
+	c1 := parseSSEChunk(t, []byte(segments[0]))
+	if len(c1.Choices) != 1 {
+		t.Fatalf("first chunk Choices len = %d, want 1", len(c1.Choices))
+	}
+	if c1.Choices[0].FinishReason == nil {
+		t.Fatal("first chunk should have FinishReason")
+	}
+	if *c1.Choices[0].FinishReason != "tool_calls" {
+		t.Errorf("first chunk FinishReason = %q, want %q", *c1.Choices[0].FinishReason, "tool_calls")
+	}
+	if c1.Usage != nil {
+		t.Errorf("first chunk should NOT contain Usage, got %+v", c1.Usage)
+	}
+
+	// 第二条：usage，choices 为空数组
+	c2 := parseSSEChunk(t, []byte(segments[1]))
+	if len(c2.Choices) != 0 {
+		t.Fatalf("second chunk Choices len = %d, want 0 (empty array)", len(c2.Choices))
+	}
+	if c2.Usage == nil {
+		t.Fatal("second chunk should contain Usage")
+	}
+	if c2.Usage.PromptTokens != 100 {
+		t.Errorf("second chunk PromptTokens = %d, want 100", c2.Usage.PromptTokens)
+	}
+	if c2.Usage.CompletionTokens != 200 {
+		t.Errorf("second chunk CompletionTokens = %d, want 200", c2.Usage.CompletionTokens)
+	}
+	if c2.Usage.TotalTokens != 300 {
+		t.Errorf("second chunk TotalTokens = %d, want 300", c2.Usage.TotalTokens)
+	}
+}
+
+// TestFinishReasonOnly 验证 message_delta 仅携带 StopReason（无 Usage）时，
+// 输出恰好一条 data 行，包含 finish_reason 且无 usage。
+func TestFinishReasonOnly(t *testing.T) {
+	s := newStreamSerializer("gpt-4o")
+
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type: bamboo.EventMessageDelta,
+		Delta: &bamboo.MessageDelta{
+			StopReason: bamboo.FinishReasonMaxTokens,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(message_delta) error = %v", err)
+	}
+
+	raw := string(data)
+	if cnt := strings.Count(raw, "data: "); cnt != 1 {
+		t.Fatalf("expected exactly 1 data line, got %d\nraw: %s", cnt, raw)
+	}
+
+	chunk := parseSSEChunk(t, data)
+	if len(chunk.Choices) != 1 {
+		t.Fatalf("Choices len = %d, want 1", len(chunk.Choices))
+	}
+	if chunk.Choices[0].FinishReason == nil {
+		t.Fatal("FinishReason is nil")
+	}
+	if *chunk.Choices[0].FinishReason != "length" {
+		t.Errorf("FinishReason = %q, want %q", *chunk.Choices[0].FinishReason, "length")
+	}
+	if chunk.Usage != nil {
+		t.Errorf("Usage should be nil, got %+v", chunk.Usage)
 	}
 }
 
