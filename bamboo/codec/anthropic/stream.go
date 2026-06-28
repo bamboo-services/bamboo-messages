@@ -18,8 +18,10 @@ type anthropicStreamSerializer struct {
 }
 
 // newStreamSerializer 创建一个新的 Anthropic 流式序列化器实例。
-func newStreamSerializer() *anthropicStreamSerializer {
-	return &anthropicStreamSerializer{}
+func newStreamSerializer(model string) *anthropicStreamSerializer {
+	return &anthropicStreamSerializer{
+		model: model,
+	}
 }
 
 // Serialize 将单个 StreamEvent 序列化为 Anthropic SSE 数据帧。

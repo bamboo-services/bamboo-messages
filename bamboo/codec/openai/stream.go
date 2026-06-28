@@ -64,10 +64,11 @@ type openaiStreamSerializer struct {
 }
 
 // newStreamSerializer 创建一个新的 OpenAI 流式序列化器实例。
-func newStreamSerializer() *openaiStreamSerializer {
+func newStreamSerializer(model string) *openaiStreamSerializer {
 	return &openaiStreamSerializer{
 		id:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
 		created: time.Now().Unix(),
+		model:   model,
 	}
 }
 

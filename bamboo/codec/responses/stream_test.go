@@ -104,7 +104,7 @@ func requireStringField(t *testing.T, payload map[string]any, key string) string
 // ════════════════════════════════════════════════════════════════════════════
 
 func TestStreamSerializer_TextStream(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// 1. message_start → response.created（嵌套在 response 字段中）
 	data, err := s.Serialize(bamboo.StreamEvent{
@@ -276,7 +276,7 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 }
 
 func TestStreamSerializer_FunctionCallStream(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// message_start
 	s.Serialize(bamboo.StreamEvent{
@@ -378,7 +378,7 @@ func TestStreamSerializer_FunctionCallStream(t *testing.T) {
 }
 
 func TestStreamSerializer_ThinkingStream(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// message_start
 	s.Serialize(bamboo.StreamEvent{
@@ -426,7 +426,7 @@ func TestStreamSerializer_ThinkingStream(t *testing.T) {
 }
 
 func TestStreamSerializer_ResponseCreated(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	data, err := s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
@@ -458,7 +458,7 @@ func TestStreamSerializer_ResponseCreated(t *testing.T) {
 }
 
 func TestStreamSerializer_ResponseCompletedWithUsage(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// 先发送 message_start
 	s.Serialize(bamboo.StreamEvent{
@@ -502,7 +502,7 @@ func TestStreamSerializer_ResponseCompletedWithUsage(t *testing.T) {
 }
 
 func TestStreamSerializer_ResponseCompletedUsageDetailsIncludeZeroRequiredFields(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
@@ -552,7 +552,7 @@ func TestStreamSerializer_ResponseCompletedUsageDetailsIncludeZeroRequiredFields
 }
 
 func TestStreamSerializer_ResponseCompletedParsesWithOpenAIGoSchema(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
@@ -602,7 +602,7 @@ func TestStreamSerializer_ResponseCompletedParsesWithOpenAIGoSchema(t *testing.T
 }
 
 func TestStreamSerializer_ResponseCompletedWithoutUpstreamUsageParsesWithOpenAIGoSchema(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
@@ -637,7 +637,7 @@ func TestStreamSerializer_ResponseCompletedWithoutUpstreamUsageParsesWithOpenAIG
 }
 
 func TestStreamSerializer_MaxTokensStatus(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
@@ -665,7 +665,7 @@ func TestStreamSerializer_MaxTokensStatus(t *testing.T) {
 }
 
 func TestStreamSerializer_ErrorEvent(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	data, err := s.Serialize(bamboo.StreamEvent{
 		Type: bamboo.EventError,
@@ -696,7 +696,7 @@ func TestStreamSerializer_ErrorEvent(t *testing.T) {
 }
 
 func TestStreamSerializer_Flush(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 	data, err := s.Flush()
 	if err != nil {
 		t.Fatalf("Flush() error = %v", err)
@@ -709,7 +709,7 @@ func TestStreamSerializer_Flush(t *testing.T) {
 
 func TestStreamSerializer_CombinedStream(t *testing.T) {
 	// 完整流程：thinking + text + tool_use
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// message_start
 	s.Serialize(bamboo.StreamEvent{
@@ -785,7 +785,7 @@ func TestStreamSerializer_CombinedStream(t *testing.T) {
 }
 
 func TestStreamSerializer_TextAccumulation(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,

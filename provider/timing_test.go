@@ -392,6 +392,28 @@ func TestRound2(t *testing.T) {
 	}
 }
 
+func TestTimingCollectorMissingStart(t *testing.T) {
+	// 适配器未发送 Start 事件时，fallback startTime 到首个非 Start 事件时间
+	tc := NewTimingCollector()
+
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeTextOutput, TextData("hello")))
+	time.Sleep(5 * time.Millisecond)
+
+	tc.Observe(makeStopEvent())
+
+	stats := tc.Stats()
+
+	if stats.TotalDuration <= 0 {
+		t.Errorf("TotalDuration should be > 0 when Start event is missing, got %v", stats.TotalDuration)
+	}
+	if stats.FirstByteDuration != 0 {
+		t.Errorf("FirstByteDuration should be 0 when first event is also the first byte, got %v", stats.FirstByteDuration)
+	}
+	if stats.ContentDuration <= 0 {
+		t.Errorf("ContentDuration should be > 0 when Start event is missing, got %v", stats.ContentDuration)
+	}
+}
+
 func TestTimingCollector_NoStopEvent(t *testing.T) {
 	// 流中断（无 Stop 事件）— 取消场景应保留已有记录
 	tc := NewTimingCollector()

@@ -198,6 +198,11 @@ func (tc *TimingCollector) Observe(event StreamEvent) {
 	now := time.Now()
 	tc.lastEventTime = now
 
+	// 缺失 Start 事件时，fallback startTime 到首个非 Start 事件时间
+	if tc.startTime.IsZero() && event.Type != StreamTypeStart {
+		tc.startTime = now
+	}
+
 	switch event.Type {
 	case StreamTypeStart:
 		if tc.startTime.IsZero() {

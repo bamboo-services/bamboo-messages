@@ -145,10 +145,11 @@ type responsesStreamBlock struct {
 	encryptedContent string
 }
 
-func newStreamSerializer() *responsesStreamSerializer {
+func newStreamSerializer(model string) *responsesStreamSerializer {
 	return &responsesStreamSerializer{
 		responseID: fmt.Sprintf("resp_%d", time.Now().UnixNano()),
 		createdAt:  time.Now().Unix(),
+		model:      model,
 		blocks:     make(map[int]*responsesStreamBlock),
 	}
 }

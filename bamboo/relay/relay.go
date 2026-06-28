@@ -176,7 +176,7 @@ func RelayStream(
 	}
 
 	// ── 启动转换 goroutine ──
-	serializer := outCodec.NewSerializer()
+	serializer := outCodec.NewSerializer(req.Config.Model)
 	out := make(chan []byte, 64)
 
 	go func() {

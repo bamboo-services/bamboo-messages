@@ -57,8 +57,10 @@ type geminiStreamSerializer struct {
 }
 
 // newStreamSerializer 创建一个新的 Gemini 流式序列化器实例。
-func newStreamSerializer() *geminiStreamSerializer {
-	return &geminiStreamSerializer{}
+func newStreamSerializer(model string) *geminiStreamSerializer {
+	return &geminiStreamSerializer{
+		model: model,
+	}
 }
 
 // Serialize 将单个 StreamEvent 序列化为 Gemini SSE 数据帧。

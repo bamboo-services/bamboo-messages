@@ -33,7 +33,7 @@ func parseSSEEvent(t *testing.T, raw []byte) (eventType string, payload map[stri
 }
 
 func TestStreamSerializer_TextStream(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// 1. message_start
 	data, err := s.Serialize(bamboo.StreamEvent{
@@ -169,7 +169,7 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 }
 
 func TestStreamSerializer_FlushReturnsNil(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 	data, err := s.Flush()
 	if err != nil {
 		t.Fatalf("Flush() error = %v", err)
@@ -180,7 +180,7 @@ func TestStreamSerializer_FlushReturnsNil(t *testing.T) {
 }
 
 func TestStreamSerializer_ErrorEvent(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 	data, err := s.Serialize(bamboo.StreamEvent{
 		Type: bamboo.EventError,
 		Error: &bamboo.BambooError{
@@ -208,7 +208,7 @@ func TestStreamSerializer_ErrorEvent(t *testing.T) {
 }
 
 func TestStreamSerializer_ToolUseStream(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// message_start
 	s.Serialize(bamboo.StreamEvent{
@@ -263,7 +263,7 @@ func TestStreamSerializer_ToolUseStream(t *testing.T) {
 }
 
 func TestStreamSerializer_ThinkingStream(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
@@ -302,7 +302,7 @@ func TestStreamSerializer_ThinkingStream(t *testing.T) {
 }
 
 func TestStreamSerializer_PingEvent(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 	data, err := s.Serialize(bamboo.StreamEvent{
 		Type: bamboo.EventPing,
 	})
@@ -319,7 +319,7 @@ func TestStreamSerializer_PingEvent(t *testing.T) {
 }
 
 func TestStreamSerializer_MessageDeltaUsage(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 	data, err := s.Serialize(bamboo.StreamEvent{
 		Type: bamboo.EventMessageDelta,
 		Delta: &bamboo.MessageDelta{

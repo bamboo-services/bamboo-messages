@@ -160,6 +160,45 @@ func TestStreamDeltaTypeConstants(t *testing.T) {
 	}
 }
 
+// TestNewBlockStopDelta 测试创建带索引的内容块停止事件。
+func TestNewBlockStopDelta(t *testing.T) {
+	delta := NewBlockStopDelta(2)
+
+	if delta.Type != StreamDeltaTypeBlockStop {
+		t.Errorf("NewBlockStopDelta() Type = %v, want %v", delta.Type, StreamDeltaTypeBlockStop)
+	}
+
+	data, ok := delta.Data.(BlockStopData)
+	if !ok {
+		t.Errorf("NewBlockStopDelta() Data type assertion failed, want BlockStopData")
+	}
+
+	if data.Index != 2 {
+		t.Errorf("NewBlockStopDelta() Index = %v, want %v", data.Index, 2)
+	}
+	if !data.HasIndex {
+		t.Errorf("NewBlockStopDelta() HasIndex = %v, want true", data.HasIndex)
+	}
+}
+
+// TestNewBlockStopDeltaNoIndex 测试创建无索引的内容块停止事件。
+func TestNewBlockStopDeltaNoIndex(t *testing.T) {
+	delta := NewBlockStopDeltaNoIndex()
+
+	if delta.Type != StreamDeltaTypeBlockStop {
+		t.Errorf("NewBlockStopDeltaNoIndex() Type = %v, want %v", delta.Type, StreamDeltaTypeBlockStop)
+	}
+
+	data, ok := delta.Data.(BlockStopData)
+	if !ok {
+		t.Errorf("NewBlockStopDeltaNoIndex() Data type assertion failed, want BlockStopData")
+	}
+
+	if data.HasIndex {
+		t.Errorf("NewBlockStopDeltaNoIndex() HasIndex = %v, want false", data.HasIndex)
+	}
+}
+
 // TestStreamTypeConstants 测试流事件类型常量的值
 func TestStreamTypeConstants(t *testing.T) {
 	tests := []struct {

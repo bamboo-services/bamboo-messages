@@ -26,7 +26,7 @@ func parseSSEChunk(t *testing.T, raw []byte) openaiChunk {
 }
 
 func TestStreamSerializer_TextStream(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// 1. message_start
 	data, err := s.Serialize(bamboo.StreamEvent{
@@ -120,7 +120,7 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 }
 
 func TestStreamSerializer_ThinkingStream(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// message_start
 	s.Serialize(bamboo.StreamEvent{
@@ -144,7 +144,7 @@ func TestStreamSerializer_ThinkingStream(t *testing.T) {
 }
 
 func TestStreamSerializer_ToolCallStream(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// message_start
 	s.Serialize(bamboo.StreamEvent{
@@ -212,7 +212,7 @@ func TestStreamSerializer_ToolCallStream(t *testing.T) {
 // 如果 codec 层把空 StopReason 映射为 "stop"，会产生一个额外的 finish_reason:"stop" chunk，
 // 导致客户端收到两个 finish_reason（先 stop 后 tool_calls）。
 func TestStreamSerializer_UsageDeltaNoFinishReason(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// message_start
 	s.Serialize(bamboo.StreamEvent{
@@ -251,7 +251,7 @@ func TestStreamSerializer_UsageDeltaNoFinishReason(t *testing.T) {
 }
 
 func TestStreamSerializer_FlushDONE(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 	data, err := s.Flush()
 	if err != nil {
 		t.Fatalf("Flush() error = %v", err)
@@ -262,7 +262,7 @@ func TestStreamSerializer_FlushDONE(t *testing.T) {
 }
 
 func TestStreamSerializer_ErrorEvent(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 	data, err := s.Serialize(bamboo.StreamEvent{
 		Type: bamboo.EventError,
 		Error: &bamboo.BambooError{
@@ -283,7 +283,7 @@ func TestStreamSerializer_ErrorEvent(t *testing.T) {
 }
 
 func TestStreamSerializer_MultipleToolCalls(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// message_start
 	s.Serialize(bamboo.StreamEvent{
@@ -335,7 +335,7 @@ func TestStreamSerializer_MultipleToolCalls(t *testing.T) {
 //	StreamConverter 行为: text block Index=0; tool: stopIdx=0, blockIndex++→1,
 //	block_start Index=1, delta Index=1
 func TestStreamSerializer_ToolCallIndexConsistency_NoPrecedingText(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// message_start
 	s.Serialize(bamboo.StreamEvent{
@@ -382,7 +382,7 @@ func TestStreamSerializer_ToolCallIndexConsistency_NoPrecedingText(t *testing.T)
 }
 
 func TestStreamSerializer_ToolCallIndexConsistency_WithPrecedingText(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// message_start
 	s.Serialize(bamboo.StreamEvent{

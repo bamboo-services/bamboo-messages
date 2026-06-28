@@ -20,7 +20,7 @@ import (
 // 构造 MessageDelta 事件携带 Usage{InputTokens:10, OutputTokens:20}，
 // 断言 response.completed 的 JSON 中包含 "total_tokens":30。
 func TestResponsesStream_TotalTokens(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// 先发 message_start 建立 response.created
 	if _, err := s.Serialize(bamboo.StreamEvent{
@@ -80,7 +80,7 @@ func TestResponsesStream_TotalTokens(t *testing.T) {
 // feed MessageDelta 不带 Usage（nil），断言 response.completed JSON
 // 仍包含 usage:{input_tokens:0, output_tokens:0, total_tokens:0}。
 func TestResponsesStream_ZeroUsage(t *testing.T) {
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// message_start
 	s.Serialize(bamboo.StreamEvent{
@@ -145,7 +145,7 @@ func TestResponsesStream_ZeroUsage(t *testing.T) {
 // 返回 content_block_stop 产生的 SSE 字节（包含两个帧）。
 func setupReasoningStream(t *testing.T) []byte {
 	t.Helper()
-	s := newStreamSerializer()
+	s := newStreamSerializer("")
 
 	// message_start
 	s.Serialize(bamboo.StreamEvent{

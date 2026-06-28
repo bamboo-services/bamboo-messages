@@ -48,6 +48,7 @@ const (
 	StreamDeltaTypeToolCallDelta StreamDeltaType = "tool_call_delta" // 工具调用增量事件，表示工具调用 JSON 参数的增量部分
 	StreamDeltaTypeUsage         StreamDeltaType = "usage"           // 用量统计事件，表示本次对话的 Token 使用量统计信息
 	StreamDeltaTypeBlockStart    StreamDeltaType = "block_start"     // 内容块开始事件，标记新内容块的起始
+	StreamDeltaTypeBlockStop     StreamDeltaType = "block_stop"      // 内容块停止事件，标记内容块的结束
 )
 
 // ============================================
@@ -114,6 +115,14 @@ type BlockStartData struct {
 	BlockType string `json:"block_type"`     // 内容块类型: "text" | "thinking" | "tool_use"
 	ID        string `json:"id,omitempty"`   // 内容块 ID（tool_use 时使用）
 	Name      string `json:"name,omitempty"` // 工具名称（tool_use 时使用）
+}
+
+// BlockStopData 内容块停止数据。
+//
+// 标记内容块（text/thinking/tool_use）的结束，包含索引信息用于匹配对应的 block。
+type BlockStopData struct {
+	Index    int  `json:"index,omitempty"`     // 内容块索引，用于匹配对应的 block
+	HasIndex bool `json:"has_index,omitempty"` // 是否显式携带索引
 }
 
 // ============================================
@@ -271,6 +280,34 @@ func NewBlockStartDeltaWithID(blockType, id, name string) StreamDelta[any] {
 			BlockType: blockType,
 			ID:        id,
 			Name:      name,
+		},
+	}
+}
+
+// NewBlockStopDelta 创建带索引的内容块停止事件。
+//
+// 参数:
+//   - index - 内容块索引，用于匹配对应的 block
+//
+// 返回类型为 StreamDelta[any] 的内容块停止事件。
+func NewBlockStopDelta(index int) StreamDelta[any] {
+	return StreamDelta[any]{
+		Type: StreamDeltaTypeBlockStop,
+		Data: BlockStopData{
+			Index:    index,
+			HasIndex: true,
+		},
+	}
+}
+
+// NewBlockStopDeltaNoIndex 创建无索引的内容块停止事件。
+//
+// 返回类型为 StreamDelta[any] 的内容块停止事件。
+func NewBlockStopDeltaNoIndex() StreamDelta[any] {
+	return StreamDelta[any]{
+		Type: StreamDeltaTypeBlockStop,
+		Data: BlockStopData{
+			HasIndex: false,
 		},
 	}
 }

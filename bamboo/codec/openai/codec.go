@@ -29,8 +29,8 @@ func (c *openaiCodec) SerializeError(err error) []byte {
 }
 
 // NewSerializer 创建一个新的 OpenAI 流式序列化器实例。
-func (c *openaiCodec) NewSerializer() codec.StreamSerializer {
-	return newStreamSerializer()
+func (c *openaiCodec) NewSerializer(model string) codec.StreamSerializer {
+	return newStreamSerializer(model)
 }
 
 // Codec 全局 OpenAI Codec 实例，供外部直接使用。

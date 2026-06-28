@@ -29,8 +29,8 @@ func (c *anthropicCodec) SerializeError(err error) []byte {
 }
 
 // NewSerializer 创建一个新的 Anthropic 流式序列化器实例。
-func (c *anthropicCodec) NewSerializer() codec.StreamSerializer {
-	return newStreamSerializer()
+func (c *anthropicCodec) NewSerializer(model string) codec.StreamSerializer {
+	return newStreamSerializer(model)
 }
 
 // Codec 全局 Anthropic Codec 实例，供外部直接使用。

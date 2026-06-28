@@ -29,8 +29,8 @@ func (c *geminiCodec) SerializeError(err error) []byte {
 }
 
 // NewSerializer 创建一个新的 Gemini 流式序列化器实例。
-func (c *geminiCodec) NewSerializer() codec.StreamSerializer {
-	return newStreamSerializer()
+func (c *geminiCodec) NewSerializer(model string) codec.StreamSerializer {
+	return newStreamSerializer(model)
 }
 
 // Codec 全局 Gemini Codec 实例，供外部直接使用。

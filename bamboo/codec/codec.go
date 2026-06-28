@@ -38,8 +38,9 @@ type Codec interface {
 
 	// NewSerializer 创建一个新的流式序列化器实例。
 	//
+	// 参数 model 为当前流对应的模型名称，序列化器可将其注入到输出事件中。
 	// 每个流需要一个独立的 StreamSerializer，因为它是有状态的。
-	NewSerializer() StreamSerializer
+	NewSerializer(model string) StreamSerializer
 }
 
 // StreamSerializer 流式序列化器，每个流创建一个独立实例。
