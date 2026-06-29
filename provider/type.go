@@ -85,6 +85,7 @@ type CompletionResult struct {
 	FinishReason      FinishReason `json:"finish_reason"`                // 结束原因
 	Usage             UsageData    `json:"usage"`                        // Token 用量统计
 	ResponseID        string       `json:"response_id,omitempty"`        // 响应 ID（OpenAI Responses API 用于多轮对话循环追踪）
+	ReasoningID       string       `json:"reasoning_id,omitempty"`       // 推理项 ID（OpenAI Responses API 的 reasoning item ID，如 "rs_xxx"，独立于 ThinkingSignature）
 }
 
 // ============================================

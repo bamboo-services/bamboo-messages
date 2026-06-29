@@ -22,12 +22,16 @@ func (p *ResponsesProvider) handleStreamEvent(ctx context.Context, event respons
 		return p.contentResponseCreated(event)
 	case "response.output_item.added":
 		return p.contentOutputItemAdded(event, thinkingBlockStarted)
+	case "response.output_item.done":
+		return p.contentOutputItemDone(event)
 	case "response.output_text.delta":
 		return p.contentOutputTextDelta(event, textBlockStarted)
 	case "response.reasoning_summary_part.added":
 		return p.contentReasoningSummaryPartAdded(event, thinkingBlockStarted)
 	case "response.reasoning_summary_text.delta":
 		return p.contentReasoningSummaryTextDelta(event, thinkingBlockStarted)
+	case "response.reasoning_summary_text.done":
+		return p.contentReasoningSummaryTextDone()
 	case "response.reasoning_summary_part.done":
 		return p.contentReasoningSummaryPartDone()
 	case "response.reasoning_text.delta":
@@ -49,11 +53,17 @@ func (p *ResponsesProvider) handleStreamEvent(ctx context.Context, event respons
 
 // contentResponseCreated 处理响应创建事件。
 //
-// OpenAI Responses 响应创建时触发，已在 ChatWithSystem 中发送 StreamTypeStart，
-// 此处无需额外处理。
-func (p *ResponsesProvider) contentResponseCreated(_ responses.ResponseStreamEventUnion) []provider.StreamEvent {
-	// 响应创建，已在 ChatWithSystem 中发送 StreamTypeStart
-	return nil
+// 从 response.created 事件提取 Response.ID，通过 MetadataDelta 返回，
+// 供上层关联后续请求（如 WithPreviousResponseID）。
+func (p *ResponsesProvider) contentResponseCreated(event responses.ResponseStreamEventUnion) []provider.StreamEvent {
+	e := event.AsResponseCreated()
+	if e.Response.ID == "" {
+		return nil
+	}
+	return []provider.StreamEvent{{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewMetadataDelta(e.Response.ID, "", ""),
+	}}
 }
 
 // contentOutputItemAdded 处理输出项添加事件。
@@ -198,6 +208,32 @@ func (p *ResponsesProvider) contentReasoningSummaryTextDelta(event responses.Res
 // contentReasoningSummaryPartDone 处理推理摘要段落完成事件。
 func (p *ResponsesProvider) contentReasoningSummaryPartDone() []provider.StreamEvent {
 	return nil
+}
+
+// contentReasoningSummaryTextDone 处理推理摘要文本完成事件。
+//
+// 摘要文本的完整内容已通过增量事件传输完毕，此处无需重复发送。
+func (p *ResponsesProvider) contentReasoningSummaryTextDone() []provider.StreamEvent {
+	return nil
+}
+
+// contentOutputItemDone 处理输出项完成事件。
+//
+// 当 item.Type == "reasoning" 时，提取 ID（如 "rs_xxx"）和 EncryptedContent，
+// 通过 MetadataDelta 返回，供上层在多轮对话中保留推理上下文。
+func (p *ResponsesProvider) contentOutputItemDone(event responses.ResponseStreamEventUnion) []provider.StreamEvent {
+	e := event.AsResponseOutputItemDone()
+	if e.Item.Type != "reasoning" {
+		return nil
+	}
+	reasoning := e.Item.AsReasoning()
+	if reasoning.ID == "" && reasoning.EncryptedContent == "" {
+		return nil
+	}
+	return []provider.StreamEvent{{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewMetadataDelta("", reasoning.ID, reasoning.EncryptedContent),
+	}}
 }
 
 // contentFunctionCallDelta 处理函数调用参数增量事件。

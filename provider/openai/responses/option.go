@@ -18,6 +18,7 @@ type responsesRequestConfig struct {
 	modalities         any
 	previousResponseID *string
 	truncation         *string
+	include            []string
 }
 
 // WithStore 设置是否在 OpenAI 端存储响应。
@@ -49,4 +50,13 @@ func WithPreviousResponseID(v string) OpenaiResponsesOption {
 // 例如 "auto" 自动截断，保持最新消息优先。
 func WithTruncation(v string) OpenaiResponsesOption {
 	return func(c *responsesRequestConfig) { c.truncation = &v }
+}
+
+// WithInclude 设置需要包含在响应中的附加数据。
+//
+// Codex CLI 使用 include: ["reasoning.encrypted_content"] 来确保
+// reasoning item 携带 encrypted_content（服务端加密的不透明 token），
+// 以支持多轮对话中的 reasoning 上下文回传。
+func WithInclude(items []string) OpenaiResponsesOption {
+	return func(c *responsesRequestConfig) { c.include = items }
 }

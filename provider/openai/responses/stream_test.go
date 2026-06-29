@@ -221,3 +221,159 @@ func TestContentOutputItemAdded_UsesCallIDForToolCallID(t *testing.T) {
 		t.Fatalf("ToolCallData.Name = %q, want run_shell", data.Name)
 	}
 }
+
+// ==============================
+// Task 9: 推理事件 + output_item.done 测试
+// ==============================
+
+// TestContentReasoningSummaryTextDelta_BlockStart 验证 reasoning_summary_text.delta 首次调用时合成 thinking BlockStart
+func TestContentReasoningSummaryTextDelta_BlockStart(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	rawJSON := `{"type":"response.reasoning_summary_text.delta","output_index":0,"content_index":0,"delta":"Analyzing the request..."}`
+	event := unmarshalResponseEvent(t, rawJSON)
+
+	thinkingBlockStarted := false
+	events := p.contentReasoningSummaryTextDelta(event, &thinkingBlockStarted)
+
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events (BlockStart + ThinkingDelta), got %d", len(events))
+	}
+	if findBlockStartType(t, events) != "thinking" {
+		t.Error("expected BlockStart type 'thinking'")
+	}
+	if !thinkingBlockStarted {
+		t.Error("thinkingBlockStarted should be true")
+	}
+	if events[1].Delta.Type != provider.StreamDeltaTypeThinking {
+		t.Errorf("expected ThinkingDelta, got %v", events[1].Delta.Type)
+	}
+}
+
+// TestContentOutputItemDone_Reasoning 验证 output_item.done 提取 reasoning ID 和 EncryptedContent
+func TestContentOutputItemDone_Reasoning(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	rawJSON := `{
+		"type": "response.output_item.done",
+		"output_index": 0,
+		"item": {
+			"type": "reasoning",
+			"id": "rs_abc123",
+			"encrypted_content": "gAAAAABp_test_encrypted_content",
+			"summary": []
+		}
+	}`
+	event := unmarshalResponseEvent(t, rawJSON)
+
+	events := p.contentOutputItemDone(event)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Delta.Type != provider.StreamDeltaTypeMetadata {
+		t.Fatalf("expected MetadataDelta, got %v", events[0].Delta.Type)
+	}
+	data, ok := events[0].Delta.Data.(provider.MetadataData)
+	if !ok {
+		t.Fatalf("delta data type = %T, want provider.MetadataData", events[0].Delta.Data)
+	}
+	if data.ReasoningID != "rs_abc123" {
+		t.Errorf("ReasoningID = %q, want rs_abc123", data.ReasoningID)
+	}
+	if data.EncryptedContent != "gAAAAABp_test_encrypted_content" {
+		t.Errorf("EncryptedContent = %q, want gAAAAABp_test_encrypted_content", data.EncryptedContent)
+	}
+}
+
+// TestContentOutputItemDone_NonReasoning 验证 output_item.done 对非 reasoning 类型返回 nil
+func TestContentOutputItemDone_NonReasoning(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	rawJSON := `{
+		"type": "response.output_item.done",
+		"output_index": 0,
+		"item": {
+			"type": "function_call",
+			"id": "fc_123",
+			"call_id": "call_456",
+			"name": "search",
+			"arguments": "{}"
+		}
+	}`
+	event := unmarshalResponseEvent(t, rawJSON)
+
+	events := p.contentOutputItemDone(event)
+	if events != nil {
+		t.Fatalf("expected nil for non-reasoning item, got %d events", len(events))
+	}
+}
+
+// TestContentResponseCreated_ExtractsResponseID 验证 response.created 提取 Response ID
+func TestContentResponseCreated_ExtractsResponseID(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	rawJSON := `{
+		"type": "response.created",
+		"response": {
+			"id": "resp_test789",
+			"status": "in_progress",
+			"model": "o3",
+			"output": []
+		}
+	}`
+	event := unmarshalResponseEvent(t, rawJSON)
+
+	events := p.contentResponseCreated(event)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Delta.Type != provider.StreamDeltaTypeMetadata {
+		t.Fatalf("expected MetadataDelta, got %v", events[0].Delta.Type)
+	}
+	data, ok := events[0].Delta.Data.(provider.MetadataData)
+	if !ok {
+		t.Fatalf("delta data type = %T, want provider.MetadataData", events[0].Delta.Data)
+	}
+	if data.ResponseID != "resp_test789" {
+		t.Errorf("ResponseID = %q, want resp_test789", data.ResponseID)
+	}
+}
+
+// TestContentResponseCreated_EmptyID 验证 response.created 空 ID 时返回 nil
+func TestContentResponseCreated_EmptyID(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	rawJSON := `{
+		"type": "response.created",
+		"response": {
+			"id": "",
+			"status": "in_progress",
+			"model": "o3",
+			"output": []
+		}
+	}`
+	event := unmarshalResponseEvent(t, rawJSON)
+
+	events := p.contentResponseCreated(event)
+	if events != nil {
+		t.Fatalf("expected nil for empty response ID, got %d events", len(events))
+	}
+}
+
+// TestContentReasoningTextDelta_LegacyCompat 验证旧事件名 reasoning_text.delta 仍被处理
+func TestContentReasoningTextDelta_LegacyCompat(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	rawJSON := `{"type":"response.reasoning_text.delta","delta":"legacy thinking"}`
+	event := unmarshalResponseEvent(t, rawJSON)
+
+	thinkingBlockStarted := true // 已开始，不应再发 BlockStart
+	events := p.contentReasoningTextDelta(event, &thinkingBlockStarted)
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Delta.Type != provider.StreamDeltaTypeThinking {
+		t.Errorf("expected ThinkingDelta, got %v", events[0].Delta.Type)
+	}
+}

@@ -128,7 +128,7 @@ func (p *ResponsesProvider) buildAssistantItem(msg provider.Message) []responses
 			{Text: msg.ThinkingContent},
 		}
 		reasoningParam := &responses.ResponseReasoningItemParam{
-			ID:      "rs_" + msg.ThinkingSignature,
+			ID:      msg.ReasoningID,
 			Summary: summary,
 		}
 		if msg.ThinkingSignature != "" {

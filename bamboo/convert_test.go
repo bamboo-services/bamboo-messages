@@ -1798,3 +1798,67 @@ func TestStreamConverterBlockStopNoDuplicate(t *testing.T) {
 		t.Fatalf("content_block_stop(index=%d) should appear exactly once, got %d times. Events: %#v", toolIndex, stopCount, allEvents)
 	}
 }
+
+// ---- ResponseID / ReasoningID 映射测试 (Task 11) ----
+
+func TestConvertResult_ResponseID(t *testing.T) {
+	result := &provider.CompletionResult{
+		Content:      "ok",
+		FinishReason: provider.FinishReasonStop,
+		ResponseID:   "resp_abc123",
+	}
+	resp := resultToResponse(result, "openai-responses")
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if resp.ResponseID != "resp_abc123" {
+		t.Errorf("ResponseID = %q, want resp_abc123", resp.ResponseID)
+	}
+}
+
+func TestConvertResult_EmptyResponseID(t *testing.T) {
+	result := &provider.CompletionResult{
+		Content:      "ok",
+		FinishReason: provider.FinishReasonStop,
+	}
+	resp := resultToResponse(result, "anthropic")
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if resp.ResponseID != "" {
+		t.Errorf("ResponseID = %q, want empty", resp.ResponseID)
+	}
+}
+
+func TestConvertMessage_ReasoningID(t *testing.T) {
+	msgs := []BambooMessage{
+		{
+			Role:        RoleAssistant,
+			Content:     []ContentBlock{NewTextBlock("hi")},
+			ReasoningID: "rs_test456",
+		},
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].ReasoningID != "rs_test456" {
+		t.Errorf("ReasoningID = %q, want rs_test456", result[0].ReasoningID)
+	}
+}
+
+func TestConvertMessage_EmptyReasoningID(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessage("hello"),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result[0].ReasoningID != "" {
+		t.Errorf("ReasoningID = %q, want empty", result[0].ReasoningID)
+	}
+}

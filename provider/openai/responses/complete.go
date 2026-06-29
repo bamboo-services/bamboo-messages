@@ -39,7 +39,9 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 	}
 
 	// 解析响应结果
-	result := &provider.CompletionResult{}
+	result := &provider.CompletionResult{
+		ResponseID: response.ID,
+	}
 
 	for _, item := range response.Output {
 		switch item.Type {
@@ -52,6 +54,11 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 			}
 		case "reasoning":
 			rc := item.AsReasoning()
+			// reasoning item 的 ID（如 "rs_xxx"），用于多轮对话中引用推理上下文。
+			// 多个 reasoning items 时取最后一个（与 OpenAI Responses 多轮对话语义一致）。
+			if rc.ID != "" {
+				result.ReasoningID = rc.ID
+			}
 			for _, sum := range rc.Summary {
 				if sum.Text != "" {
 					result.Thinking += sum.Text

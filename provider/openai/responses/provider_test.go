@@ -181,10 +181,22 @@ func TestResponsesProvider_handleStreamEvent(t *testing.T) {
 		check    func(t *testing.T, events []provider.StreamEvent)
 	}{
 		{
-			name:     "response.created returns nil",
+			name:     "response.created returns metadata delta with response ID",
 			rawJSON:  `{"type":"response.created","response":{"id":"resp_01","object":"response","created_at":1743000000,"status":"in_progress","model":"gpt-4o","output":[]}}`,
-			wantLen:  0,
-			wantType: "",
+			wantLen:  1,
+			wantType: provider.StreamTypeDelta,
+			check: func(t *testing.T, events []provider.StreamEvent) {
+				if events[0].Delta.Type != provider.StreamDeltaTypeMetadata {
+					t.Errorf("expected metadata delta, got %v", events[0].Delta.Type)
+				}
+				data, ok := events[0].Delta.Data.(provider.MetadataData)
+				if !ok {
+					t.Fatalf("expected MetadataData, got %T", events[0].Delta.Data)
+				}
+				if data.ResponseID != "resp_01" {
+					t.Errorf("ResponseID = %q, want resp_01", data.ResponseID)
+				}
+			},
 		},
 		{
 			name:     "response.output_item.added with function_call",

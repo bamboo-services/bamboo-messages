@@ -80,6 +80,17 @@ func (p *ResponsesProvider) buildResponseNewParams(model string, input responses
 		params.PreviousResponseID = openai.Opt(prevID)
 	}
 
+	// ProviderExtra: include — 指定响应中需包含的附加数据（如 reasoning.encrypted_content）
+	if include, ok := provider.GetExtraAny(config.ProviderExtra, "include"); ok {
+		if items, ok := include.([]string); ok && len(items) > 0 {
+			includables := make([]responses.ResponseIncludable, len(items))
+			for i, item := range items {
+				includables[i] = responses.ResponseIncludable(item)
+			}
+			params.Include = includables
+		}
+	}
+
 	// Metadata — 附加键值对元数据
 	if len(config.Metadata) > 0 {
 		params.Metadata = shared.Metadata(config.Metadata)

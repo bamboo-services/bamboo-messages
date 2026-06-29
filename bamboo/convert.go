@@ -134,6 +134,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 				ContentBlocks:     contentBlocks,
 				ThinkingContent:   thinkingContent,
 				ThinkingSignature: thinkingSignature,
+				ReasoningID:       msg.ReasoningID,
 				ToolCalls:         toolCalls,
 				CacheControl:      msgCacheControl,
 			})
@@ -298,6 +299,7 @@ type StreamConverter struct {
 	finishReason             FinishReason
 	stopHandled              bool
 	stoppedBlockIndexes      map[int]bool // 已发送 content_block_stop 的 block index 集合（防重复）
+	metadata                 *MessageDelta // 由 MetadataDelta 收集的元信息，在 handleStop 时输出
 }
 
 func NewStreamConverter() *StreamConverter { return &StreamConverter{} }
@@ -376,6 +378,7 @@ func (sc *StreamConverter) handleStart() []StreamEvent {
 	sc.finishReason = ""
 	sc.stopHandled = false
 	sc.stoppedBlockIndexes = make(map[int]bool)
+	sc.metadata = nil
 	return []StreamEvent{
 		{
 			Type:    EventMessageStart,
@@ -648,7 +651,7 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		// 导致部分客户端（如 Vercel AI SDK）误判流结束。
 		// 最终 usage 统一由 handleStop() 在 message_delta 中输出。
 		return []StreamEvent{{
-			Type:  EventPing,
+			Type: EventPing,
 			Usage: &Usage{
 				InputTokens:              data.InputTokens,
 				OutputTokens:             data.OutputTokens,
@@ -656,6 +659,26 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 				CacheReadInputTokens:     data.CacheReadInputTokens,
 			},
 		}}
+	case provider.StreamDeltaTypeMetadata:
+		data, ok := delta.Data.(provider.MetadataData)
+		if !ok {
+			return nil
+		}
+		// 元数据不产生即时事件，累积到 sc.metadata，由 handleStop 在 message_delta 中统一输出。
+		// 多次 MetadataDelta 时采用"后值覆盖"策略（与 provider 层语义一致）。
+		if sc.metadata == nil {
+			sc.metadata = &MessageDelta{}
+		}
+		if data.ResponseID != "" {
+			sc.metadata.ResponseID = data.ResponseID
+		}
+		if data.ReasoningID != "" {
+			sc.metadata.ReasoningID = data.ReasoningID
+		}
+		if data.EncryptedContent != "" {
+			sc.metadata.EncryptedContent = data.EncryptedContent
+		}
+		return nil
 	default:
 		return nil
 	}
@@ -739,10 +762,22 @@ func (sc *StreamConverter) handleStop() []StreamEvent {
 	sc.toolBlockByID = nil
 
 	events = append(events,
-		StreamEvent{Type: EventMessageDelta, Delta: &MessageDelta{StopReason: stopReason}, Usage: usage},
+		StreamEvent{Type: EventMessageDelta, Delta: sc.buildMessageDelta(stopReason), Usage: usage},
 		StreamEvent{Type: EventMessageStop},
 	)
 	return events
+}
+
+// buildMessageDelta 构造 message_delta 事件携带的 MessageDelta，
+// 合并 stopReason 和流式过程中累积的 metadata（ResponseID/ReasoningID/EncryptedContent）。
+func (sc *StreamConverter) buildMessageDelta(stopReason FinishReason) *MessageDelta {
+	md := &MessageDelta{StopReason: stopReason}
+	if sc.metadata != nil {
+		md.ResponseID = sc.metadata.ResponseID
+		md.ReasoningID = sc.metadata.ReasoningID
+		md.EncryptedContent = sc.metadata.EncryptedContent
+	}
+	return md
 }
 
 func mapBlockType(blockType string) ContentBlockType {

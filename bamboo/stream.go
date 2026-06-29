@@ -66,9 +66,16 @@ type StreamDelta struct {
 //
 // 在消息传输结束时触发，提供完整的停止原因（如正常结束、达到最大 token 数、工具调用等）
 // 和最终的 Token 用量统计。
+//
+// Metadata 字段（ResponseID/ReasoningID/EncryptedContent）由 provider 层的
+// MetadataDelta 在流式过程中收集，最终在 message_delta 中统一输出，
+// 供上层用于多轮对话的上下文关联（如 OpenAI Responses 的 response ID 链路追踪）。
 type MessageDelta struct {
-	StopReason   FinishReason `json:"stop_reason"`             // 停止原因
-	StopSequence string       `json:"stop_sequence,omitempty"` // 触发停止的序列（可选）
+	StopReason   FinishReason `json:"stop_reason"`                       // 停止原因
+	StopSequence string       `json:"stop_sequence,omitempty"`           // 触发停止的序列（可选）
+	ResponseID   string       `json:"response_id,omitempty"`             // 响应 ID（OpenAI Responses response.id）
+	ReasoningID  string       `json:"reasoning_id,omitempty"`            // reasoning item ID（如 "rs_xxx"）
+	EncryptedContent string   `json:"encrypted_content,omitempty"`       // reasoning 加密内容（不透明 token）
 }
 
 // StreamEvent 流事件，由流式对话的 channel 逐步返回。

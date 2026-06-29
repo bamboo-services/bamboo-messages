@@ -49,6 +49,7 @@ const (
 	StreamDeltaTypeUsage         StreamDeltaType = "usage"           // 用量统计事件，表示本次对话的 Token 使用量统计信息
 	StreamDeltaTypeBlockStart    StreamDeltaType = "block_start"     // 内容块开始事件，标记新内容块的起始
 	StreamDeltaTypeBlockStop     StreamDeltaType = "block_stop"      // 内容块停止事件，标记内容块的结束
+	StreamDeltaTypeMetadata      StreamDeltaType = "metadata"        // 元数据事件，携带响应 ID / reasoning ID 等非内容性信息
 )
 
 // ============================================
@@ -123,6 +124,20 @@ type BlockStartData struct {
 type BlockStopData struct {
 	Index    int  `json:"index,omitempty"`     // 内容块索引，用于匹配对应的 block
 	HasIndex bool `json:"has_index,omitempty"` // 是否显式携带索引
+}
+
+// MetadataData 元数据增量数据。
+//
+// 用于在流式过程中传递非内容性的元信息，例如：
+// - ResponseID: OpenAI Responses 的响应 ID（response.created 事件携带）
+// - ReasoningID: reasoning item 的唯一标识（output_item.done 事件携带，如 "rs_xxx"）
+// - EncryptedContent: reasoning item 的加密内容（用于多轮对话保留推理上下文）
+//
+// 上层可通过此 Delta 提取 ResponseID 和 ReasoningID 用于后续请求的上下文关联。
+type MetadataData struct {
+	ResponseID        string `json:"response_id,omitempty"`         // 响应 ID（OpenAI Responses response.id）
+	ReasoningID       string `json:"reasoning_id,omitempty"`        // reasoning item ID（如 "rs_xxx"）
+	EncryptedContent  string `json:"encrypted_content,omitempty"`   // reasoning 加密内容（不透明 token）
 }
 
 // ============================================
@@ -308,6 +323,25 @@ func NewBlockStopDeltaNoIndex() StreamDelta[any] {
 		Type: StreamDeltaTypeBlockStop,
 		Data: BlockStopData{
 			HasIndex: false,
+		},
+	}
+}
+
+// NewMetadataDelta 创建元数据增量事件。
+//
+// 用于在流式过程中传递响应 ID、reasoning ID 和加密内容等非内容性元信息。
+//
+// 参数:
+//   - responseID - 响应 ID（可为空）
+//   - reasoningID - reasoning item ID（可为空）
+//   - encryptedContent - reasoning 加密内容（可为空）
+func NewMetadataDelta(responseID, reasoningID, encryptedContent string) StreamDelta[any] {
+	return StreamDelta[any]{
+		Type: StreamDeltaTypeMetadata,
+		Data: MetadataData{
+			ResponseID:       responseID,
+			ReasoningID:      reasoningID,
+			EncryptedContent: encryptedContent,
 		},
 	}
 }
