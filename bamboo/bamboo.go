@@ -111,6 +111,19 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 	go func() {
 		defer close(out)
 
+		// panic 时尝试发送 error 事件，防止消费者无限等待
+		defer func() {
+			if r := recover(); r != nil {
+				select {
+				case out <- StreamEvent{
+					Type:  EventError,
+					Error: NewBambooError(ErrorTypeProvider, fmt.Sprintf("bamboo: internal panic: %v", r)),
+				}:
+				default:
+				}
+			}
+		}()
+
 		pingTicker := time.NewTicker(pingIdleInterval)
 		defer pingTicker.Stop()
 

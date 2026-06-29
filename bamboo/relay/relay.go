@@ -182,12 +182,6 @@ func RelayStream(
 	go func() {
 		var lastUsage *bamboo.Usage
 		usageTriggered := false
-		defer func() {
-			if !usageTriggered && lastUsage != nil {
-				cfg.triggerUsage(*lastUsage)
-			}
-		}()
-		defer close(out)
 
 		// ── 平滑缓冲器（可选）──
 		var pacer *SmoothPacer
@@ -196,8 +190,30 @@ func RelayStream(
 			if cfg.OnRateSample != nil {
 				pacer.SetRateSampleCallback(cfg.OnRateSample)
 			}
-			defer pacer.Wait()
 		}
+
+		// defer LIFO 顺序: panicRecovery → close(out) → pacerCleanup → usageFallback
+		// pacerCleanup 必须在 close(out) 之前执行（LIFO 中后注册先执行）
+		defer func() {
+			if r := recover(); r != nil {
+				cfg.triggerError(fmt.Errorf("relay: goroutine panic: %v", r))
+				if pacer != nil {
+					pacer.SignalEnd()
+				}
+			}
+		}()
+		defer close(out)
+		defer func() {
+			if pacer != nil {
+				pacer.SignalEnd()
+				pacer.Wait()
+			}
+		}()
+		defer func() {
+			if !usageTriggered && lastUsage != nil {
+				cfg.triggerUsage(*lastUsage)
+			}
+		}()
 
 		for event := range eventCh {
 			// 处理错误事件
@@ -219,7 +235,16 @@ func RelayStream(
 				continue
 			}
 			if data != nil {
-				if pacer != nil {
+				// ping 保活帧绕过 SmoothPacer，直接写入 out channel。
+				// 原因：ping 的作用是对抗反向代理 idle timeout，如果经过 pacer 队列
+				// 排队，在队列积压时会失去实时保活意义，导致 nginx/ALB 断连。
+				if event.Type == bamboo.EventPing {
+					select {
+					case out <- data:
+					case <-ctx.Done():
+						return
+					}
+				} else if pacer != nil {
 					pacer.Push(data)
 				} else {
 					select {
@@ -230,20 +255,17 @@ func RelayStream(
 				}
 			}
 
-			// 错误事件是终结性的，序列化发出后立即停止处理
-			if event.Type == bamboo.EventError {
-				break
-			}
+			// 注意：不在 error 事件处 break。
+			// StreamConverter.handleError 会自动补发完整的终止序列
+			//（block_stop + message_delta + message_stop），
+			// 这些事件必须被正常序列化输出，否则下游客户端收不到 finish_reason，
+			// 导致流被判定为异常中断。
 		}
 
 		// ── Flush 终止标记 ──
 		flushData, fErr := serializer.Flush()
 		if fErr != nil {
 			cfg.triggerError(fmt.Errorf("relay: flush error: %w", fErr))
-			// 即使 flush 失败，也要让 pacer 排空已入队的数据
-			if pacer != nil {
-				pacer.SignalEnd()
-			}
 			return
 		}
 		if flushData != nil {
@@ -256,11 +278,7 @@ func RelayStream(
 				}
 			}
 		}
-
-		// ── 通知 pacer 上游结束 ──
-		if pacer != nil {
-			pacer.SignalEnd()
-		}
+		// pacer.SignalEnd + pacer.Wait 由 defer 统一处理
 	}()
 
 	return out, nil

@@ -162,10 +162,15 @@ func (p *SmoothPacer) Close() {
 func (p *SmoothPacer) run() {
 	defer close(p.done)
 
+	// panic 时不调用 flushAll — panic 说明内部状态已破坏，
+	// 且 out channel 可能已被调用方关闭，继续写入会二次 panic。
+	defer func() {
+		recover()
+	}()
+
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 
-	// 清理可能残留的初始计时（NewTimer(0) 已触发）
 	if !timer.Stop() {
 		<-timer.C
 	}
@@ -472,23 +477,59 @@ func (p *SmoothPacer) emitRateSamples(thinkingN, outputN int) {
 	p.lastEmitTime = now
 }
 
-// outputFrame 输出单个微帧到 out channel。
-// 尊重 ctx 取消（取消时跳过，由调用方后续处理）。
-func (p *SmoothPacer) outputFrame(frame microFrame) {
+// safeSend 向 out channel 安全发送数据，防止 send on closed channel panic。
+// 通过 defer recover 捕获 — 因为 select 无法检测 channel 是否已关闭。
+func (p *SmoothPacer) safeSend(data []byte) (sent bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			sent = false
+		}
+	}()
 	select {
-	case p.out <- frame.data:
+	case p.out <- data:
+		return true
 	case <-p.ctx.Done():
+		return false
 	}
 }
 
+// outputFrame 输出单个微帧到 out channel。
+// 尊重 ctx 取消（取消时跳过，由调用方后续处理）。
+func (p *SmoothPacer) outputFrame(frame microFrame) {
+	p.safeSend(frame.data)
+}
+
 // flushAll 立即排空全部队列（FLUSH 模式或 ctx 取消时调用）。
+//
+// 使用独立 100ms timeout 替代 ctx.Done() — ctx 取消后仍尝试短暂排空队列，
+// 避免上游已产生的数据被静默丢弃。100ms 足以排空 buffer 中的突发数据，
+// 不会造成可感知的消费者延迟。
+const flushAllTimeout = 100 * time.Millisecond
+
 func (p *SmoothPacer) flushAll() {
 	for len(p.queue) > 0 {
-		select {
-		case p.out <- p.queue[0].data:
-			p.queue = p.queue[1:]
-		case <-p.ctx.Done():
+		if !p.flushSend(p.queue[0].data) {
 			return
 		}
+		p.queue = p.queue[1:]
+	}
+}
+
+// flushSend 用于 FLUSH 模式的安全写入，独立于 safeSend。
+// FLUSH 时 ctx 通常已取消，safeSend 的 ctx.Done 分支会立即返回 false，
+// 但 FLUSH 的语义是"尽快排空"，因此使用独立 timeout 而非 ctx。
+func (p *SmoothPacer) flushSend(data []byte) (sent bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			sent = false
+		}
+	}()
+	timer := time.NewTimer(flushAllTimeout)
+	defer timer.Stop()
+	select {
+	case p.out <- data:
+		return true
+	case <-timer.C:
+		return false
 	}
 }
