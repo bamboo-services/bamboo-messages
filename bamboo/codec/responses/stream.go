@@ -166,8 +166,10 @@ func (s *responsesStreamSerializer) Serialize(event bamboo.StreamEvent) ([]byte,
 		return s.handleContentBlockStop(event)
 	case bamboo.EventMessageDelta:
 		return s.handleMessageDelta(event)
-	case bamboo.EventMessageStop, bamboo.EventPing:
+	case bamboo.EventMessageStop:
 		return nil, nil
+	case bamboo.EventPing:
+		return []byte(": keep-alive\n\n"), nil
 	case bamboo.EventError:
 		return s.handleError(event)
 	default:

@@ -8,10 +8,17 @@ package bamboo
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/bamboo-services/bamboo-messages/internal/xerr"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
+
+// pingIdleInterval provider 空闲超过此时长后，SDK 自动向消费端发送 EventPing 保活。
+//
+// 用于防止反向代理（Nginx/Cloudflare/ALB）在 LLM thinking 等长空闲阶段
+// 因 idle timeout 关闭连接。10s 与 newapi 原生路径 DefaultPingInterval 对齐。
+const pingIdleInterval = 10 * time.Second
 
 // BambooClient Bamboo Messages SDK 核心接口，定义流式对话和非流式对话两种交互模式。
 //
@@ -104,48 +111,60 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 	go func() {
 		defer close(out)
 
-		// 先处理已 peek 的首事件
-		for _, be := range converter.Convert(firstEvent) {
+		pingTicker := time.NewTicker(pingIdleInterval)
+		defer pingTicker.Stop()
+
+		writeEvent := func(be StreamEvent) bool {
 			select {
 			case out <- be:
+				pingTicker.Reset(pingIdleInterval)
+				return true
 			case <-ctx.Done():
-				return
+				return false
 			}
 		}
 
-		for event := range providerCh {
-			select {
-			case <-ctx.Done():
-				cancelErr := xerr.NewError(context.Background(), nil,
-					fmt.Sprintf("bamboo: chat cancelled: %s", ctx.Err()), false)
-				for _, be := range converter.Convert(provider.StreamEvent{
-					Type: provider.StreamTypeError,
-					Err:  cancelErr,
-				}) {
-					select {
-					case out <- be:
-					case <-ctx.Done():
-						return
-					}
+		writeAll := func(events []StreamEvent) bool {
+			for _, be := range events {
+				if !writeEvent(be) {
+					return false
 				}
-				return
-			default:
 			}
+			return true
+		}
 
-			bambooEvents := converter.Convert(event)
-			for _, be := range bambooEvents {
-				select {
-				case out <- be:
-				case <-ctx.Done():
+		if !writeAll(converter.Convert(firstEvent)) {
+			return
+		}
+
+		for {
+			select {
+			case <-pingTicker.C:
+				if !writeEvent(StreamEvent{Type: EventPing}) {
 					return
 				}
-			}
-		}
 
-		for _, be := range converter.Convert(provider.StreamEvent{Type: provider.StreamTypeDone}) {
-			select {
-			case out <- be:
-			case <-ctx.Done():
+			case event, ok := <-providerCh:
+				if !ok {
+					writeAll(converter.Convert(provider.StreamEvent{Type: provider.StreamTypeDone}))
+					return
+				}
+
+				select {
+				case <-ctx.Done():
+					cancelErr := xerr.NewError(context.Background(), nil,
+						fmt.Sprintf("bamboo: chat cancelled: %s", ctx.Err()), false)
+					writeAll(converter.Convert(provider.StreamEvent{
+						Type: provider.StreamTypeError,
+						Err:  cancelErr,
+					}))
+					return
+				default:
+				}
+
+				if !writeAll(converter.Convert(event)) {
+					return
+				}
 			}
 		}
 	}()

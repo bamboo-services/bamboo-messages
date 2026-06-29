@@ -371,8 +371,8 @@ func TestStreamSerializer_PingEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Serialize(ping) error = %v", err)
 	}
-	if data != nil {
-		t.Error("ping should produce nil output")
+	if string(data) != ": keep-alive\n\n" {
+		t.Errorf("ping should produce SSE comment, got %q", string(data))
 	}
 }
 

@@ -96,7 +96,7 @@ func (s *openaiStreamSerializer) Serialize(event bamboo.StreamEvent) ([]byte, er
 		return nil, nil
 
 	case bamboo.EventPing:
-		return nil, nil
+		return []byte(": keep-alive\n\n"), nil
 
 	case bamboo.EventError:
 		return s.handleError(event)
