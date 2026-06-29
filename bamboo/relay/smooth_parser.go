@@ -225,6 +225,7 @@ const (
 	frameControl frameKind = iota // 控制事件（block_start/message_start）— 直接透传
 	frameText                     // 文本 delta
 	frameThinking                 // 思考 delta
+	frameTool                     // 工具调用 delta — 仅分类标记，不切分
 	frameBarrier                  // 屏障事件（block_stop/message_stop/error）— 需排空前面积压
 )
 
@@ -426,6 +427,9 @@ func (p *FrameParser) parseAnthropic(data []byte) []microFrame {
 
 		case "thinking_delta":
 			return p.splitAnthropicDelta(data, frame.Index, "thinking_delta", "thinking", delta.Thinking, false)
+
+		case "input_json_delta":
+			return []microFrame{{kind: frameTool, data: data}}
 		}
 	}
 
@@ -520,9 +524,20 @@ type openaiSSEChoice struct {
 }
 
 type openaiSSEDeltaMsg struct {
-	Role             string `json:"role,omitempty"`
-	Content          string `json:"content,omitempty"`
-	ReasoningContent string `json:"reasoning_content,omitempty"`
+	Role             string                 `json:"role,omitempty"`
+	Content          string                 `json:"content,omitempty"`
+	ReasoningContent string                 `json:"reasoning_content,omitempty"`
+	ToolCalls        []openaiSSEToolCall    `json:"tool_calls,omitempty"`
+}
+
+type openaiSSEToolCall struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Function struct {
+		Name      string `json:"name,omitempty"`
+		Arguments string `json:"arguments,omitempty"`
+	} `json:"function"`
 }
 
 // parseOpenAI 解析 OpenAI Chat Completions SSE 帧。
@@ -608,6 +623,11 @@ func (p *FrameParser) parseOpenAI(data []byte) []microFrame {
 			})
 		}
 		return frames
+	}
+
+	// tool_calls 非空 → frameTool（不切分，原帧透传）
+	if len(choice.Delta.ToolCalls) > 0 {
+		return []microFrame{{kind: frameTool, data: data}}
 	}
 
 	// 仅 role 的初始帧或其他 → control
@@ -727,6 +747,10 @@ func (p *FrameParser) parseResponses(data []byte) []microFrame {
 		}
 		return frames
 
+	case evType == "response.function_call_arguments.delta",
+		evType == "response.function_call_arguments.done":
+		return []microFrame{{kind: frameTool, data: data}}
+
 	case evType == "response.output_text.done",
 		evType == "response.reasoning_text.done",
 		evType == "response.completed",
@@ -779,8 +803,14 @@ type geminiSSEContent struct {
 }
 
 type geminiSSEPart struct {
-	Text    string `json:"text,omitempty"`
-	Thought bool   `json:"thought,omitempty"`
+	Text          string          `json:"text,omitempty"`
+	Thought       bool            `json:"thought,omitempty"`
+	FunctionCall  *geminiFuncCall `json:"functionCall,omitempty"`
+}
+
+type geminiFuncCall struct {
+	Name string          `json:"name,omitempty"`
+	Args json.RawMessage `json:"args,omitempty"`
 }
 
 // parseGemini 解析 Gemini SSE 帧。
@@ -819,6 +849,12 @@ func (p *FrameParser) parseGemini(data []byte) []microFrame {
 	}
 
 	part := candidate.Content.Parts[0]
+
+	// functionCall 非空 → frameTool（不切分）
+	if part.FunctionCall != nil {
+		return []microFrame{{kind: frameTool, data: data}}
+	}
+
 	if part.Text == "" {
 		return []microFrame{{kind: frameControl, data: data}}
 	}

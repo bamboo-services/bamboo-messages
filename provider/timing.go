@@ -10,7 +10,7 @@ import (
 // 公共类型定义
 // ════════════════════════════════════════════════════════════════════════════
 
-// RateSampleKind 速率采样类型，区分思考阶段和输出阶段的 token 速率。
+// RateSampleKind 速率采样类型，区分思考阶段、输出阶段和工具调用阶段的 token 速率。
 type RateSampleKind string
 
 const (
@@ -19,6 +19,9 @@ const (
 
 	// RateSampleKindOutput 输出阶段速率采样（对应 text delta 的 token/s）。
 	RateSampleKindOutput RateSampleKind = "output"
+
+	// RateSampleKindTool 工具调用阶段速率采样（对应 tool call delta 的 token/s）。
+	RateSampleKindTool RateSampleKind = "tool"
 )
 
 // TimingStats 流式请求耗时统计。
@@ -40,6 +43,21 @@ type TimingStats struct {
 
 	// ToolDuration 工具调用阶段耗时 — 从首个 tool BlockStart/ToolCall 到 Stop。
 	ToolDuration time.Duration
+
+	// ThinkingTokens 思考阶段估算 token 数（基于 charCounter，CJK 1:1, Latin 4:1, Other 2:1）。
+	ThinkingTokens int64
+
+	// OutputTokens 输出阶段估算 token 数。
+	OutputTokens int64
+
+	// ToolTokens 工具调用阶段估算 token 数。
+	ToolTokens int64
+
+	// TotalTokens 总 token 数。provider 模式下 = UsageData.OutputTokens；calculate 模式下 = 三段合计。
+	TotalTokens int64
+
+	// TokenSource token 数据来源："provider"（Provider 上报）或 "calculate"（本地估算）。
+	TokenSource string
 }
 
 // TokenRates Token 生成速率（.2f 精度）。
@@ -52,6 +70,9 @@ type TokenRates struct {
 
 	// OutputTokensPerSec 输出阶段的 token 生成速率。
 	OutputTokensPerSec float64
+
+	// ToolTokensPerSec 工具调用阶段的 token 生成速率。
+	ToolTokensPerSec float64
 }
 
 // RateSample 速率采样点 — 记录某一时刻的 token/s 速率。
@@ -175,6 +196,7 @@ type TimingCollector struct {
 	// 字符计数（用于 token 估算）
 	thinkingChars charCounter
 	outputChars   charCounter
+	toolChars      charCounter
 
 	// Token 用量（来自 UsageDelta，可选）
 	usage *UsageData
@@ -288,8 +310,19 @@ func (tc *TimingCollector) handleDelta(delta StreamDelta[any], now time.Time) {
 		tc.phase = phaseTool
 
 	case StreamDeltaTypeToolCallDelta:
-		// 工具调用参数增量 — 已在 ToolCall 或 BlockStart("tool_use") 时记录起始时间
-		// 无需额外处理
+		if tc.toolStart.IsZero() {
+			tc.toolStart = now
+		}
+		if tc.contentEnd.IsZero() && !tc.contentStart.IsZero() {
+			tc.contentEnd = now
+		}
+		tc.phase = phaseTool
+		switch data := delta.Data.(type) {
+		case ToolCallDeltaData:
+			tc.toolChars.add(string(data))
+		case IndexedToolCallDeltaData:
+			tc.toolChars.add(data.PartialJSON)
+		}
 
 	case StreamDeltaTypeUsage:
 		if data, ok := delta.Data.(UsageData); ok {
@@ -373,6 +406,18 @@ func (tc *TimingCollector) Stats() TimingStats {
 		stats.ToolDuration = endTime.Sub(tc.toolStart)
 	}
 
+	// Token 计数与来源
+	stats.ThinkingTokens = tc.thinkingChars.estimateTokens()
+	stats.OutputTokens = tc.outputChars.estimateTokens()
+	stats.ToolTokens = tc.toolChars.estimateTokens()
+	if tc.usage != nil {
+		stats.TokenSource = "provider"
+		stats.TotalTokens = tc.usage.OutputTokens
+	} else {
+		stats.TokenSource = "calculate"
+		stats.TotalTokens = stats.ThinkingTokens + stats.OutputTokens + stats.ToolTokens
+	}
+
 	return stats
 }
 
@@ -392,6 +437,11 @@ func (tc *TimingCollector) Rates() TokenRates {
 	if stats.ContentDuration > 0 {
 		tokens := tc.outputChars.estimateTokens()
 		rates.OutputTokensPerSec = round2(float64(tokens) / stats.ContentDuration.Seconds())
+	}
+
+	if stats.ToolDuration > 0 {
+		tokens := tc.toolChars.estimateTokens()
+		rates.ToolTokensPerSec = round2(float64(tokens) / stats.ToolDuration.Seconds())
 	}
 
 	return rates

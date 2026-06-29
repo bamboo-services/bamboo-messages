@@ -400,14 +400,13 @@ func (p *SmoothPacer) outputBatch() {
 
 	// 队首是 barrier → 排空前面积压的数据帧后输出 barrier
 	if p.queue[0].isBarrier {
-		// 统计 barrier 前排空的数据帧（用于速率采样）
-		var thinkingN, outputN int
+		var thinkingN, outputN, toolN int
 		for len(p.queue) > 0 && !p.queue[0].isBarrier {
-			p.recordFrameForSampling(p.queue[0], &thinkingN, &outputN)
+			p.recordFrameForSampling(p.queue[0], &thinkingN, &outputN, &toolN)
 			p.outputFrame(p.queue[0])
 			p.queue = p.queue[1:]
 		}
-		p.emitRateSamples(thinkingN, outputN)
+		p.emitRateSamples(thinkingN, outputN, toolN)
 		if len(p.queue) > 0 {
 			p.outputFrame(p.queue[0])
 			p.queue = p.queue[1:]
@@ -419,35 +418,34 @@ func (p *SmoothPacer) outputBatch() {
 	intervalAtFloor := p.currentInterval() == minIntervalFloor
 	effectiveTokens := effectiveTokensPerFrame(len(p.queue), p.params.TokensPerFrame, intervalAtFloor)
 
-	var thinkingN, outputN int
+	var thinkingN, outputN, toolN int
 	tokensOutput := 0
 	for len(p.queue) > 0 && tokensOutput < effectiveTokens {
 		frame := p.queue[0]
 		if frame.isBarrier {
 			break
 		}
-		p.recordFrameForSampling(frame, &thinkingN, &outputN)
+		p.recordFrameForSampling(frame, &thinkingN, &outputN, &toolN)
 		p.outputFrame(frame)
 		p.queue = p.queue[1:]
 		tokensOutput++
 	}
 
-	p.emitRateSamples(thinkingN, outputN)
+	p.emitRateSamples(thinkingN, outputN, toolN)
 }
 
-// recordFrameForSampling 按帧 kind 累计 thinking/output token 数。
-func (p *SmoothPacer) recordFrameForSampling(frame microFrame, thinkingN, outputN *int) {
+func (p *SmoothPacer) recordFrameForSampling(frame microFrame, thinkingN, outputN, toolN *int) {
 	switch frame.kind {
 	case frameThinking:
 		*thinkingN++
 	case frameText:
 		*outputN++
+	case frameTool:
+		*toolN++
 	}
 }
 
-// emitRateSamples 按类型触发速率采样回调。
-// 同一 tick 可能同时输出 thinking 和 output 帧（混排），分别采样。
-func (p *SmoothPacer) emitRateSamples(thinkingN, outputN int) {
+func (p *SmoothPacer) emitRateSamples(thinkingN, outputN, toolN int) {
 	if p.onRateSample == nil {
 		return
 	}
@@ -472,6 +470,10 @@ func (p *SmoothPacer) emitRateSamples(thinkingN, outputN int) {
 	if outputN > 0 {
 		rate := float64(outputN) / intervalSec
 		p.onRateSample(elapsedSec, rate, provider.RateSampleKindOutput)
+	}
+	if toolN > 0 {
+		rate := float64(toolN) / intervalSec
+		p.onRateSample(elapsedSec, rate, provider.RateSampleKindTool)
 	}
 
 	p.lastEmitTime = now

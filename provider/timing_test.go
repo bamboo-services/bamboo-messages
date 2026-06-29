@@ -530,3 +530,144 @@ func BenchmarkCharCounter(b *testing.B) {
 		_ = c.estimateTokens()
 	}
 }
+
+// ---- Task 6: 工具调用 TPS / Token 计数集成测试 ----
+
+func TestTimingCollector_ToolCallDeltaCounting(t *testing.T) {
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(5 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCall, ToolCallData{ID: "tc1", Name: "search"}))
+	time.Sleep(3 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCallDelta, ToolCallDeltaData(`{"query":"hello"}`)))
+	time.Sleep(2 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCallDelta, ToolCallDeltaData(`"world"}`)))
+	tc.Observe(makeStopEvent())
+
+	stats := tc.Stats()
+	if stats.ToolTokens <= 0 {
+		t.Errorf("ToolTokens should be > 0, got %d", stats.ToolTokens)
+	}
+	if stats.TokenSource != "calculate" {
+		t.Errorf("TokenSource = %q, want calculate", stats.TokenSource)
+	}
+	if stats.TotalTokens != stats.ThinkingTokens+stats.OutputTokens+stats.ToolTokens {
+		t.Errorf("TotalTokens = %d, want %d (sum)", stats.TotalTokens, stats.ThinkingTokens+stats.OutputTokens+stats.ToolTokens)
+	}
+}
+
+func TestTimingCollector_IndexedToolCallDeltaCounting(t *testing.T) {
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(3 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCall, ToolCallData{ID: "tc1", Name: "fn", Index: 0, HasIndex: true}))
+	time.Sleep(2 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCallDelta, IndexedToolCallDeltaData{PartialJSON: `{"x":1}`, Index: 0, HasIndex: true}))
+	tc.Observe(makeStopEvent())
+
+	stats := tc.Stats()
+	if stats.ToolTokens <= 0 {
+		t.Errorf("ToolTokens should be > 0 for indexed delta, got %d", stats.ToolTokens)
+	}
+}
+
+func TestTimingCollector_EmptyToolDelta(t *testing.T) {
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCallDelta, ToolCallDeltaData("")))
+	tc.Observe(makeStopEvent())
+
+	stats := tc.Stats()
+	if stats.ToolTokens != 0 {
+		t.Errorf("ToolTokens should be 0 for empty delta, got %d", stats.ToolTokens)
+	}
+}
+
+func TestTimingCollector_StatsTokenSource_Provider(t *testing.T) {
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(3 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeTextOutput, TextData("hello")))
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeUsage, UsageData{InputTokens: 100, OutputTokens: 50}))
+	tc.Observe(makeStopEvent())
+
+	stats := tc.Stats()
+	if stats.TokenSource != "provider" {
+		t.Errorf("TokenSource = %q, want provider", stats.TokenSource)
+	}
+	if stats.TotalTokens != 50 {
+		t.Errorf("TotalTokens = %d, want 50 (usage.OutputTokens)", stats.TotalTokens)
+	}
+}
+
+func TestTimingCollector_Rates_ToolTokensPerSec(t *testing.T) {
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(5 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCall, ToolCallData{ID: "tc1", Name: "search"}))
+	time.Sleep(10 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCallDelta, ToolCallDeltaData(`{"query":"test value"}`)))
+	time.Sleep(5 * time.Millisecond)
+	tc.Observe(makeStopEvent())
+
+	rates := tc.Rates()
+	if rates.ToolTokensPerSec <= 0 {
+		t.Errorf("ToolTokensPerSec should be > 0, got %v", rates.ToolTokensPerSec)
+	}
+}
+
+func TestTimingCollector_NoToolStream_ZeroToolMetrics(t *testing.T) {
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(3 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeTextOutput, TextData("hello")))
+	tc.Observe(makeStopEvent())
+
+	stats := tc.Stats()
+	rates := tc.Rates()
+	if stats.ToolTokens != 0 {
+		t.Errorf("ToolTokens should be 0 for text-only stream, got %d", stats.ToolTokens)
+	}
+	if stats.ToolDuration != 0 {
+		t.Errorf("ToolDuration should be 0 for text-only stream, got %v", stats.ToolDuration)
+	}
+	if rates.ToolTokensPerSec != 0 {
+		t.Errorf("ToolTokensPerSec should be 0 for text-only stream, got %v", rates.ToolTokensPerSec)
+	}
+}
+
+func TestTimingCollector_ToolCallDeltaBeforeToolCall(t *testing.T) {
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(3 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCallDelta, ToolCallDeltaData(`{"q":"test"}`)))
+	time.Sleep(2 * time.Millisecond)
+	tc.Observe(makeStopEvent())
+
+	stats := tc.Stats()
+	if stats.ToolDuration <= 0 {
+		t.Errorf("ToolDuration should be > 0 (fallback toolStart), got %v", stats.ToolDuration)
+	}
+	if stats.ToolTokens <= 0 {
+		t.Errorf("ToolTokens should be > 0, got %d", stats.ToolTokens)
+	}
+}
+
+func TestTimingCollector_MultipleToolCalls(t *testing.T) {
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(3 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCall, ToolCallData{ID: "tc1", Name: "search"}))
+	time.Sleep(2 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCallDelta, ToolCallDeltaData(`{"q":"first"}`)))
+	time.Sleep(2 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCall, ToolCallData{ID: "tc2", Name: "calc"}))
+	time.Sleep(2 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCallDelta, ToolCallDeltaData(`{"x":42}`)))
+	tc.Observe(makeStopEvent())
+
+	stats := tc.Stats()
+	if stats.ToolTokens <= 0 {
+		t.Errorf("ToolTokens should be > 0 for multiple tool calls, got %d", stats.ToolTokens)
+	}
+}
