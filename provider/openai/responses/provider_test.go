@@ -6,14 +6,15 @@ import (
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
-	openaisdk "github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 )
 
-// unmarshalResponseEvent 将 JSON 字符串反序列化为 OpenAI Responses 流事件 Union 类型。
-func unmarshalResponseEvent(t *testing.T, rawJSON string) responses.ResponseStreamEventUnion {
+// unmarshalResponseEvent 将 JSON 字符串反序列化为本地 responseStreamEvent 类型。
+//
+// 去 SDK 化后不再使用 responses.ResponseStreamEventUnion，
+// 直接解析到 types.go 中定义的 responseStreamEvent 结构体。
+func unmarshalResponseEvent(t *testing.T, rawJSON string) responseStreamEvent {
 	t.Helper()
-	var event responses.ResponseStreamEventUnion
+	var event responseStreamEvent
 	if err := json.Unmarshal([]byte(rawJSON), &event); err != nil {
 		t.Fatalf("failed to unmarshal event JSON: %v", err)
 	}
@@ -57,14 +58,14 @@ func TestResponsesProvider_GetAvailableModels(t *testing.T) {
 	}
 
 	expectedModels := []string{
-		openaisdk.ChatModelGPT4o,
-		openaisdk.ChatModelGPT4oMini,
-		openaisdk.ChatModelGPT4_1,
-		openaisdk.ChatModelGPT4_1Mini,
-		openaisdk.ChatModelGPT4_1Nano,
-		openaisdk.ChatModelO3,
-		openaisdk.ChatModelO3Mini,
-		openaisdk.ChatModelO4Mini,
+		ModelGPT4o,
+		ModelGPT4oMini,
+		ModelGPT4_1,
+		ModelGPT4_1Mini,
+		ModelGPT4_1Nano,
+		ModelO3,
+		ModelO3Mini,
+		ModelO4Mini,
 	}
 
 	for _, expected := range expectedModels {
@@ -89,45 +90,24 @@ func TestResponsesProvider_buildInput(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
 	tests := []struct {
-		name         string
-		systemPrompt string
-		messages     []provider.Message
-		wantItems    int
-		check        func(t *testing.T, input responses.ResponseNewParamsInputUnion)
+		name      string
+		messages  []provider.Message
+		wantItems int
 	}{
 		{
-			name:         "empty messages and no system prompt",
-			systemPrompt: "",
-			messages:     []provider.Message{},
-			wantItems:    0,
+			name:      "empty messages",
+			messages:  []provider.Message{},
+			wantItems: 0,
 		},
 		{
-			name:         "with system prompt",
-			systemPrompt: "You are a helpful assistant.",
-			messages:     []provider.Message{},
-			wantItems:    1,
-			check: func(t *testing.T, input responses.ResponseNewParamsInputUnion) {
-				if len(input.OfInputItemList) != 1 {
-					t.Error("expected system message in input")
-				}
-			},
-		},
-		{
-			name:         "user message",
-			systemPrompt: "",
+			name: "user message",
 			messages: []provider.Message{
 				{Role: provider.RoleUser, Content: "Hello"},
 			},
 			wantItems: 1,
-			check: func(t *testing.T, input responses.ResponseNewParamsInputUnion) {
-				if len(input.OfInputItemList) != 1 {
-					t.Error("expected user message in input")
-				}
-			},
 		},
 		{
-			name:         "tool response message",
-			systemPrompt: "",
+			name: "tool response message",
 			messages: []provider.Message{
 				{
 					Role:       provider.RoleTool,
@@ -136,31 +116,22 @@ func TestResponsesProvider_buildInput(t *testing.T) {
 				},
 			},
 			wantItems: 1,
-			check: func(t *testing.T, input responses.ResponseNewParamsInputUnion) {
-				if len(input.OfInputItemList) != 1 {
-					t.Error("expected function call output in input")
-				}
-			},
 		},
 		{
-			name:         "mixed message sequence",
-			systemPrompt: "You are a weather assistant.",
+			name: "mixed message sequence",
 			messages: []provider.Message{
 				{Role: provider.RoleUser, Content: "What's the weather?"},
 				{Role: provider.RoleAssistant, Content: "It's sunny!"},
 			},
-			wantItems: 3,
+			wantItems: 2,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := p.buildInput(tt.systemPrompt, tt.messages)
-			if len(result.OfInputItemList) != tt.wantItems {
-				t.Errorf("buildInput() returned %d items, want %d", len(result.OfInputItemList), tt.wantItems)
-			}
-			if tt.check != nil {
-				tt.check(t, result)
+			result := p.buildInput(tt.messages)
+			if len(result) != tt.wantItems {
+				t.Errorf("buildInput() returned %d items, want %d", len(result), tt.wantItems)
 			}
 		})
 	}
@@ -211,7 +182,7 @@ func TestResponsesProvider_handleStreamEvent(t *testing.T) {
 		},
 		{
 			name:     "response.output_text.delta",
-			rawJSON:  `{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Hello world"}`,
+			rawJSON:  `{"type":"response.output_text.delta","output_index":0,"content_index":0,"text":"Hello world"}`,
 			wantLen:  2,
 			wantType: provider.StreamTypeDelta,
 			check: func(t *testing.T, events []provider.StreamEvent) {
@@ -340,7 +311,7 @@ func TestResponsesProvider_buildAssistantItem(t *testing.T) {
 		name      string
 		msg       provider.Message
 		wantCount int
-		check     func(t *testing.T, items []responses.ResponseInputItemUnionParam)
+		check     func(t *testing.T, items []map[string]any)
 	}{
 		{
 			name: "text-only assistant message",
@@ -349,12 +320,9 @@ func TestResponsesProvider_buildAssistantItem(t *testing.T) {
 				Content: "Hello, how can I help you?",
 			},
 			wantCount: 1,
-			check: func(t *testing.T, items []responses.ResponseInputItemUnionParam) {
-				if items[0].OfMessage == nil {
-					t.Error("expected message item")
-				}
-				if items[0].OfMessage.Role != responses.EasyInputMessageRoleAssistant {
-					t.Error("expected assistant role")
+			check: func(t *testing.T, items []map[string]any) {
+				if items[0]["role"] != "assistant" {
+					t.Errorf("expected assistant role, got %v", items[0]["role"])
 				}
 			},
 		},
@@ -373,12 +341,12 @@ func TestResponsesProvider_buildAssistantItem(t *testing.T) {
 				},
 			},
 			wantCount: 1,
-			check: func(t *testing.T, items []responses.ResponseInputItemUnionParam) {
-				if items[0].OfFunctionCall == nil {
-					t.Error("expected function call item")
+			check: func(t *testing.T, items []map[string]any) {
+				if items[0]["type"] != "function_call" {
+					t.Errorf("expected function_call type, got %v", items[0]["type"])
 				}
-				if items[0].OfFunctionCall.Name != "get_weather" {
-					t.Errorf("expected function name 'get_weather', got '%s'", items[0].OfFunctionCall.Name)
+				if items[0]["name"] != "get_weather" {
+					t.Errorf("expected function name 'get_weather', got '%v'", items[0]["name"])
 				}
 			},
 		},
@@ -404,10 +372,10 @@ func TestResponsesProvider_buildAssistantItem(t *testing.T) {
 				},
 			},
 			wantCount: 2,
-			check: func(t *testing.T, items []responses.ResponseInputItemUnionParam) {
+			check: func(t *testing.T, items []map[string]any) {
 				for i, item := range items {
-					if item.OfFunctionCall == nil {
-						t.Errorf("item %d: expected function call item", i)
+					if item["type"] != "function_call" {
+						t.Errorf("item %d: expected function_call type", i)
 					}
 				}
 			},
@@ -435,19 +403,15 @@ func TestResponsesProvider_buildAssistantItem(t *testing.T) {
 				},
 			},
 			wantCount: 3,
-			check: func(t *testing.T, items []responses.ResponseInputItemUnionParam) {
+			check: func(t *testing.T, items []map[string]any) {
 				// First item should be text message
-				if items[0].OfMessage == nil {
-					t.Error("first item should be message")
+				if items[0]["role"] != "assistant" {
+					t.Error("first item should be message with assistant role")
 				}
-				if items[0].OfMessage.Role != responses.EasyInputMessageRoleAssistant {
-					t.Error("first item should have assistant role")
-				}
-
 				// Remaining items should be function calls
 				for i := 1; i < len(items); i++ {
-					if items[i].OfFunctionCall == nil {
-						t.Errorf("item %d: expected function call", i)
+					if items[i]["type"] != "function_call" {
+						t.Errorf("item %d: expected function_call", i)
 					}
 				}
 			},
@@ -469,9 +433,9 @@ func TestResponsesProvider_buildAssistantItem(t *testing.T) {
 				ToolCalls: []provider.ToolCall{},
 			},
 			wantCount: 1,
-			check: func(t *testing.T, items []responses.ResponseInputItemUnionParam) {
-				if items[0].OfMessage == nil {
-					t.Error("expected message item")
+			check: func(t *testing.T, items []map[string]any) {
+				if items[0]["role"] != "assistant" {
+					t.Error("expected message item with assistant role")
 				}
 			},
 		},
@@ -491,17 +455,15 @@ func TestResponsesProvider_buildAssistantItem(t *testing.T) {
 }
 
 // ==============================
-// buildResponseNewParams 参数映射测试
+// buildParams 参数映射测试
 // ==============================
 
-// testBuildParams 辅助函数，用空输入构建 ResponseNewParams。
-func testBuildParams(p *ResponsesProvider, config *provider.ChatConfig) responses.ResponseNewParams {
-	return p.buildResponseNewParams("gpt-4o", responses.ResponseNewParamsInputUnion{}, config)
+// testBuildParams 辅助函数，用空输入构建参数 map。
+func testBuildParams(p *ResponsesProvider, config *provider.ChatConfig) map[string]any {
+	return p.buildParams("gpt-4o", "", nil, config, false)
 }
 
-// TestBuildParams_StopMapping 验证 Stop 参数通过 SetExtraFields 透传。
-//
-// Responses SDK 无原生 Stop 字段，通过 SetExtraFields 透传。
+// TestBuildParams_StopMapping 验证 Stop 参数正确映射到 params["stop"]。
 func TestBuildParams_StopMapping(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
@@ -511,28 +473,20 @@ func TestBuildParams_StopMapping(t *testing.T) {
 
 	params := testBuildParams(p, config)
 
-	data, err := json.Marshal(params)
-	if err != nil {
-		t.Fatalf("序列化 params 失败: %v", err)
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("反序列化 params 失败: %v", err)
-	}
-	stopVal, ok := raw["stop"]
+	stopVal, ok := params["stop"]
 	if !ok {
-		t.Fatal("序列化后的 JSON 中应包含 'stop' 字段")
+		t.Fatal("params 中应包含 'stop' 字段")
 	}
-	stopSlice, ok := stopVal.([]any)
+	stopSlice, ok := stopVal.([]string)
 	if !ok {
-		t.Fatalf("'stop' 应为数组类型, 实际为 %T", stopVal)
+		t.Fatalf("'stop' 应为 []string 类型, 实际为 %T", stopVal)
 	}
 	if len(stopSlice) != 2 || stopSlice[0] != "STOP" || stopSlice[1] != "END" {
 		t.Errorf("stop = %v, want [STOP END]", stopSlice)
 	}
 }
 
-// TestBuildParams_User 验证 UserID 参数从 ChatConfig.UserID 正确映射到 params.User。
+// TestBuildParams_User 验证 UserID 参数正确映射到 params["user"]。
 func TestBuildParams_User(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
@@ -542,17 +496,16 @@ func TestBuildParams_User(t *testing.T) {
 
 	params := testBuildParams(p, config)
 
-	if !params.User.Valid() {
-		t.Fatal("params.User 应该有效")
+	userVal, ok := params["user"]
+	if !ok {
+		t.Fatal("params 中应包含 'user' 字段")
 	}
-	if params.User.Value != "test-user" {
-		t.Errorf("params.User.Value = %q, want %q", params.User.Value, "test-user")
+	if userVal != "test-user" {
+		t.Errorf("params['user'] = %v, want %q", userVal, "test-user")
 	}
 }
 
-// TestBuildParams_Store 验证 Store 参数从 ProviderExtra 正确映射到 params.Store。
-//
-// Store 参数控制是否持久化存储响应。
+// TestBuildParams_Store 验证 Store 参数从 ProviderExtra 正确映射到 params["store"]。
 func TestBuildParams_Store(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
@@ -564,18 +517,16 @@ func TestBuildParams_Store(t *testing.T) {
 
 	params := testBuildParams(p, config)
 
-	if !params.Store.Valid() {
-		t.Fatal("params.Store 应该有效")
+	storeVal, ok := params["store"]
+	if !ok {
+		t.Fatal("params 中应包含 'store' 字段")
 	}
-	if params.Store.Value != true {
-		t.Errorf("params.Store.Value = %v, want true", params.Store.Value)
+	if storeVal != true {
+		t.Errorf("params['store'] = %v, want true", storeVal)
 	}
 }
 
-// TestBuildParams_Modalities 验证 Modalities 参数通过 SetExtraFields 正确传递。
-//
-// ResponseNewParams 无原生 Modalities 字段，通过 SetExtraFields 透传。
-// 通过 JSON 序列化验证 modalities 字段存在。
+// TestBuildParams_Modalities 验证 Modalities 参数从 ProviderExtra 正确传递。
 func TestBuildParams_Modalities(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
@@ -588,31 +539,20 @@ func TestBuildParams_Modalities(t *testing.T) {
 
 	params := testBuildParams(p, config)
 
-	// 通过 JSON 序列化验证 modalities 字段存在
-	data, err := json.Marshal(params)
-	if err != nil {
-		t.Fatalf("序列化 params 失败: %v", err)
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("反序列化 params 失败: %v", err)
-	}
-	m, ok := raw["modalities"]
+	m, ok := params["modalities"]
 	if !ok {
-		t.Fatal("序列化后的 JSON 中应包含 'modalities' 字段")
+		t.Fatal("params 中应包含 'modalities' 字段")
 	}
-	arr, ok := m.([]any)
+	arr, ok := m.([]string)
 	if !ok {
-		t.Fatalf("'modalities' 应为数组类型, 实际为 %T", m)
+		t.Fatalf("'modalities' 应为 []string 类型, 实际为 %T", m)
 	}
 	if len(arr) != 2 {
 		t.Errorf("modalities 长度 = %d, want 2", len(arr))
 	}
 }
 
-// TestBuildParams_Truncation 验证 Truncation 参数从 ProviderExtra 正确映射到 params.Truncation。
-//
-// Truncation 参数控制上下文截断策略 ("auto" / "disabled")。
+// TestBuildParams_Truncation 验证 Truncation 参数从 ProviderExtra 正确映射。
 func TestBuildParams_Truncation(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
@@ -624,14 +564,16 @@ func TestBuildParams_Truncation(t *testing.T) {
 
 	params := testBuildParams(p, config)
 
-	if string(params.Truncation) != "auto" {
-		t.Errorf("params.Truncation = %q, want %q", string(params.Truncation), "auto")
+	truncationVal, ok := params["truncation"]
+	if !ok {
+		t.Fatal("params 中应包含 'truncation' 字段")
+	}
+	if truncationVal != "auto" {
+		t.Errorf("params['truncation'] = %v, want %q", truncationVal, "auto")
 	}
 }
 
 // TestBuildParams_PreviousResponseID 验证 PreviousResponseID 参数从 ProviderExtra 正确映射。
-//
-// PreviousResponseID 用于关联上一轮响应实现多轮对话。
 func TestBuildParams_PreviousResponseID(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
@@ -643,14 +585,16 @@ func TestBuildParams_PreviousResponseID(t *testing.T) {
 
 	params := testBuildParams(p, config)
 
-	if !params.PreviousResponseID.Valid() {
-		t.Fatal("params.PreviousResponseID 应该有效")
+	prevID, ok := params["previous_response_id"]
+	if !ok {
+		t.Fatal("params 中应包含 'previous_response_id' 字段")
 	}
-	if params.PreviousResponseID.Value != "resp-123" {
-		t.Errorf("params.PreviousResponseID.Value = %q, want %q", params.PreviousResponseID.Value, "resp-123")
+	if prevID != "resp-123" {
+		t.Errorf("params['previous_response_id'] = %v, want %q", prevID, "resp-123")
 	}
 }
 
+// TestBuildParams_InstructionsNativeField 验证 instructions 从 ProviderExtra 回退。
 func TestBuildParams_InstructionsNativeField(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 	config := &provider.ChatConfig{
@@ -662,57 +606,34 @@ func TestBuildParams_InstructionsNativeField(t *testing.T) {
 
 	params := testBuildParams(p, config)
 
-	if !params.Instructions.Valid() {
-		t.Fatal("params.Instructions should be valid")
+	ins, ok := params["instructions"]
+	if !ok {
+		t.Fatal("params 中应包含 'instructions' 字段")
 	}
-	if params.Instructions.Value != "Use native instructions." {
-		t.Errorf("params.Instructions.Value = %q", params.Instructions.Value)
+	if ins != "Use native instructions." {
+		t.Errorf("params['instructions'] = %v", ins)
 	}
-	if !params.PreviousResponseID.Valid() || params.PreviousResponseID.Value != "resp-123" {
-		t.Fatalf("params.PreviousResponseID = %#v", params.PreviousResponseID)
+	prevID, ok := params["previous_response_id"]
+	if !ok || prevID != "resp-123" {
+		t.Fatalf("params['previous_response_id'] = %v", prevID)
 	}
 }
 
+// TestBuildParams_ParallelToolCallsNativeField 验证 ParallelToolCalls 映射。
 func TestBuildParams_ParallelToolCallsNativeField(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 	params := testBuildParams(p, &provider.ChatConfig{ParallelToolCalls: true})
 
-	if !params.ParallelToolCalls.Valid() {
-		t.Fatal("params.ParallelToolCalls should be valid")
+	ptc, ok := params["parallel_tool_calls"]
+	if !ok {
+		t.Fatal("params 中应包含 'parallel_tool_calls' 字段")
 	}
-	if !params.ParallelToolCalls.Value {
-		t.Fatal("params.ParallelToolCalls.Value should be true")
-	}
-}
-
-func TestBuildParams_ExtraFieldsMerged(t *testing.T) {
-	p := NewResponsesProvider("test-api-key")
-	params := testBuildParams(p, &provider.ChatConfig{
-		Stop: []string{"STOP"},
-		ProviderExtra: map[string]any{
-			"modalities": []string{"text", "audio"},
-		},
-	})
-
-	data, err := json.Marshal(params)
-	if err != nil {
-		t.Fatalf("序列化 params 失败: %v", err)
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("反序列化 params 失败: %v", err)
-	}
-	if _, ok := raw["stop"]; !ok {
-		t.Fatal("merged ExtraFields should include stop")
-	}
-	if _, ok := raw["modalities"]; !ok {
-		t.Fatal("merged ExtraFields should include modalities")
+	if ptc != true {
+		t.Errorf("params['parallel_tool_calls'] = %v, want true", ptc)
 	}
 }
 
-// TestBuildParams_Metadata 验证 Metadata 参数从 ChatConfig.Metadata 正确映射到 params.Metadata。
-//
-// Metadata 附加键值对元数据到响应中。
+// TestBuildParams_Metadata 验证 Metadata 参数正确映射。
 func TestBuildParams_Metadata(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
@@ -724,10 +645,15 @@ func TestBuildParams_Metadata(t *testing.T) {
 
 	params := testBuildParams(p, config)
 
-	if params.Metadata == nil {
-		t.Fatal("params.Metadata 不应为 nil")
+	meta, ok := params["metadata"]
+	if !ok {
+		t.Fatal("params 中应包含 'metadata' 字段")
 	}
-	if params.Metadata["key"] != "val" {
-		t.Errorf("params.Metadata['key'] = %q, want %q", params.Metadata["key"], "val")
+	metaMap, ok := meta.(map[string]any)
+	if !ok {
+		t.Fatalf("'metadata' 应为 map[string]any 类型, 实际为 %T", meta)
+	}
+	if metaMap["key"] != "val" {
+		t.Errorf("params['metadata']['key'] = %v, want %q", metaMap["key"], "val")
 	}
 }

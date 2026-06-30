@@ -6,13 +6,10 @@ import (
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
-// TestAudit_ResponseFormat_Dropped 验证 Anthropic 适配器丢弃 ResponseFormat 字段。
+// TestAudit_ResponseFormat_Dropped 验证 Anthropic 适配器对 ResponseFormat 的 best-effort 适配。
 //
-// Severity: P1
-// File:Line: provider/anthropic/params.go:19-92 (buildParams 缺失 ResponseFormat 处理)
-// Issue: buildParams 不处理 config.ResponseFormat。Anthropic API 支持 JSON mode，
-//        但适配器未将 ResponseFormat 映射到 Anthropic 的 response_format 参数。
-// Affected: Any→Anthropic with ResponseFormat="json_object"
+// Anthropic 不原生支持 ResponseFormat，当设置为 "json_object" 时，
+// buildParams 会注入系统提示指令 "Respond with valid JSON only." 作为替代方案。
 func TestAudit_ResponseFormat_Dropped(t *testing.T) {
 	p := NewProvider("test-key")
 
@@ -22,21 +19,21 @@ func TestAudit_ResponseFormat_Dropped(t *testing.T) {
 		ResponseFormat: "json_object",
 	}
 
-	params := p.buildParams("", nil, config)
+	params := p.buildParams("original system", nil, config)
 
-	// Anthropic SDK BetaMessageNewParams 没有直接的 ResponseFormat 字段
-	// 但 Anthropic API 支持通过 tools 强制 JSON 输出，或通过 system prompt 引导
-	// 当前 buildParams 完全忽略 ResponseFormat —— 参数被静默丢弃
-	t.Logf("P1 NOTE: ResponseFormat=%q is dropped by Anthropic adapter buildParams (no mapping exists)", config.ResponseFormat)
-	_ = params
+	// ResponseFormat=json_object 时应注入 JSON 指令到 system prompt
+	sysStr, ok := params.System.(string)
+	if !ok {
+		t.Fatalf("expected System to be string, got %T", params.System)
+	}
+	if sysStr == "original system" {
+		t.Error("expected system prompt to contain JSON instruction, got unchanged prompt")
+	}
 }
 
-// TestAudit_ParallelToolCalls_Dropped 验证 ParallelToolCalls 在 Anthropic 适配器中被丢弃。
+// TestAudit_ParallelToolCalls_Dropped 验证 ParallelToolCalls 在 Anthropic 适配器中被忽略。
 //
-// Severity: P2
-// File:Line: provider/anthropic/params.go (buildParams 缺失 ParallelToolCalls 处理)
-// Issue: Anthropic API 不支持 parallel_tool_calls 参数，buildParams 不处理此字段。
-// Affected: Any→Anthropic with ParallelToolCalls=true
+// Anthropic API 不支持 parallel_tool_calls 参数，buildParams 仅记录 debug 日志。
 func TestAudit_ParallelToolCalls_Dropped(t *testing.T) {
 	p := NewProvider("test-key")
 
@@ -48,9 +45,8 @@ func TestAudit_ParallelToolCalls_Dropped(t *testing.T) {
 
 	params := p.buildParams("", nil, config)
 
-	// Anthropic 没有 parallel_tool_calls 字段，参数被丢弃是预期行为
-	t.Logf("P2 NOTE: ParallelToolCalls=%v is dropped by Anthropic adapter (not supported by Anthropic API)", config.ParallelToolCalls)
-	_ = params
+	// ParallelToolCalls 不影响 params（Anthropic 不支持此字段）
+	_ = params // 不 panic 即通过
 }
 
 // TestAudit_SystemCacheControl_Mapping 验证 SystemCacheControl 映射到 Anthropic system block。
@@ -66,12 +62,19 @@ func TestAudit_SystemCacheControl_Mapping(t *testing.T) {
 
 	params := p.buildParams("You are a helpful assistant.", nil, config)
 
-	if len(params.System) != 1 {
-		t.Fatalf("System blocks = %d, want 1", len(params.System))
+	sysBlocks, ok := params.System.([]map[string]any)
+	if !ok {
+		t.Fatalf("System type = %T, want []map[string]any", params.System)
+	}
+	if len(sysBlocks) != 1 {
+		t.Fatalf("System blocks = %d, want 1", len(sysBlocks))
 	}
 
-	sysBlock := params.System[0]
-	if sysBlock.CacheControl.Type != "ephemeral" {
-		t.Errorf("CacheControl.Type = %q, want 'ephemeral'", sysBlock.CacheControl.Type)
+	ccField, ok := sysBlocks[0]["cache_control"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected cache_control to be map[string]any, got %T", sysBlocks[0]["cache_control"])
+	}
+	if ccField["type"] != "ephemeral" {
+		t.Errorf("CacheControl.Type = %v, want 'ephemeral'", ccField["type"])
 	}
 }

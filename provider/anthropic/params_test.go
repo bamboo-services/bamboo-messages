@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -24,9 +25,10 @@ func TestBuildParams_NilConfig(t *testing.T) {
 	if params.Model != "" {
 		t.Errorf("Model = %q, want empty", params.Model)
 	}
-	// systemPrompt 应正常设置
-	if len(params.System) != 1 || params.System[0].Text != "system prompt" {
-		t.Errorf("System not set correctly with nil config")
+	// systemPrompt 应正常设置（字符串格式）
+	sysStr, ok := params.System.(string)
+	if !ok || sysStr != "system prompt" {
+		t.Errorf("System = %#v, want string 'system prompt'", params.System)
 	}
 }
 
@@ -41,14 +43,14 @@ func TestBuildParams_EmptyConfig(t *testing.T) {
 	if params.Model != "" {
 		t.Errorf("Model = %q, want empty", params.Model)
 	}
-	if params.Temperature.Valid() {
-		t.Error("Temperature should not be valid for empty config")
+	if params.Temperature != nil {
+		t.Error("Temperature should be nil for empty config")
 	}
-	if params.TopP.Valid() {
-		t.Error("TopP should not be valid for empty config")
+	if params.TopP != nil {
+		t.Error("TopP should be nil for empty config")
 	}
-	if len(params.System) != 0 {
-		t.Errorf("System should be empty, got %d entries", len(params.System))
+	if params.System != nil {
+		t.Errorf("System should be nil, got %v", params.System)
 	}
 }
 
@@ -56,11 +58,12 @@ func TestBuildParams_SystemPrompt(t *testing.T) {
 	p := NewProvider("test-api-key")
 	params := p.buildParams("system instruction", nil, nil)
 
-	if len(params.System) != 1 {
-		t.Fatalf("System length = %d, want 1", len(params.System))
+	sysStr, ok := params.System.(string)
+	if !ok {
+		t.Fatalf("System type = %T, want string", params.System)
 	}
-	if params.System[0].Text != "system instruction" {
-		t.Errorf("System[0].Text = %q, want %q", params.System[0].Text, "system instruction")
+	if sysStr != "system instruction" {
+		t.Errorf("System = %q, want %q", sysStr, "system instruction")
 	}
 }
 
@@ -71,11 +74,11 @@ func TestBuildParams_Temperature(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	if !params.Temperature.Valid() {
-		t.Error("expected Temperature to be valid")
+	if params.Temperature == nil {
+		t.Fatal("expected Temperature to be non-nil")
 	}
-	if params.Temperature.Value != 0.7 {
-		t.Errorf("Temperature.Value = %v, want 0.7", params.Temperature.Value)
+	if *params.Temperature != 0.7 {
+		t.Errorf("Temperature = %v, want 0.7", *params.Temperature)
 	}
 }
 
@@ -86,11 +89,11 @@ func TestBuildParams_TopP(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	if !params.TopP.Valid() {
-		t.Error("expected TopP to be valid")
+	if params.TopP == nil {
+		t.Fatal("expected TopP to be non-nil")
 	}
-	if params.TopP.Value != 0.95 {
-		t.Errorf("TopP.Value = %v, want 0.95", params.TopP.Value)
+	if *params.TopP != 0.95 {
+		t.Errorf("TopP = %v, want 0.95", *params.TopP)
 	}
 }
 
@@ -133,11 +136,11 @@ func TestBuildParams_Tools(t *testing.T) {
 	if len(params.Tools) != 1 {
 		t.Fatalf("Tools length = %d, want 1", len(params.Tools))
 	}
-	if params.Tools[0].OfTool == nil {
-		t.Fatal("expected Tools[0].OfTool to be non-nil")
+	if params.Tools[0]["name"] != "test_tool" {
+		t.Errorf("Tool name = %v, want 'test_tool'", params.Tools[0]["name"])
 	}
-	if params.Tools[0].OfTool.Name != "test_tool" {
-		t.Errorf("Tool name = %q, want %q", params.Tools[0].OfTool.Name, "test_tool")
+	if params.Tools[0]["description"] != "A test tool" {
+		t.Errorf("Tool description = %v, want 'A test tool'", params.Tools[0]["description"])
 	}
 }
 
@@ -148,8 +151,11 @@ func TestBuildParams_ThinkingConfig(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	if params.Thinking.OfAdaptive == nil {
-		t.Error("expected Thinking.OfAdaptive to be non-nil for effort=high")
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil for effort=high")
+	}
+	if params.Thinking.Type != "adaptive" {
+		t.Errorf("Thinking.Type = %q, want 'adaptive'", params.Thinking.Type)
 	}
 }
 
@@ -160,11 +166,11 @@ func TestBuildParams_TopK(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	if !params.TopK.Valid() {
-		t.Error("expected TopK to be valid")
+	if params.TopK == nil {
+		t.Fatal("expected TopK to be non-nil")
 	}
-	if params.TopK.Value != int64(40) {
-		t.Errorf("TopK.Value = %v, want 40", params.TopK.Value)
+	if *params.TopK != 40 {
+		t.Errorf("TopK = %d, want 40", *params.TopK)
 	}
 }
 
@@ -175,11 +181,11 @@ func TestBuildParams_TopKFromCodecInt64(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	if !params.TopK.Valid() {
-		t.Fatal("expected TopK to be valid for int64 ProviderExtra")
+	if params.TopK == nil {
+		t.Fatal("expected TopK to be non-nil for int64 ProviderExtra")
 	}
-	if params.TopK.Value != int64(40) {
-		t.Errorf("TopK.Value = %v, want 40", params.TopK.Value)
+	if *params.TopK != 40 {
+		t.Errorf("TopK = %d, want 40", *params.TopK)
 	}
 }
 
@@ -196,16 +202,16 @@ func TestBuildParams_CacheNormalizationRemovesDynamicMetadataOnlyWhenEnabled(t *
 	}
 	params := p.buildParams("system prompt", []provider.Message{{Role: provider.RoleUser, Content: "hello"}}, config)
 
-	if params.Metadata.UserID.Valid() {
-		t.Fatal("metadata.user_id should be removed when cache normalization is enabled")
+	// cache normalize 启用时 metadata 不发送
+	if params.Metadata != nil {
+		t.Fatalf("metadata should be nil when cache normalization is enabled, got %#v", params.Metadata)
 	}
-	if len(params.Metadata.ExtraFields()) != 0 {
-		t.Fatalf("metadata extra fields should be removed, got %v", params.Metadata.ExtraFields())
-	}
-	if params.Thinking.OfAdaptive == nil {
+	if params.Thinking == nil || params.Thinking.Type != "adaptive" {
 		t.Fatal("parsed ThinkingConfig should remain available; only raw ProviderExtra thinking is ignored")
 	}
-	if len(params.System) != 1 || params.System[0].Text != "system prompt" {
+	// system prompt 应保持字符串格式
+	sysStr, ok := params.System.(string)
+	if !ok || sysStr != "system prompt" {
 		t.Fatalf("system prompt changed: %#v", params.System)
 	}
 	if len(params.Messages) != 1 {
@@ -224,11 +230,11 @@ func TestBuildParams_CacheNormalizationDefaultOff(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	if !params.Metadata.UserID.Valid() || params.Metadata.UserID.Value != "dynamic-user" {
-		t.Fatalf("metadata.user_id should be preserved by default, got %#v", params.Metadata.UserID)
+	if params.Metadata == nil {
+		t.Fatal("metadata should be preserved by default")
 	}
-	if params.Metadata.ExtraFields()["trace_id"] != "req-123" {
-		t.Fatalf("metadata extra fields should be preserved by default, got %v", params.Metadata.ExtraFields())
+	if params.Metadata.UserID != "dynamic-user" {
+		t.Errorf("metadata.user_id = %q, want 'dynamic-user'", params.Metadata.UserID)
 	}
 }
 
@@ -237,8 +243,12 @@ func TestBuildParams_ToolChoiceAuto(t *testing.T) {
 	config := &provider.ChatConfig{ToolChoice: "auto"}
 	params := p.buildParams("", nil, config)
 
-	if params.ToolChoice.OfAuto == nil {
-		t.Error("expected ToolChoice.OfAuto to be non-nil")
+	tc, ok := params.ToolChoice.(map[string]any)
+	if !ok {
+		t.Fatalf("expected ToolChoice to be map[string]any, got %T", params.ToolChoice)
+	}
+	if tc["type"] != "auto" {
+		t.Errorf("ToolChoice type = %v, want 'auto'", tc["type"])
 	}
 }
 
@@ -247,8 +257,12 @@ func TestBuildParams_ToolChoiceForced(t *testing.T) {
 	config := &provider.ChatConfig{ToolChoice: "forced"}
 	params := p.buildParams("", nil, config)
 
-	if params.ToolChoice.OfAny == nil {
-		t.Error("expected ToolChoice.OfAny to be non-nil for forced")
+	tc, ok := params.ToolChoice.(map[string]any)
+	if !ok {
+		t.Fatalf("expected ToolChoice to be map[string]any, got %T", params.ToolChoice)
+	}
+	if tc["type"] != "any" {
+		t.Errorf("ToolChoice type = %v, want 'any' for forced", tc["type"])
 	}
 }
 
@@ -257,29 +271,85 @@ func TestBuildParams_ToolChoiceNone(t *testing.T) {
 	config := &provider.ChatConfig{ToolChoice: "none"}
 	params := p.buildParams("", nil, config)
 
-	if params.ToolChoice.OfNone == nil {
-		t.Error("expected ToolChoice.OfNone to be non-nil")
+	tc, ok := params.ToolChoice.(map[string]any)
+	if !ok {
+		t.Fatalf("expected ToolChoice to be map[string]any, got %T", params.ToolChoice)
+	}
+	if tc["type"] != "none" {
+		t.Errorf("ToolChoice type = %v, want 'none'", tc["type"])
 	}
 }
 
 func TestBuildParams_UserIDAndMetadata(t *testing.T) {
 	p := NewProvider("test-api-key")
 	config := &provider.ChatConfig{
-		UserID:   "user-123",
-		Metadata: map[string]string{"key": "val"},
+		UserID: "user-123",
 	}
 	params := p.buildParams("", nil, config)
 
-	if !params.Metadata.UserID.Valid() {
-		t.Error("expected Metadata.UserID to be valid")
+	if params.Metadata == nil {
+		t.Fatal("expected Metadata to be non-nil")
 	}
-	if params.Metadata.UserID.Value != "user-123" {
-		t.Errorf("Metadata.UserID.Value = %q, want %q", params.Metadata.UserID.Value, "user-123")
+	if params.Metadata.UserID != "user-123" {
+		t.Errorf("Metadata.UserID = %q, want 'user-123'", params.Metadata.UserID)
 	}
+}
 
-	// 验证 extra fields 包含 metadata
-	extraFields := params.Metadata.ExtraFields()
-	if extraFields["key"] != "val" {
-		t.Errorf("extra fields[key] = %v, want %q", extraFields["key"], "val")
+// TestBuildParams_SystemCacheControl 验证带 cache_control 的 system 块数组格式。
+func TestBuildParams_SystemCacheControl(t *testing.T) {
+	p := NewProvider("test-api-key")
+	cc := provider.NewEphemeralCacheControl(provider.CacheTTL1h)
+	config := &provider.ChatConfig{
+		SystemCacheControl: cc,
+	}
+	params := p.buildParams("You are a helpful assistant.", nil, config)
+
+	sysBlocks, ok := params.System.([]map[string]any)
+	if !ok {
+		t.Fatalf("expected System to be []map[string]any, got %T", params.System)
+	}
+	if len(sysBlocks) != 1 {
+		t.Fatalf("System blocks = %d, want 1", len(sysBlocks))
+	}
+	ccField, ok := sysBlocks[0]["cache_control"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected cache_control to be map[string]any, got %T", sysBlocks[0]["cache_control"])
+	}
+	if ccField["type"] != "ephemeral" {
+		t.Errorf("CacheControl.Type = %v, want 'ephemeral'", ccField["type"])
+	}
+}
+
+// TestBuildParams_StreamFlag 验证 stream 字段默认不设置（由 chat.go 设置）。
+func TestBuildParams_StreamFlag(t *testing.T) {
+	p := NewProvider("test-api-key")
+	config := &provider.ChatConfig{Model: "claude-sonnet-4-20250514", MaxTokens: 100}
+	params := p.buildParams("", nil, config)
+
+	if params.Stream {
+		t.Error("Stream should be false by default (set by chat.go)")
+	}
+}
+
+// TestBuildParams_Marshalable 验证 buildParams 结果可被 json.Marshal 序列化。
+func TestBuildParams_Marshalable(t *testing.T) {
+	p := NewProvider("test-api-key")
+	config := &provider.ChatConfig{
+		Model:         "claude-sonnet-4-20250514",
+		MaxTokens:     1024,
+		Temperature:   float64Ptr(0.7),
+		TopP:          float64Ptr(0.95),
+		Stop:          []string{"END"},
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
+		ToolChoice:    "auto",
+		UserID:        "user-1",
+	}
+	messages := []provider.Message{
+		{Role: provider.RoleUser, Content: "Hello"},
+	}
+	params := p.buildParams("Be helpful.", messages, config)
+
+	if _, err := json.Marshal(params); err != nil {
+		t.Fatalf("buildParams result not marshalable: %v", err)
 	}
 }

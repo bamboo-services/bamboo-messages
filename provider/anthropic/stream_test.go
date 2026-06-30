@@ -1,11 +1,21 @@
 package anthropic
 
 import (
+	"encoding/json"
 	"testing"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
+
+// unmarshalEvent 将 JSON 字符串反序列化为内部 messageStreamEvent。
+func unmarshalEvent(t *testing.T, rawJSON string) messageStreamEvent {
+	t.Helper()
+	var event messageStreamEvent
+	if err := json.Unmarshal([]byte(rawJSON), &event); err != nil {
+		t.Fatalf("failed to unmarshal event JSON: %v", err)
+	}
+	return event
+}
 
 // TestContentBlockStopPassedThrough 验证 content_block_stop 事件被透传为 BlockStop delta。
 //
@@ -15,16 +25,11 @@ func TestContentBlockStopPassedThrough(t *testing.T) {
 	p := NewProvider("test-key")
 
 	// 构造 content_block_stop 事件，index 为 1
-	event := anthropic.BetaRawMessageStreamEventUnion{
-		Type: "content_block_stop",
-	}
 	eventJSON := `{
 		"type": "content_block_stop",
 		"index": 1
 	}`
-	if err := event.UnmarshalJSON([]byte(eventJSON)); err != nil {
-		t.Fatalf("failed to unmarshal event: %v", err)
-	}
+	event := unmarshalEvent(t, eventJSON)
 
 	var finishReason provider.FinishReason
 	events := p.handleStreamEvent(event, &finishReason)
@@ -58,17 +63,13 @@ func TestContentBlockStopPassedThrough(t *testing.T) {
 // TestContentBlockDelta_SignatureDelta 验证 signature_delta 事件被正确转换为 NewSignatureDelta。
 //
 // Anthropic extended thinking 在 thinking 块结束前发送 signature_delta 携带验证签名，
-// 用于多轮对话中保留推理上下文。修复前该事件被 default 分支静默丢弃。
+// 用于多轮对话中保留推理上下文。
 func TestContentBlockDelta_SignatureDelta(t *testing.T) {
 	p := NewProvider("test-key")
 
 	// 构造 signature_delta 事件
-	// RawContentBlockDeltaUnion 的 Type 为 "content_block_delta"，
-	// 内部 Delta.Type 为 "signature_delta"
-	event := anthropic.BetaRawMessageStreamEventUnion{
-		Type: "content_block_delta",
-	}
-	// 使用 JSON 注入方式设置 delta 字段
+	// messageStreamEvent.Type 为 "content_block_delta"，
+	// Delta 字段为 delta 子对象的原始 JSON
 	eventJSON := `{
 		"type": "content_block_delta",
 		"index": 0,
@@ -77,8 +78,22 @@ func TestContentBlockDelta_SignatureDelta(t *testing.T) {
 			"signature": "EvEFCu4F..."
 		}
 	}`
-	if err := event.UnmarshalJSON([]byte(eventJSON)); err != nil {
-		t.Fatalf("failed to unmarshal event: %v", err)
+
+	// 手动构建 event，Delta 需要是 delta 子对象
+	var raw struct {
+		Type  string          `json:"type"`
+		Index int             `json:"index"`
+		Delta json.RawMessage `json:"delta"`
+	}
+	if err := json.Unmarshal([]byte(eventJSON), &raw); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	idx := raw.Index
+	event := messageStreamEvent{
+		Type:  raw.Type,
+		Delta: raw.Delta,
+		Index: &idx,
 	}
 
 	var finishReason provider.FinishReason

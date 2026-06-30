@@ -1,12 +1,12 @@
 package gemini
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"google.golang.org/genai"
 )
 
 // TestAudit_ToolUse_NoDoubleBlockStart 验证 Gemini 工具调用事件序列。
@@ -16,11 +16,12 @@ import (
 func TestAudit_ToolUse_NoDoubleBlockStart(t *testing.T) {
 	p := NewProvider("test-key")
 
-	part := &genai.Part{
-		FunctionCall: &genai.FunctionCall{
+	argsJSON, _ := json.Marshal(map[string]any{"city": "Tokyo"})
+	part := &geminiPart{
+		FunctionCall: &functionCall{
 			ID:   "call_123",
 			Name: "get_weather",
-			Args: map[string]any{"city": "Tokyo"},
+			Args: argsJSON,
 		},
 	}
 
@@ -59,17 +60,18 @@ func TestAudit_ToolUse_StreamConverterSimulation(t *testing.T) {
 	p := NewProvider("test-key")
 
 	// 先模拟文本
-	textPart := &genai.Part{Text: "Let me check."}
+	textPart := &geminiPart{Text: "Let me check."}
 	textStarted := false
 	thinkingStarted := false
 	textEvents := p.handlePart(textPart, &textStarted, &thinkingStarted)
 
 	// 再模拟工具调用
-	toolPart := &genai.Part{
-		FunctionCall: &genai.FunctionCall{
+	argsJSON, _ := json.Marshal(map[string]any{"city": "Tokyo"})
+	toolPart := &geminiPart{
+		FunctionCall: &functionCall{
 			ID:   "call_456",
 			Name: "get_weather",
-			Args: map[string]any{"city": "Tokyo"},
+			Args: argsJSON,
 		},
 	}
 	toolEvents := p.handlePart(toolPart, &textStarted, &thinkingStarted)
@@ -112,7 +114,7 @@ func TestAudit_ToolUse_StreamConverterSimulation(t *testing.T) {
 func TestAudit_ThinkingBlockStart_DeltaType(t *testing.T) {
 	p := NewProvider("test-key")
 
-	part := &genai.Part{
+	part := &geminiPart{
 		Thought: true,
 		Text:    "Let me reason about this...",
 	}

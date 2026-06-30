@@ -4,49 +4,47 @@ import (
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"google.golang.org/genai"
 )
 
-// TestHandlePart_ThoughtSignatureExtraction 验证 Gemini thinking part 的 ThoughtSignature 被正确提取为 SignatureDelta。
+// TestHandlePart_ThinkingExtraction 验证 Gemini thinking part 的 Thought 内容被正确提取为 ThinkingDelta。
 //
-// Gemini 2.5 thinking 功能通过 ThoughtSignature ([]byte) 传递加密推理签名，
-// 用于多轮对话中保留推理上下文。修复前该字段被完全忽略。
-func TestHandlePart_ThoughtSignatureExtraction(t *testing.T) {
+// Gemini 2.5 thinking 功能通过 Thought=true 标记推理内容，
+// 用于多轮对话中保留推理上下文。
+func TestHandlePart_ThinkingExtraction(t *testing.T) {
 	p := NewProvider("test-key")
 
-	// 构造一个带 ThoughtSignature 的 thinking part
-	part := &genai.Part{
-		Text:             "Let me analyze this...",
-		Thought:          true,
-		ThoughtSignature: []byte("EvEFCu4Fencrypted_signature"),
+	// 构造一个带 Thought 的 thinking part
+	part := &geminiPart{
+		Text:    "Let me analyze this...",
+		Thought: true,
 	}
 
 	textStarted := false
 	thinkingStarted := false
 	events := p.handlePart(part, &textStarted, &thinkingStarted)
 
-	// 应该有 3 个事件: BlockStart("thinking") + ThinkingDelta + SignatureDelta
+	// 应该有 2 个事件: BlockStart("thinking") + ThinkingDelta
 	if len(events) < 2 {
-		t.Fatalf("expected at least 2 events (BlockStart + ThinkingDelta + SignatureDelta), got %d", len(events))
+		t.Fatalf("expected at least 2 events (BlockStart + ThinkingDelta), got %d", len(events))
 	}
 
-	// 查找 SignatureDelta 事件
-	var foundSignature bool
+	// 查找 ThinkingDelta 事件
+	var foundThinking bool
 	for _, e := range events {
-		if e.Delta.Type == provider.StreamDeltaTypeSignature {
-			foundSignature = true
-			sigData, ok := e.Delta.Data.(provider.SignatureData)
+		if e.Delta.Type == provider.StreamDeltaTypeThinking {
+			foundThinking = true
+			thinkingData, ok := e.Delta.Data.(provider.ThinkingData)
 			if !ok {
-				t.Fatalf("signature delta data type = %T, want provider.SignatureData", e.Delta.Data)
+				t.Fatalf("thinking delta data type = %T, want provider.ThinkingData", e.Delta.Data)
 			}
-			if string(sigData) != "EvEFCu4Fencrypted_signature" {
-				t.Errorf("signature = %q, want %q", string(sigData), "EvEFCu4Fencrypted_signature")
+			if string(thinkingData) != "Let me analyze this..." {
+				t.Errorf("thinking = %q, want %q", string(thinkingData), "Let me analyze this...")
 			}
 		}
 	}
 
-	if !foundSignature {
-		t.Fatal("no SignatureDelta event found — ThoughtSignature is silently dropped")
+	if !foundThinking {
+		t.Fatal("no ThinkingDelta event found — Thought content is silently dropped")
 	}
 
 	// thinkingStarted 应该被设置为 true
@@ -55,27 +53,31 @@ func TestHandlePart_ThoughtSignatureExtraction(t *testing.T) {
 	}
 }
 
-// TestHandlePart_ThoughtSignatureOnly 验证只有 ThoughtSignature 没有 Text 的边缘情况。
-func TestHandlePart_ThoughtSignatureOnly(t *testing.T) {
+// TestHandlePart_ThinkingBlockStartType 验证 thinking part 首次触发 BlockStart("thinking")。
+func TestHandlePart_ThinkingBlockStartType(t *testing.T) {
 	p := NewProvider("test-key")
 
-	part := &genai.Part{
-		ThoughtSignature: []byte("sig_only"),
+	part := &geminiPart{
+		Text:    "Reasoning...",
+		Thought: true,
 	}
 
 	textStarted := false
 	thinkingStarted := false
 	events := p.handlePart(part, &textStarted, &thinkingStarted)
 
-	// 即使没有 Text，ThoughtSignature 存在时也应发出 SignatureDelta
-	var foundSignature bool
-	for _, e := range events {
-		if e.Delta.Type == provider.StreamDeltaTypeSignature {
-			foundSignature = true
-		}
+	if len(events) < 2 {
+		t.Fatalf("expected at least 2 events, got %d", len(events))
 	}
 
-	if !foundSignature {
-		t.Fatal("expected SignatureDelta event for thought-signature-only part, got none")
+	if events[0].Delta.Type != provider.StreamDeltaTypeBlockStart {
+		t.Fatalf("first event should be BlockStart, got %v", events[0].Delta.Type)
+	}
+	data, ok := events[0].Delta.Data.(provider.BlockStartData)
+	if !ok {
+		t.Fatal("BlockStart data type assertion failed")
+	}
+	if data.BlockType != "thinking" {
+		t.Errorf("BlockStart type = %q, want thinking", data.BlockType)
 	}
 }

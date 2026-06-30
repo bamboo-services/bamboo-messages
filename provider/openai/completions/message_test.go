@@ -10,10 +10,6 @@ import (
 
 // TestBuildAssistantMessage_OmitsEmptyToolCalls 验证没有工具调用的 assistant 消息
 // 在序列化后不会包含空 tool_calls 数组。
-//
-// 第三方 OpenAI 兼容端点（如 Kimi coding API）可能将 "tool_calls": [] 视为无效请求，
-// 从而返回空响应（choices=0）。通过保持 ToolCalls 为 nil，可让 SDK 的 omitzero 标签在
-// 序列化时省略该字段。
 func TestBuildAssistantMessage_OmitsEmptyToolCalls(t *testing.T) {
 	p := NewCompletionsProvider("test-api-key")
 	msg := provider.Message{
@@ -22,11 +18,11 @@ func TestBuildAssistantMessage_OmitsEmptyToolCalls(t *testing.T) {
 	}
 
 	result := p.buildAssistantMessage(msg)
-	if result.OfAssistant == nil {
+	if result["role"] != "assistant" {
 		t.Fatal("expected assistant message")
 	}
 
-	raw, err := json.Marshal(result.OfAssistant)
+	raw, err := json.Marshal(result)
 	if err != nil {
 		t.Fatalf("failed to marshal assistant message: %v", err)
 	}
@@ -36,8 +32,7 @@ func TestBuildAssistantMessage_OmitsEmptyToolCalls(t *testing.T) {
 	}
 }
 
-// TestBuildAssistantMessage_IncludesToolCallsWhenPresent 验证有工具调用的 assistant 消息
-// 仍然正确包含 tool_calls 字段。
+// TestBuildAssistantMessage_IncludesToolCallsWhenPresent 验证有工具调用的 assistant 消息包含 tool_calls。
 func TestBuildAssistantMessage_IncludesToolCallsWhenPresent(t *testing.T) {
 	p := NewCompletionsProvider("test-api-key")
 	msg := provider.Message{
@@ -56,15 +51,19 @@ func TestBuildAssistantMessage_IncludesToolCallsWhenPresent(t *testing.T) {
 	}
 
 	result := p.buildAssistantMessage(msg)
-	if result.OfAssistant == nil {
+	if result["role"] != "assistant" {
 		t.Fatal("expected assistant message")
 	}
 
-	if len(result.OfAssistant.ToolCalls) != 1 {
-		t.Errorf("expected 1 tool call, got %d", len(result.OfAssistant.ToolCalls))
+	tc, ok := result["tool_calls"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected tool_calls to be []map[string]any, got %T", result["tool_calls"])
+	}
+	if len(tc) != 1 {
+		t.Errorf("expected 1 tool call, got %d", len(tc))
 	}
 
-	raw, err := json.Marshal(result.OfAssistant)
+	raw, err := json.Marshal(result)
 	if err != nil {
 		t.Fatalf("failed to marshal assistant message: %v", err)
 	}

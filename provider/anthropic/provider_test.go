@@ -4,19 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
-
-// unmarshalEvent 将 JSON 字符串反序列化为 Anthropic 流事件 Union 类型。
-func unmarshalEvent(t *testing.T, rawJSON string) anthropic.BetaRawMessageStreamEventUnion {
-	t.Helper()
-	var event anthropic.BetaRawMessageStreamEventUnion
-	if err := json.Unmarshal([]byte(rawJSON), &event); err != nil {
-		t.Fatalf("failed to unmarshal event JSON: %v", err)
-	}
-	return event
-}
 
 // ==============================
 // 构造函数测试
@@ -88,7 +77,7 @@ func TestProvider_buildMessages(t *testing.T) {
 		name     string
 		messages []provider.Message
 		wantLen  int
-		check    func(t *testing.T, result []anthropic.BetaMessageParam)
+		check    func(t *testing.T, result []map[string]any)
 	}{
 		{
 			name:     "empty messages",
@@ -101,9 +90,9 @@ func TestProvider_buildMessages(t *testing.T) {
 				{Role: provider.RoleUser, Content: "Hello"},
 			},
 			wantLen: 1,
-			check: func(t *testing.T, result []anthropic.BetaMessageParam) {
-				if result[0].Role != anthropic.BetaMessageParamRoleUser {
-					t.Errorf("expected role user, got %v", result[0].Role)
+			check: func(t *testing.T, result []map[string]any) {
+				if result[0]["role"] != "user" {
+					t.Errorf("expected role user, got %v", result[0]["role"])
 				}
 			},
 		},
@@ -113,9 +102,9 @@ func TestProvider_buildMessages(t *testing.T) {
 				{Role: provider.RoleAssistant, Content: "Hi there!"},
 			},
 			wantLen: 1,
-			check: func(t *testing.T, result []anthropic.BetaMessageParam) {
-				if result[0].Role != anthropic.BetaMessageParamRoleAssistant {
-					t.Errorf("expected role assistant, got %v", result[0].Role)
+			check: func(t *testing.T, result []map[string]any) {
+				if result[0]["role"] != "assistant" {
+					t.Errorf("expected role assistant, got %v", result[0]["role"])
 				}
 			},
 		},
@@ -138,12 +127,13 @@ func TestProvider_buildMessages(t *testing.T) {
 				},
 			},
 			wantLen: 1,
-			check: func(t *testing.T, result []anthropic.BetaMessageParam) {
-				if result[0].Role != anthropic.BetaMessageParamRoleAssistant {
-					t.Errorf("expected role assistant, got %v", result[0].Role)
+			check: func(t *testing.T, result []map[string]any) {
+				if result[0]["role"] != "assistant" {
+					t.Errorf("expected role assistant, got %v", result[0]["role"])
 				}
-				if len(result[0].Content) < 2 {
-					t.Errorf("expected at least 2 content blocks, got %d", len(result[0].Content))
+				content, ok := result[0]["content"].([]map[string]any)
+				if !ok || len(content) < 2 {
+					t.Errorf("expected at least 2 content blocks, got %v", result[0]["content"])
 				}
 			},
 		},
@@ -166,9 +156,13 @@ func TestProvider_buildMessages(t *testing.T) {
 				},
 			},
 			wantLen: 1,
-			check: func(t *testing.T, result []anthropic.BetaMessageParam) {
-				if len(result[0].Content) != 1 {
-					t.Errorf("expected 1 content block (tool only), got %d", len(result[0].Content))
+			check: func(t *testing.T, result []map[string]any) {
+				content, ok := result[0]["content"].([]map[string]any)
+				if !ok {
+					t.Fatalf("expected content to be []map[string]any, got %T", result[0]["content"])
+				}
+				if len(content) != 1 {
+					t.Errorf("expected 1 content block (tool only), got %d", len(content))
 				}
 			},
 		},
@@ -182,9 +176,9 @@ func TestProvider_buildMessages(t *testing.T) {
 				},
 			},
 			wantLen: 1,
-			check: func(t *testing.T, result []anthropic.BetaMessageParam) {
-				if result[0].Role != anthropic.BetaMessageParamRoleUser {
-					t.Errorf("expected role user for tool result, got %v", result[0].Role)
+			check: func(t *testing.T, result []map[string]any) {
+				if result[0]["role"] != "user" {
+					t.Errorf("expected role user for tool result, got %v", result[0]["role"])
 				}
 			},
 		},
@@ -286,11 +280,11 @@ func TestProvider_handleStreamEvent(t *testing.T) {
 			wantLen:  1,
 			wantType: provider.StreamTypeDelta,
 			check: func(t *testing.T, events []provider.StreamEvent) {
-				if events[0].Delta.Type != provider.StreamDeltaTypeToolCall {
-					t.Errorf("expected tool_call delta, got %v", events[0].Delta.Type)
+				if events[0].Delta.Type != provider.StreamDeltaTypeBlockStart {
+					t.Errorf("expected block_start delta, got %v", events[0].Delta.Type)
 				}
-				if data, ok := events[0].Delta.Data.(provider.ToolCallData); !ok || data.ID != "toolu_01ABC" || data.Name != "get_weather" {
-					t.Errorf("expected ToolCallData{id: toolu_01ABC, name: get_weather}, got %v", events[0].Delta.Data)
+				if data, ok := events[0].Delta.Data.(provider.BlockStartData); !ok || data.ID != "toolu_01ABC" || data.Name != "get_weather" {
+					t.Errorf("expected BlockStartData{id: toolu_01ABC, name: get_weather}, got %v", events[0].Delta.Data)
 				}
 			},
 		},
@@ -348,19 +342,8 @@ func TestProvider_handleStreamEvent(t *testing.T) {
 			},
 		},
 		{
-			name:     "message_delta with usage",
-			rawJSON:  `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":42}}`,
-			wantLen:  1,
-			wantType: provider.StreamTypeDelta,
-			check: func(t *testing.T, events []provider.StreamEvent) {
-				if events[0].Delta.Type != provider.StreamDeltaTypeUsage {
-					t.Errorf("expected usage delta, got %v", events[0].Delta.Type)
-				}
-			},
-		},
-		{
-			name:     "message_delta without usage returns nil",
-			rawJSON:  `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":0}}`,
+			name:     "message_delta with stop_reason",
+			rawJSON:  `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null}}`,
 			wantLen:  0,
 			wantType: "",
 		},
@@ -381,7 +364,25 @@ func TestProvider_handleStreamEvent(t *testing.T) {
 	var finishReason provider.FinishReason
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			event := unmarshalEvent(t, tt.rawJSON)
+			// 解析完整 JSON 到 messageStreamEvent
+			// 对于 content_block_delta 和 message_delta，需要提取 delta 子对象
+			var raw struct {
+				Type         string          `json:"type"`
+				Index        *int            `json:"index,omitempty"`
+				ContentBlock *contentBlock   `json:"content_block,omitempty"`
+				Delta        json.RawMessage `json:"delta,omitempty"`
+			}
+			if err := json.Unmarshal([]byte(tt.rawJSON), &raw); err != nil {
+				t.Fatalf("failed to unmarshal raw JSON: %v", err)
+			}
+
+			event := messageStreamEvent{
+				Type:         raw.Type,
+				Index:        raw.Index,
+				ContentBlock: raw.ContentBlock,
+				Delta:        raw.Delta,
+			}
+
 			result := p.handleStreamEvent(event, &finishReason)
 			if len(result) != tt.wantLen {
 				t.Errorf("handleStreamEvent() returned %d events, want %d", len(result), tt.wantLen)
@@ -406,12 +407,13 @@ func TestProvider_handleStreamEvent(t *testing.T) {
 func TestMapFinishReason(t *testing.T) {
 	tests := []struct {
 		name   string
-		reason anthropic.BetaStopReason
+		reason string
 		want   provider.FinishReason
 	}{
-		{"end_turn", anthropic.BetaStopReasonEndTurn, provider.FinishReasonStop},
-		{"max_tokens", anthropic.BetaStopReasonMaxTokens, provider.FinishReasonLength},
-		{"tool_use", anthropic.BetaStopReasonToolUse, provider.FinishReasonToolCalls},
+		{"end_turn", "end_turn", provider.FinishReasonStop},
+		{"max_tokens", "max_tokens", provider.FinishReasonLength},
+		{"tool_use", "tool_use", provider.FinishReasonToolCalls},
+		{"stop_sequence", "stop_sequence", provider.FinishReasonStop},
 		{"unknown", "unknown_reason", provider.FinishReasonStop},
 	}
 

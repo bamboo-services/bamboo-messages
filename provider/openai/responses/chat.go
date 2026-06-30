@@ -2,32 +2,30 @@ package responses
 
 import (
 	"context"
-	"sync"
-	"time"
+	"encoding/json"
+	"fmt"
+	"io"
 
 	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
-// streamDrainTimeout 是收到 response.completed 后等待上游关闭连接的最大时长。
-//
-// 背景：openai-go SDK 的 Stream.Next() 在收到终止事件后不 break，
-// 而是继续 drain 直到底层 HTTP 连接关闭（io.EOF）。部分上游
-// 在发送终止事件后不主动关闭 TCP 连接，导致 Stream.Next() 永久阻塞。
-const streamDrainTimeout = 5 * time.Second
-
 // Chat 流式对话。
 //
-// 将统一的 provider.Message 转换为 OpenAI Responses 格式，
-// 通过底层 SDK 发起流式请求，返回 StreamEvent channel。
+// 无系统提示的流式对话，内部调用 ChatWithSystem 并传入空 systemPrompt。
+// 返回 StreamEvent channel，按需消费流式输出。
 func (p *ResponsesProvider) Chat(ctx context.Context, messages []provider.Message, config *provider.ChatConfig) <-chan provider.StreamEvent {
 	return p.ChatWithSystem(ctx, "", messages, config)
 }
 
 // ChatWithSystem 带系统提示的流式对话。
 //
-// 在消息前插入系统提示，然后调用 OpenAI Responses API 发起流式请求，
-// 返回包含文本、推理、工具调用等事件的 StreamEvent channel。
+// 将统一 provider.Message 转换为 OpenAI Responses 协议格式，
+// 通过 HTTPClient 发起流式请求（SSE），返回 StreamEvent channel。
+//
+// 去 SDK 化实现：使用 httpClient.DoWithDebug 发送 HTTP 请求，
+// 通过 provider.SSEScanner 解析 SSE 帧并分发到 handleStreamEvent，
+// 不依赖 openai-go SDK。
 func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) <-chan provider.StreamEvent {
 	eventCh := make(chan provider.StreamEvent, 64)
 
@@ -38,44 +36,93 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			config = &provider.ChatConfig{}
 		}
 
-		params := p.buildResponseNewParams(config.Model, p.buildInput(systemPrompt, messages), config)
+		// 构建请求参数（map[string]any）
+		params := p.buildParams(config.Model, systemPrompt, messages, config, true)
 
-		provider.DebugRequest(
-			"openai-responses",
-			"POST /responses (streaming, model="+config.Model+")",
-			nil,
-			params,
-		)
+		body, err := json.Marshal(params)
+		if err != nil {
+			select {
+			case eventCh <- provider.StreamEvent{
+				Type: provider.StreamTypeError,
+				Err:  xError.NewError(ctx, nil, "OpenAI Responses 请求参数序列化失败", false, err),
+			}:
+			case <-ctx.Done():
+			}
+			return
+		}
 
-		stream := p.Client.Responses.NewStreaming(ctx, params)
-		defer stream.Close()
+		// 发送 HTTP 请求（含 debug 日志）
+		resp, err := p.httpClient.DoWithDebug(ctx, "POST", "/responses", body, "openai-responses", "POST /responses (streaming, model="+config.Model+")")
+		if err != nil {
+			select {
+			case eventCh <- provider.StreamEvent{
+				Type: provider.StreamTypeError,
+				Err:  xError.NewError(ctx, nil, "OpenAI Responses 流式对话请求失败", false, err),
+			}:
+			case <-ctx.Done():
+			}
+			return
+		}
 
-		var drainMu sync.Mutex
-		drainTimedOut := false
-		drainStarted := false
+		// 检查 HTTP 状态码，错误响应直接读取 body 并返回错误事件
+		if resp.StatusCode >= 400 {
+			respBody, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
 
-		startDrainTimer := func() {
-			drainMu.Lock()
-			already := drainStarted
-			drainStarted = true
-			drainMu.Unlock()
-			if already {
+			var apiErr openaiError
+			_ = json.Unmarshal(respBody, &apiErr)
+			errMsg := fmt.Sprintf("OpenAI Responses 上游错误 (HTTP %d)", resp.StatusCode)
+			if apiErr.Error.Message != "" {
+				errMsg += ": " + apiErr.Error.Message
+			}
+
+			select {
+			case eventCh <- provider.StreamEvent{
+				Type: provider.StreamTypeError,
+				Err:  xError.NewError(ctx, nil, errMsg, false, fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody))),
+			}:
+			case <-ctx.Done():
 				return
 			}
-			time.AfterFunc(streamDrainTimeout, func() {
-				drainMu.Lock()
-				drainTimedOut = true
-				drainMu.Unlock()
-				_ = stream.Close()
-			})
+
+			select {
+			case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone}:
+			case <-ctx.Done():
+			}
+			return
 		}
+
+		// 使用 SSEScanner 解析 SSE 流
+		scanner := provider.NewSSEScanner(resp.Body)
+		defer scanner.Close()
 
 		textBlockStarted := false
 		thinkingBlockStarted := false
 		startSent := false
-		stopSent := false
 
-		for stream.Next() {
+		for {
+			eventType, data, done, scanErr := scanner.Next()
+			if done {
+				break
+			}
+			if scanErr != nil {
+				// io.EOF 表示流正常耗尽，不作为错误处理
+				if scanErr == io.EOF {
+					break
+				}
+				// 其他读取错误 → 发送错误事件
+				select {
+				case eventCh <- provider.StreamEvent{
+					Type: provider.StreamTypeError,
+					Err:  xError.NewError(ctx, nil, "OpenAI Responses SSE 流读取失败", false, scanErr),
+				}:
+				case <-ctx.Done():
+					return
+				}
+				break
+			}
+
+			// 首次成功读取数据后发送 StreamTypeStart
 			if !startSent {
 				startSent = true
 				select {
@@ -85,41 +132,39 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 				}
 			}
 
-			event := stream.Current()
+			// 解析 SSE 帧数据为 responseStreamEvent
+			var event responseStreamEvent
+			if jsonErr := json.Unmarshal(data, &event); jsonErr != nil {
+				// JSON 解析失败：跳过该帧，继续读取（容错）
+				continue
+			}
+
+			// 如果 event: 行有类型但 JSON 中无 type 字段，用 eventType 补充
+			if event.Type == "" && eventType != "" {
+				event.Type = eventType
+			}
+
+			// 分发事件到处理函数
 			events := p.handleStreamEvent(ctx, event, &textBlockStarted, &thinkingBlockStarted)
 			for _, e := range events {
-				if e.Type == provider.StreamTypeStop {
-					stopSent = true
-				}
 				select {
 				case eventCh <- e:
 				case <-ctx.Done():
 					return
 				}
 			}
+		}
 
-			if stopSent {
-				startDrainTimer()
+		// 如果因 ctx 取消等原因未发送过 Start，补发一个 Start 以保证 channel 语义完整
+		if !startSent {
+			select {
+			case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
+			case <-ctx.Done():
+				return
 			}
 		}
 
-		drainMu.Lock()
-		timedOut := drainTimedOut
-		drainMu.Unlock()
-
-		if !timedOut {
-			if err := stream.Err(); err != nil {
-				select {
-				case eventCh <- provider.StreamEvent{
-					Type: provider.StreamTypeError,
-					Err:  xError.NewError(ctx, nil, "OpenAI 流式对话失败", false, err),
-				}:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-
+		// 发送 StreamTypeDone 结束流
 		select {
 		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone}:
 		case <-ctx.Done():

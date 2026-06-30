@@ -27,14 +27,15 @@ func TestBuildAssistantItem_ReasoningID_NoRsPrefix(t *testing.T) {
 	}
 
 	// 第一个 item 应该是 reasoning
-	reasoningItem := items[0].OfReasoning
-	if reasoningItem == nil {
-		t.Fatal("expected first item to be reasoning")
+	reasoningItem := items[0]
+	if reasoningItem["type"] != "reasoning" {
+		t.Fatalf("expected first item type 'reasoning', got %v", reasoningItem["type"])
 	}
-	if reasoningItem.ID != "rs_real_id_123" {
-		t.Errorf("reasoning ID = %q, want rs_real_id_123", reasoningItem.ID)
+	id, _ := reasoningItem["id"].(string)
+	if id != "rs_real_id_123" {
+		t.Errorf("reasoning ID = %q, want rs_real_id_123", id)
 	}
-	if reasoningItem.ID == "rs_gAAAAABp_encrypted_token" {
+	if id == "rs_gAAAAABp_encrypted_token" {
 		t.Error("reasoning ID should NOT be 'rs_' + ThinkingSignature (old bug)")
 	}
 }
@@ -56,16 +57,17 @@ func TestBuildAssistantItem_EmptyReasoningID(t *testing.T) {
 		t.Fatal("expected items even with empty ReasoningID")
 	}
 
-	reasoningItem := items[0].OfReasoning
-	if reasoningItem == nil {
-		t.Fatal("expected reasoning item")
+	reasoningItem := items[0]
+	if reasoningItem["type"] != "reasoning" {
+		t.Fatalf("expected reasoning item, got type %v", reasoningItem["type"])
 	}
-	if reasoningItem.ID != "" {
-		t.Errorf("expected empty ID, got %q", reasoningItem.ID)
+	id, _ := reasoningItem["id"].(string)
+	if id != "" {
+		t.Errorf("expected empty ID, got %q", id)
 	}
 }
 
-// TestBuildAssistantItem_EncryptedContent 验证 ThinkingSignature 正确映射到 EncryptedContent
+// TestBuildAssistantItem_EncryptedContent 验证 ThinkingSignature 正确映射到 encrypted_content
 func TestBuildAssistantItem_EncryptedContent(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
@@ -78,14 +80,12 @@ func TestBuildAssistantItem_EncryptedContent(t *testing.T) {
 	}
 
 	items := p.buildAssistantItem(msg)
-	reasoningItem := items[0].OfReasoning
-	if reasoningItem == nil {
-		t.Fatal("expected reasoning item")
+	reasoningItem := items[0]
+	if reasoningItem["type"] != "reasoning" {
+		t.Fatalf("expected reasoning item, got type %v", reasoningItem["type"])
 	}
-	if !reasoningItem.EncryptedContent.Valid() {
-		t.Fatal("EncryptedContent should be set")
-	}
-	if reasoningItem.EncryptedContent.Value != "gAAAAABp_test_encrypted" {
-		t.Errorf("EncryptedContent = %q, want gAAAAABp_test_encrypted", reasoningItem.EncryptedContent.Value)
+	enc, _ := reasoningItem["encrypted_content"].(string)
+	if enc != "gAAAAABp_test_encrypted" {
+		t.Errorf("encrypted_content = %q, want gAAAAABp_test_encrypted", enc)
 	}
 }

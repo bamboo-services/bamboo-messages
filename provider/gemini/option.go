@@ -1,7 +1,5 @@
 package gemini
 
-import "google.golang.org/genai"
-
 // GeminiProviderOption 配置 Gemini 请求特有参数的函数选项。
 //
 // 用于设置 TopK、SafetySettings 等 Gemini 协议特有的请求参数。
@@ -15,7 +13,7 @@ type GeminiProviderOption func(*geminiRequestConfig)
 // 后续在请求执行时，这些参数会被合并到 ProviderExtra 中透传。
 type geminiRequestConfig struct {
 	topK           *float64
-	safetySettings []*genai.SafetySetting
+	safetySettings []map[string]string
 }
 
 // WithTopK 设置 Top-K 采样参数（Gemini 特有）。
@@ -30,6 +28,7 @@ func WithTopK(v float64) GeminiProviderOption {
 //
 // Gemini 原生支持按 harm category 和 threshold 进行内容安全过滤。
 // 通过此 Option 可覆盖默认的安全策略。
-func WithSafetySettings(settings []*genai.SafetySetting) GeminiProviderOption {
+// 每个 map 应包含 "category" 和 "threshold" 键。
+func WithSafetySettings(settings []map[string]string) GeminiProviderOption {
 	return func(c *geminiRequestConfig) { c.safetySettings = settings }
 }

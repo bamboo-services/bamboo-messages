@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"github.com/openai/openai-go/v3/packages/param"
-	"github.com/openai/openai-go/v3/shared"
 )
 
 // newLegacyProvider 创建 Legacy 兼容模式的 Provider 实例。
@@ -23,35 +21,37 @@ func newDefaultProvider(t *testing.T) *CompletionsProvider {
 	return NewCompletionsProvider("test")
 }
 
-// TestBuildParams_LegacyMaxTokens 验证 Legacy 模式使用 MaxTokens（旧字段名 max_tokens）。
+// TestBuildParams_LegacyMaxTokens 验证 Legacy 模式使用旧字段名 max_tokens。
 func TestBuildParams_LegacyMaxTokens(t *testing.T) {
 	p := newLegacyProvider(t)
 	params := p.buildParams("", nil, &provider.ChatConfig{MaxTokens: 4096})
 
-	if param.IsOmitted(params.MaxTokens) {
-		t.Error("Legacy: MaxTokens should be set")
+	v, ok := params["max_tokens"]
+	if !ok {
+		t.Fatal("Legacy: max_tokens should be set")
 	}
-	if params.MaxTokens.Value != 4096 {
-		t.Errorf("Legacy: MaxTokens.Value = %d, want 4096", params.MaxTokens.Value)
+	if v.(int64) != 4096 {
+		t.Errorf("Legacy: max_tokens = %v, want 4096", v)
 	}
-	if !param.IsOmitted(params.MaxCompletionTokens) {
-		t.Error("Legacy: MaxCompletionTokens should NOT be set")
+	if _, exists := params["max_completion_tokens"]; exists {
+		t.Error("Legacy: max_completion_tokens should NOT be set")
 	}
 }
 
-// TestBuildParams_DefaultMaxCompletionTokens 验证默认模式使用 MaxCompletionTokens（新字段名）。
+// TestBuildParams_DefaultMaxCompletionTokens 验证默认模式使用新字段名 max_completion_tokens。
 func TestBuildParams_DefaultMaxCompletionTokens(t *testing.T) {
 	p := newDefaultProvider(t)
 	params := p.buildParams("", nil, &provider.ChatConfig{MaxTokens: 4096})
 
-	if param.IsOmitted(params.MaxCompletionTokens) {
-		t.Error("Default: MaxCompletionTokens should be set")
+	v, ok := params["max_completion_tokens"]
+	if !ok {
+		t.Fatal("Default: max_completion_tokens should be set")
 	}
-	if params.MaxCompletionTokens.Value != 4096 {
-		t.Errorf("Default: MaxCompletionTokens.Value = %d, want 4096", params.MaxCompletionTokens.Value)
+	if v.(int64) != 4096 {
+		t.Errorf("Default: max_completion_tokens = %v, want 4096", v)
 	}
-	if !param.IsOmitted(params.MaxTokens) {
-		t.Error("Default: MaxTokens should NOT be set")
+	if _, exists := params["max_tokens"]; exists {
+		t.Error("Default: max_tokens should NOT be set")
 	}
 }
 
@@ -60,8 +60,8 @@ func TestBuildParams_LegacyNoParallelToolCalls(t *testing.T) {
 	p := newLegacyProvider(t)
 	params := p.buildParams("", nil, &provider.ChatConfig{})
 
-	if !param.IsOmitted(params.ParallelToolCalls) {
-		t.Error("Legacy (no tools): ParallelToolCalls should NOT be set")
+	if _, exists := params["parallel_tool_calls"]; exists {
+		t.Error("Legacy (no tools): parallel_tool_calls should NOT be set")
 	}
 }
 
@@ -76,19 +76,16 @@ func TestBuildParams_LegacyParallelToolCallsWithTools(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	if param.IsOmitted(params.ParallelToolCalls) {
-		t.Error("Legacy (with tools): ParallelToolCalls should be set")
+	v, ok := params["parallel_tool_calls"]
+	if !ok {
+		t.Fatal("Legacy (with tools): parallel_tool_calls should be set")
 	}
-	if !params.ParallelToolCalls.Value {
-		t.Error("Legacy (with tools): ParallelToolCalls.Value should be true")
+	if v != true {
+		t.Errorf("Legacy (with tools): parallel_tool_calls = %v, want true", v)
 	}
 }
 
-// TestBuildParams_LegacyParallelToolCallsOmittedWhenFalse 验证 Legacy 模式下有工具但
-// ParallelToolCalls 为 false（零值）时不发送 ParallelToolCalls 字段。
-//
-// 该测试复现并防护智谱 GLM 等 OpenAI 兼容端点的 400 code:1210 参数错误问题：
-// 这些端点不支持 parallel_tool_calls 参数，即使发送 false 也会被拒绝。
+// TestBuildParams_LegacyParallelToolCallsOmittedWhenFalse 验证 ParallelToolCalls=false 时不发送。
 func TestBuildParams_LegacyParallelToolCallsOmittedWhenFalse(t *testing.T) {
 	p := newLegacyProvider(t)
 	config := &provider.ChatConfig{
@@ -99,42 +96,39 @@ func TestBuildParams_LegacyParallelToolCallsOmittedWhenFalse(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	if !param.IsOmitted(params.ParallelToolCalls) {
-		t.Error("Legacy (with tools, ParallelToolCalls=false): ParallelToolCalls should NOT be set; " +
-			"sending it to OpenAI-compatible endpoints (e.g. Zhipu GLM) causes 400 param error")
+	if _, exists := params["parallel_tool_calls"]; exists {
+		t.Error("Legacy (with tools, ParallelToolCalls=false): parallel_tool_calls should NOT be set")
 	}
 }
 
-// TestBuildStreamOptions_LegacyOmitted 验证 Legacy 模式下 buildStreamOptions 返回零值（序列化时省略）。
-//
-// 该测试复现并防护智谱 GLM 等 OpenAI 兼容端点的 400 code:1210 参数错误问题：
-// 这些端点不支持 stream_options 参数，发送 include_usage 会导致请求被拒绝。
+// TestBuildStreamOptions_LegacyOmitted 验证 Legacy 模式下 buildStreamOptions 返回 nil。
 func TestBuildStreamOptions_LegacyOmitted(t *testing.T) {
 	p := newLegacyProvider(t)
 	opts := p.buildStreamOptions()
 
-	if !param.IsOmitted(opts.IncludeUsage) {
-		t.Error("Legacy: StreamOptions.IncludeUsage should be omitted; " +
-			"sending stream_options to OpenAI-compatible endpoints (e.g. Zhipu GLM) causes 400 code:1210")
+	if opts != nil {
+		t.Errorf("Legacy: buildStreamOptions should return nil, got %v", opts)
 	}
 }
 
-// TestBuildStreamOptions_DefaultSet 验证默认模式（非 Legacy）下 buildStreamOptions 设置 IncludeUsage=true。
+// TestBuildStreamOptions_DefaultSet 验证默认模式下 buildStreamOptions 设置 include_usage=true。
 func TestBuildStreamOptions_DefaultSet(t *testing.T) {
 	p := newDefaultProvider(t)
 	opts := p.buildStreamOptions()
 
-	if param.IsOmitted(opts.IncludeUsage) {
-		t.Error("Default: StreamOptions.IncludeUsage should be set")
+	if opts == nil {
+		t.Fatal("Default: buildStreamOptions should not be nil")
 	}
-	if !opts.IncludeUsage.Value {
-		t.Error("Default: StreamOptions.IncludeUsage.Value should be true")
+	v, ok := opts["include_usage"]
+	if !ok {
+		t.Fatal("Default: include_usage should be set")
+	}
+	if v != true {
+		t.Errorf("Default: include_usage = %v, want true", v)
 	}
 }
 
 // TestBuildParams_LegacyReasoningEffort 验证 Legacy 模式正常映射 reasoning_effort。
-//
-// Legacy 模式和默认模式都透传 reasoning_effort，GLM-5.2 原生支持完整值域。
 func TestBuildParams_LegacyReasoningEffort(t *testing.T) {
 	p := newLegacyProvider(t)
 	config := &provider.ChatConfig{
@@ -142,8 +136,12 @@ func TestBuildParams_LegacyReasoningEffort(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	if params.ReasoningEffort != shared.ReasoningEffort("high") {
-		t.Errorf("Legacy: ReasoningEffort = %q, want %q", string(params.ReasoningEffort), "high")
+	v, ok := params["reasoning_effort"]
+	if !ok {
+		t.Fatal("Legacy: reasoning_effort should be set")
+	}
+	if v != "high" {
+		t.Errorf("Legacy: reasoning_effort = %v, want %q", v, "high")
 	}
 }
 
@@ -156,27 +154,20 @@ func TestBuildParams_LegacyThinkingPassthrough(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	extraFields := params.ExtraFields()
-	if extraFields == nil {
-		t.Fatal("Legacy: ExtraFields() should not be nil after SetExtraFields")
-	}
-	thinking, ok := extraFields["thinking"]
+	thinking, ok := params["thinking"]
 	if !ok {
-		t.Error("Legacy: expected 'thinking' in ExtraFields")
-	} else {
-		thinkingMap, ok := thinking.(map[string]any)
-		if !ok {
-			t.Errorf("Legacy: thinking value type = %T, want map[string]any", thinking)
-		} else if thinkingMap["type"] != "enabled" {
-			t.Errorf("Legacy: thinking.type = %v, want 'enabled'", thinkingMap["type"])
-		}
+		t.Fatal("Legacy: expected 'thinking' in params")
+	}
+	thinkingMap, ok := thinking.(map[string]any)
+	if !ok {
+		t.Fatalf("Legacy: thinking value type = %T, want map[string]any", thinking)
+	}
+	if thinkingMap["type"] != "enabled" {
+		t.Errorf("Legacy: thinking.type = %v, want 'enabled'", thinkingMap["type"])
 	}
 }
 
-// TestBuildParams_LegacyThinkingPassthroughAdaptive 验证 Legacy 模式下 adaptive thinking 被归一化为 enabled。
-//
-// 跨协议场景（如 Anthropic 入口）传入 thinking.type="adaptive"，但 legacy 端点（GLM/Kimi）
-// 仅识别 "enabled"/"disabled"。normalizeLegacyThinking 应将 adaptive 映射为 enabled。
+// TestBuildParams_LegacyThinkingPassthroughAdaptive 验证 adaptive thinking 被归一化为 enabled。
 func TestBuildParams_LegacyThinkingPassthroughAdaptive(t *testing.T) {
 	p := newLegacyProvider(t)
 	thinkingValue := map[string]any{"type": "adaptive"}
@@ -185,13 +176,9 @@ func TestBuildParams_LegacyThinkingPassthroughAdaptive(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	extraFields := params.ExtraFields()
-	if extraFields == nil {
-		t.Fatal("Legacy: ExtraFields() should not be nil")
-	}
-	thinking, ok := extraFields["thinking"]
+	thinking, ok := params["thinking"]
 	if !ok {
-		t.Fatal("Legacy: expected 'thinking' in ExtraFields")
+		t.Fatal("Legacy: expected 'thinking' in params")
 	}
 	thinkingMap, ok := thinking.(map[string]any)
 	if !ok {
@@ -202,8 +189,7 @@ func TestBuildParams_LegacyThinkingPassthroughAdaptive(t *testing.T) {
 	}
 }
 
-// TestBuildParams_LegacyThinkingPassthroughAdaptiveJSONRawMessage 验证 json.RawMessage 输入的
-// adaptive thinking 也能正确归一化。跨协议 JSON 解析后可能残留 json.RawMessage 类型。
+// TestBuildParams_LegacyThinkingPassthroughAdaptiveJSONRawMessage 验证 json.RawMessage 输入也能正确归一化。
 func TestBuildParams_LegacyThinkingPassthroughAdaptiveJSONRawMessage(t *testing.T) {
 	p := newLegacyProvider(t)
 	thinkingValue := json.RawMessage(`{"type":"adaptive"}`)
@@ -212,24 +198,20 @@ func TestBuildParams_LegacyThinkingPassthroughAdaptiveJSONRawMessage(t *testing.
 	}
 	params := p.buildParams("", nil, config)
 
-	extraFields := params.ExtraFields()
-	if extraFields == nil {
-		t.Fatal("Legacy: ExtraFields() should not be nil")
-	}
-	thinking, ok := extraFields["thinking"]
+	thinking, ok := params["thinking"]
 	if !ok {
-		t.Fatal("Legacy: expected 'thinking' in ExtraFields")
+		t.Fatal("Legacy: expected 'thinking' in params")
 	}
 	thinkingMap, ok := thinking.(map[string]any)
 	if !ok {
 		t.Fatalf("Legacy: thinking type = %T, want map[string]any (json.RawMessage should be unwrapped)", thinking)
 	}
 	if thinkingMap["type"] != "enabled" {
-		t.Errorf("Legacy: thinking.type = %v, want 'enabled' (normalized from adaptive via json.RawMessage)", thinkingMap["type"])
+		t.Errorf("Legacy: thinking.type = %v, want 'enabled'", thinkingMap["type"])
 	}
 }
 
-// TestBuildParams_LegacyThinkingPassthroughDisabled 验证 Legacy 模式下 disabled thinking 保持不变。
+// TestBuildParams_LegacyThinkingPassthroughDisabled 验证 disabled thinking 保持不变。
 func TestBuildParams_LegacyThinkingPassthroughDisabled(t *testing.T) {
 	p := newLegacyProvider(t)
 	thinkingValue := map[string]any{"type": "disabled"}
@@ -238,24 +220,20 @@ func TestBuildParams_LegacyThinkingPassthroughDisabled(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	extraFields := params.ExtraFields()
-	if extraFields == nil {
-		t.Fatal("Legacy: ExtraFields() should not be nil")
-	}
-	thinking, ok := extraFields["thinking"]
+	thinking, ok := params["thinking"]
 	if !ok {
-		t.Fatal("Legacy: expected 'thinking' in ExtraFields")
+		t.Fatal("Legacy: expected 'thinking' in params")
 	}
 	thinkingMap, ok := thinking.(map[string]any)
 	if !ok {
 		t.Fatalf("Legacy: thinking type = %T, want map[string]any", thinking)
 	}
 	if thinkingMap["type"] != "disabled" {
-		t.Errorf("Legacy: thinking.type = %v, want 'disabled' (unchanged)", thinkingMap["type"])
+		t.Errorf("Legacy: thinking.type = %v, want 'disabled'", thinkingMap["type"])
 	}
 }
 
-// TestBuildParams_LegacyThinkingPassthroughUnknownType 验证 Legacy 模式下未知 type 值原样保留。
+// TestBuildParams_LegacyThinkingPassthroughUnknownType 验证未知 type 值原样保留。
 func TestBuildParams_LegacyThinkingPassthroughUnknownType(t *testing.T) {
 	p := newLegacyProvider(t)
 	thinkingValue := map[string]any{"type": "custom_type", "extra": "data"}
@@ -264,31 +242,23 @@ func TestBuildParams_LegacyThinkingPassthroughUnknownType(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	extraFields := params.ExtraFields()
-	if extraFields == nil {
-		t.Fatal("Legacy: ExtraFields() should not be nil")
-	}
-	thinking, ok := extraFields["thinking"]
+	thinking, ok := params["thinking"]
 	if !ok {
-		t.Fatal("Legacy: expected 'thinking' in ExtraFields")
+		t.Fatal("Legacy: expected 'thinking' in params")
 	}
 	thinkingMap, ok := thinking.(map[string]any)
 	if !ok {
 		t.Fatalf("Legacy: thinking type = %T, want map[string]any", thinking)
 	}
 	if thinkingMap["type"] != "custom_type" {
-		t.Errorf("Legacy: thinking.type = %v, want 'custom_type' (unchanged)", thinkingMap["type"])
+		t.Errorf("Legacy: thinking.type = %v, want 'custom_type'", thinkingMap["type"])
 	}
 	if thinkingMap["extra"] != "data" {
-		t.Errorf("Legacy: thinking.extra = %v, want 'data' (preserved)", thinkingMap["extra"])
+		t.Errorf("Legacy: thinking.extra = %v, want 'data'", thinkingMap["extra"])
 	}
 }
 
-// TestBuildParams_LegacyThinkingFromEffort 验证 Legacy 模式下无原始 thinking JSON 时，
-// 从 ThinkingConfig.Effort 合成 thinking 参数注入 ExtraFields。
-//
-// GLM-5.2 需要 thinking: {type:"enabled"} 启用思考 + reasoning_effort 控制级别。
-// effort 到 thinking 的映射：none→disabled，其他→enabled。effort 值本身通过 reasoning_effort 传递。
+// TestBuildParams_LegacyThinkingFromEffort 验证从 Effort 合成 thinking 参数。
 func TestBuildParams_LegacyThinkingFromEffort(t *testing.T) {
 	tests := []struct {
 		effort              string
@@ -313,18 +283,14 @@ func TestBuildParams_LegacyThinkingFromEffort(t *testing.T) {
 			params := p.buildParams("", nil, config)
 
 			// 验证 reasoning_effort 直接透传
-			if string(params.ReasoningEffort) != tt.wantReasoningEffort {
-				t.Errorf("reasoning_effort = %q, want %q", string(params.ReasoningEffort), tt.wantReasoningEffort)
+			if v, ok := params["reasoning_effort"]; !ok || v != tt.wantReasoningEffort {
+				t.Errorf("reasoning_effort = %v, want %q", v, tt.wantReasoningEffort)
 			}
 
 			// 验证 thinking 合成
-			extraFields := params.ExtraFields()
-			if extraFields == nil {
-				t.Fatalf("ExtraFields should not be nil for effort=%s", tt.effort)
-			}
-			thinking, ok := extraFields["thinking"]
+			thinking, ok := params["thinking"]
 			if !ok {
-				t.Fatalf("expected 'thinking' in ExtraFields for effort=%s", tt.effort)
+				t.Fatalf("expected 'thinking' in params for effort=%s", tt.effort)
 			}
 			thinkingMap, ok := thinking.(map[string]any)
 			if !ok {
@@ -337,12 +303,7 @@ func TestBuildParams_LegacyThinkingFromEffort(t *testing.T) {
 	}
 }
 
-// TestBuildParams_LegacyThinkingEffortOverriddenByRawThinking 验证 ProviderExtra["thinking"]
-// 优先于 ThinkingConfig.Effort 合成。
-//
-// 当跨协议请求同时包含 thinking JSON 和 output_config.effort 时，
-// codec 层将原始 thinking JSON 存入 ProviderExtra，effort 解析到 ThinkingConfig。
-// Legacy 模式应优先使用原始 thinking JSON，而非从 effort 合成。
+// TestBuildParams_LegacyThinkingEffortOverriddenByRawThinking 验证原始 thinking JSON 优先于 Effort 合成。
 func TestBuildParams_LegacyThinkingEffortOverriddenByRawThinking(t *testing.T) {
 	p := newLegacyProvider(t)
 	thinkingValue := map[string]any{"type": "enabled", "budget_tokens": int64(50000)}
@@ -352,40 +313,29 @@ func TestBuildParams_LegacyThinkingEffortOverriddenByRawThinking(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	extraFields := params.ExtraFields()
-	if extraFields == nil {
-		t.Fatal("Legacy: ExtraFields should not be nil")
-	}
-	thinking, ok := extraFields["thinking"]
+	thinking, ok := params["thinking"]
 	if !ok {
-		t.Fatal("Legacy: expected 'thinking' in ExtraFields")
+		t.Fatal("Legacy: expected 'thinking' in params")
 	}
 	thinkingMap, ok := thinking.(map[string]any)
 	if !ok {
 		t.Fatalf("Legacy: thinking type = %T, want map[string]any", thinking)
 	}
-	// 应保留原始 thinking JSON，而非 Effort 合成的 {type:"enabled"}
 	budget, hasBudget := thinkingMap["budget_tokens"].(int64)
 	if !hasBudget {
 		t.Error("Legacy: expected budget_tokens from raw thinking JSON to be preserved")
 	} else if budget != 50000 {
-		t.Errorf("Legacy: budget_tokens = %d, want 50000 (raw thinking should take priority)", budget)
+		t.Errorf("Legacy: budget_tokens = %d, want 50000", budget)
 	}
 }
 
-// TestBuildParams_LegacyThinkingPassthroughNil 验证 Legacy 模式下无 thinking 时不 panic 且不设置 thinking 字段。
+// TestBuildParams_LegacyThinkingPassthroughNil 验证无 thinking 时不设置 thinking 字段。
 func TestBuildParams_LegacyThinkingPassthroughNil(t *testing.T) {
 	p := newLegacyProvider(t)
-	// ProviderExtra 为 nil
 	params := p.buildParams("", nil, &provider.ChatConfig{})
 
-	extraFields := params.ExtraFields()
-	if extraFields == nil {
-		// ExtraFields() 为 nil 也是可接受的（无 ExtraFields 设置）
-		return
-	}
-	if _, ok := extraFields["thinking"]; ok {
-		t.Error("Legacy: 'thinking' should not be present in ExtraFields when ProviderExtra is nil")
+	if _, ok := params["thinking"]; ok {
+		t.Error("Legacy: 'thinking' should not be present when ProviderExtra is nil")
 	}
 }
 
@@ -397,27 +347,26 @@ func TestBuildParams_DefaultReasoningEffort(t *testing.T) {
 	}
 	params := p.buildParams("", nil, config)
 
-	if params.ReasoningEffort != shared.ReasoningEffort("high") {
-		t.Errorf("Default: ReasoningEffort = %q, want %q", string(params.ReasoningEffort), "high")
+	v, ok := params["reasoning_effort"]
+	if !ok {
+		t.Fatal("Default: reasoning_effort should be set")
+	}
+	if v != "high" {
+		t.Errorf("Default: reasoning_effort = %v, want %q", v, "high")
 	}
 }
 
 // TestBuildParams_DefaultParallelToolCalls 验证默认模式仅在工具存在且显式 true 时发送 ParallelToolCalls。
-//
-// 回归测试：默认模式不再无条件发送 parallel_tool_calls: false，避免智谱 GLM / Kimi
-// 等第三方 OpenAI 兼容端点因该参数返回 400 code:1210 或空响应（choices=0）。
 func TestBuildParams_DefaultParallelToolCalls(t *testing.T) {
 	p := newDefaultProvider(t)
 
-	// 无工具时不应发送 ParallelToolCalls
 	t.Run("no tools omitted", func(t *testing.T) {
 		params := p.buildParams("", nil, &provider.ChatConfig{})
-		if !param.IsOmitted(params.ParallelToolCalls) {
-			t.Error("Default (no tools): ParallelToolCalls should be omitted")
+		if _, exists := params["parallel_tool_calls"]; exists {
+			t.Error("Default (no tools): parallel_tool_calls should be omitted")
 		}
 	})
 
-	// 有工具但 ParallelToolCalls=false 时不应发送（bool 无法区分未设置与显式 false）
 	t.Run("with tools false omitted", func(t *testing.T) {
 		params := p.buildParams("", nil, &provider.ChatConfig{
 			Tools: []provider.Tool{
@@ -425,12 +374,11 @@ func TestBuildParams_DefaultParallelToolCalls(t *testing.T) {
 			},
 			ParallelToolCalls: false,
 		})
-		if !param.IsOmitted(params.ParallelToolCalls) {
-			t.Error("Default (with tools, false): ParallelToolCalls should be omitted")
+		if _, exists := params["parallel_tool_calls"]; exists {
+			t.Error("Default (with tools, false): parallel_tool_calls should be omitted")
 		}
 	})
 
-	// 有工具且 ParallelToolCalls=true 时应发送 true
 	t.Run("with tools true set", func(t *testing.T) {
 		params := p.buildParams("", nil, &provider.ChatConfig{
 			Tools: []provider.Tool{
@@ -438,11 +386,12 @@ func TestBuildParams_DefaultParallelToolCalls(t *testing.T) {
 			},
 			ParallelToolCalls: true,
 		})
-		if param.IsOmitted(params.ParallelToolCalls) {
-			t.Fatal("Default (with tools, true): ParallelToolCalls should be set")
+		v, ok := params["parallel_tool_calls"]
+		if !ok {
+			t.Fatal("Default (with tools, true): parallel_tool_calls should be set")
 		}
-		if !params.ParallelToolCalls.Value {
-			t.Error("Default (with tools, true): ParallelToolCalls.Value should be true")
+		if v != true {
+			t.Errorf("Default (with tools, true): parallel_tool_calls = %v, want true", v)
 		}
 	})
 }
@@ -468,21 +417,13 @@ func TestMarshalJSON_LegacyFields(t *testing.T) {
 
 // TestWithLegacyCompat_Flag 验证 WithLegacyCompat Option 正确设置 legacyCompat 字段。
 func TestWithLegacyCompat_Flag(t *testing.T) {
-	// 带 WithLegacyCompat 的 Provider
 	legacy := NewCompletionsProviderWithOptions(WithAPIKey("test"), WithLegacyCompat())
 	if !legacy.legacyCompat {
 		t.Error("Provider with WithLegacyCompat(): legacyCompat should be true")
 	}
 
-	// 不带 WithLegacyCompat 的 Provider
 	defaultP := NewCompletionsProvider("test")
 	if defaultP.legacyCompat {
 		t.Error("Provider without WithLegacyCompat(): legacyCompat should be false")
-	}
-
-	// 最简构造函数也不应开启 legacyCompat
-	simpleP := NewCompletionsProvider("test")
-	if simpleP.legacyCompat {
-		t.Error("NewCompletionsProvider('test'): legacyCompat should be false")
 	}
 }

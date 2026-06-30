@@ -260,8 +260,7 @@ func TestContentOutputItemDone_Reasoning(t *testing.T) {
 		"item": {
 			"type": "reasoning",
 			"id": "rs_abc123",
-			"encrypted_content": "gAAAAABp_test_encrypted_content",
-			"summary": []
+			"encrypted_content": "gAAAAABp_test_encrypted_content"
 		}
 	}`
 	event := unmarshalResponseEvent(t, rawJSON)

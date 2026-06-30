@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -14,9 +13,8 @@ import (
 
 // TestBuildMessages_ToolUseInputNotDoubleEncoded 验证 tool_use 的 input 字段不会被双重编码。
 //
-// 修复前：tc.Function.Arguments (string) 直接传给 NewBetaToolUseBlock 的 input any，
-// SDK 内部 json.Marshal 对 string 产生双重编码（如 "\"{...}\"" 或 base64）。
-// 修复后：先转为 json.RawMessage，Marshal 时直接输出原始字节。
+// buildMessages 将 tc.Function.Arguments 转为 json.RawMessage，
+// json.Marshal 时直接输出原始字节，不会产生双重编码。
 func TestBuildMessages_ToolUseInputNotDoubleEncoded(t *testing.T) {
 	p := NewProvider("test-api-key")
 
@@ -42,37 +40,38 @@ func TestBuildMessages_ToolUseInputNotDoubleEncoded(t *testing.T) {
 	}
 
 	msg := result[0]
-	if msg.Role != anthropic.BetaMessageParamRoleAssistant {
-		t.Fatalf("expected assistant role, got %v", msg.Role)
+	if msg["role"] != "assistant" {
+		t.Fatalf("expected assistant role, got %v", msg["role"])
 	}
 
-	if len(msg.Content) != 1 {
-		t.Fatalf("expected 1 content block, got %d", len(msg.Content))
+	content, ok := msg["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected content to be []map[string]any, got %T", msg["content"])
+	}
+	if len(content) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(content))
 	}
 
-	block := msg.Content[0]
-	if block.OfToolUse == nil {
-		t.Fatal("expected tool_use block, got nil")
+	block := content[0]
+	if block["type"] != "tool_use" {
+		t.Fatalf("expected tool_use block, got type=%v", block["type"])
+	}
+	if block["id"] != "call_123" {
+		t.Errorf("expected tool_use ID 'call_123', got %v", block["id"])
+	}
+	if block["name"] != "get_weather" {
+		t.Errorf("expected tool_use name 'get_weather', got %v", block["name"])
 	}
 
-	tu := block.OfToolUse
-	if tu.ID != "call_123" {
-		t.Errorf("expected tool_use ID 'call_123', got %q", tu.ID)
-	}
-	if tu.Name != "get_weather" {
-		t.Errorf("expected tool_use name 'get_weather', got %q", tu.Name)
+	// 验证 input 是合法 JSON 对象，不是双重编码字符串
+	inputRaw, ok := block["input"].(json.RawMessage)
+	if !ok {
+		t.Fatalf("expected input to be json.RawMessage, got %T", block["input"])
 	}
 
-	// 验证 input 是合法 JSON 对象，不是 base64/双重编码字符串
-	inputBytes, err := json.Marshal(tu.Input)
-	if err != nil {
-		t.Fatalf("failed to marshal tool_use input: %v", err)
-	}
-
-	// 解析回 map 验证结构
 	var parsed map[string]any
-	if err := json.Unmarshal(inputBytes, &parsed); err != nil {
-		t.Fatalf("tool_use input is not valid JSON object: %v\nraw: %s", err, string(inputBytes))
+	if err := json.Unmarshal(inputRaw, &parsed); err != nil {
+		t.Fatalf("tool_use input is not valid JSON object: %v\nraw: %s", err, string(inputRaw))
 	}
 
 	if parsed["city"] != "北京" {
@@ -106,23 +105,128 @@ func TestBuildMessages_EmptyToolUseArguments(t *testing.T) {
 		t.Fatalf("expected 1 message, got %d", len(result))
 	}
 
-	block := result[0].Content[0]
-	if block.OfToolUse == nil {
-		t.Fatal("expected tool_use block, got nil")
+	content, ok := result[0]["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected content to be []map[string]any, got %T", result[0]["content"])
+	}
+	if len(content) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(content))
 	}
 
-	// input 应为 {}
-	inputBytes, err := json.Marshal(block.OfToolUse.Input)
-	if err != nil {
-		t.Fatalf("failed to marshal tool_use input: %v", err)
+	block := content[0]
+	if block["type"] != "tool_use" {
+		t.Fatalf("expected tool_use block, got type=%v", block["type"])
 	}
 
-	var parsed map[string]any
-	if err := json.Unmarshal(inputBytes, &parsed); err != nil {
-		t.Fatalf("tool_use input is not valid JSON object: %v\nraw: %s", err, string(inputBytes))
+	// input 应为空对象 map[string]any{}
+	input, ok := block["input"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected input to be map[string]any, got %T", block["input"])
+	}
+	if len(input) != 0 {
+		t.Errorf("expected empty object, got %v", input)
+	}
+}
+
+// TestBuildMessages_UserTextMessage 验证 user 角色纯文本消息构建。
+func TestBuildMessages_UserTextMessage(t *testing.T) {
+	p := NewProvider("test-api-key")
+
+	messages := []provider.Message{
+		{Role: provider.RoleUser, Content: "Hello world"},
 	}
 
-	if len(parsed) != 0 {
-		t.Errorf("expected empty object, got %v", parsed)
+	result := p.buildMessages(messages)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0]["role"] != "user" {
+		t.Errorf("expected role 'user', got %v", result[0]["role"])
+	}
+
+	content, ok := result[0]["content"].([]map[string]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("expected 1 content block, got %v", result[0]["content"])
+	}
+	if content[0]["type"] != "text" {
+		t.Errorf("expected text block, got %v", content[0]["type"])
+	}
+	if content[0]["text"] != "Hello world" {
+		t.Errorf("expected 'Hello world', got %v", content[0]["text"])
+	}
+}
+
+// TestBuildMessages_ToolResultMerged 验证连续 tool_result 消息合并到同一 user 消息。
+func TestBuildMessages_ToolResultMerged(t *testing.T) {
+	p := NewProvider("test-api-key")
+
+	messages := []provider.Message{
+		{Role: provider.RoleUser, Content: "What's the weather?"},
+		{
+			Role:       provider.RoleTool,
+			Content:    `{"temp": 25}`,
+			ToolCallID: "call-1",
+		},
+		{
+			Role:       provider.RoleTool,
+			Content:    `{"temp": 20}`,
+			ToolCallID: "call-2",
+		},
+	}
+
+	result := p.buildMessages(messages)
+
+	// user + merged tool results = 2 messages
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages (user + merged tool results), got %d", len(result))
+	}
+
+	// 第二条消息应包含 2 个 tool_result blocks
+	content, ok := result[1]["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected content to be []map[string]any, got %T", result[1]["content"])
+	}
+	if len(content) != 2 {
+		t.Errorf("expected 2 tool_result blocks in merged message, got %d", len(content))
+	}
+}
+
+// TestBuildMessages_AssistantWithThinking 验证 thinking block 保留在 assistant 消息中。
+func TestBuildMessages_AssistantWithThinking(t *testing.T) {
+	p := NewProvider("test-api-key")
+
+	messages := []provider.Message{
+		{
+			Role:              provider.RoleAssistant,
+			Content:           "The answer is 42.",
+			ThinkingContent:   "Let me think about this...",
+			ThinkingSignature: "sig_abc123",
+		},
+	}
+
+	result := p.buildMessages(messages)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+
+	content, ok := result[0]["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected content to be []map[string]any, got %T", result[0]["content"])
+	}
+	if len(content) < 2 {
+		t.Fatalf("expected at least 2 blocks (thinking + text), got %d", len(content))
+	}
+
+	// 第一个 block 应为 thinking
+	if content[0]["type"] != "thinking" {
+		t.Errorf("expected first block to be thinking, got %v", content[0]["type"])
+	}
+	if content[0]["thinking"] != "Let me think about this..." {
+		t.Errorf("expected thinking content, got %v", content[0]["thinking"])
+	}
+	if content[0]["signature"] != "sig_abc123" {
+		t.Errorf("expected signature, got %v", content[0]["signature"])
 	}
 }
