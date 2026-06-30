@@ -3,8 +3,10 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
@@ -20,70 +22,89 @@ func (p *Provider) Complete(ctx context.Context, messages []provider.Message, co
 // CompleteWithSystem 带系统提示的非流式对话。
 //
 // 将统一 provider.Message 转换为 Anthropic 协议格式，
-// 通过底层 SDK 发起同步请求，返回 CompletionResult。
+// 通过 httpClient 发起同步 HTTP 请求，返回 CompletionResult。
 // 支持系统提示、温度、TopP、Stop 序列、工具调用、Thinking 配置、TopK、ToolChoice 等参数。
 func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
 	params := p.buildParams(systemPrompt, messages, config)
 
-	provider.DebugRequest(
-		"anthropic",
-		"POST /v1/messages (non-stream, model="+config.Model+")",
-		nil,
-		params,
-	)
-
-	response, err := p.Client.Beta.Messages.New(ctx, params)
+	body, err := json.Marshal(params)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, "Anthropic 非流式对话失败", false, err)
+		return nil, xError.NewError(ctx, nil, "Anthropic 请求参数序列化失败", false, err)
 	}
 
-	// 解析响应内容
+	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, "/v1/messages", body, "anthropic", "POST /v1/messages (non-stream, model="+config.Model+")")
+	if err != nil {
+		return nil, xError.NewError(ctx, nil, "Anthropic 非流式对话请求失败", false, err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应体
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, xError.NewError(ctx, nil, "Anthropic 非流式响应读取失败", false, err)
+	}
+
+	// 检查 HTTP 状态码，解析错误响应
+	if resp.StatusCode >= 400 {
+		var errResp anthropicErrorResponse
+		if jsonErr := json.Unmarshal(respBody, &errResp); jsonErr == nil && errResp.Error != nil {
+			return nil, xError.NewError(ctx, nil, fmt.Sprintf("Anthropic API 错误 [%d]: %s", resp.StatusCode, errResp.Error.Message), false)
+		}
+		return nil, xError.NewError(ctx, nil, fmt.Sprintf("Anthropic API 返回错误状态码 %d", resp.StatusCode), false)
+	}
+
+	// 解析响应
+	var msgResp messageResponse
+	if err := json.Unmarshal(respBody, &msgResp); err != nil {
+		return nil, xError.NewError(ctx, nil, "Anthropic 非流式响应解析失败", false, err)
+	}
+
+	// 构建 CompletionResult
 	result := &provider.CompletionResult{
-		FinishReason: mapFinishReason(response.StopReason),
-		Usage: provider.UsageData{
-			InputTokens:              response.Usage.InputTokens,
-			OutputTokens:             response.Usage.OutputTokens,
-			CacheCreationInputTokens: response.Usage.CacheCreationInputTokens,
-			CacheReadInputTokens:     response.Usage.CacheReadInputTokens,
-		},
+		ResponseID: msgResp.ID,
 	}
 
-	// 遍历响应内容块
-	for _, block := range response.Content {
+	// 映射停止原因
+	if msgResp.StopReason != nil {
+		result.FinishReason = mapFinishReason(*msgResp.StopReason)
+	}
+
+	// 提取 Token 用量（保留缓存统计）
+	if msgResp.Usage != nil {
+		result.Usage = provider.UsageData{
+			InputTokens:              int64(msgResp.Usage.InputTokens),
+			OutputTokens:             int64(msgResp.Usage.OutputTokens),
+			CacheCreationInputTokens: int64(msgResp.Usage.CacheCreationInputTokens),
+			CacheReadInputTokens:     int64(msgResp.Usage.CacheReadInputTokens),
+		}
+	}
+
+	// 遍历响应内容块，提取文本、思考和工具调用
+	for _, block := range msgResp.Content {
 		switch block.Type {
 		case "text":
-			result.Content += block.AsText().Text
+			result.Content += block.Text
 		case "thinking":
-			result.Thinking += block.AsThinking().Thinking
+			result.Thinking += block.Thinking
+			// 保留 thinking 签名（用于多轮对话验证）
+			if block.Signature != "" {
+				result.ThinkingSignature = block.Signature
+			}
 		case "tool_use":
-			toolUse := block.AsToolUse()
-			inputBytes, _ := json.Marshal(toolUse.Input)
+			inputStr := string(block.Input)
+			if len(block.Input) == 0 {
+				inputStr = "{}"
+			}
 			result.ToolCalls = append(result.ToolCalls, provider.ToolCall{
-				ID:   toolUse.ID,
+				ID:   block.ID,
 				Type: "function",
 				Function: provider.FunctionCall{
-					Name:      toolUse.Name,
-					Arguments: string(inputBytes),
+					Name:      block.Name,
+					Arguments: inputStr,
 				},
 			})
 		}
 	}
 
 	return result, nil
-}
-
-// mapFinishReason 将 Anthropic 停止原因映射为统一的 FinishReason。
-//
-// Anthropic: end_turn → Stop, max_tokens → Length, tool_use → ToolCalls，其他默认为 Stop。
-func mapFinishReason(reason anthropic.BetaStopReason) provider.FinishReason {
-	switch reason {
-	case anthropic.BetaStopReasonEndTurn:
-		return provider.FinishReasonStop
-	case anthropic.BetaStopReasonMaxTokens:
-		return provider.FinishReasonLength
-	case anthropic.BetaStopReasonToolUse:
-		return provider.FinishReasonToolCalls
-	default:
-		return provider.FinishReasonStop
-	}
 }

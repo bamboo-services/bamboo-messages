@@ -1,11 +1,10 @@
 package completions
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/packages/respjson"
 )
 
 // checkBlockStartType 验证事件列表中包含指定类型的 BlockStart 事件
@@ -36,12 +35,11 @@ func hasDeltaType(events []provider.StreamEvent, deltaType provider.StreamDeltaT
 func TestHandleChoice_ReasoningContent(t *testing.T) {
 	p := NewCompletionsProvider("test-api-key")
 
-	choice := openai.ChatCompletionChunkChoice{
+	choice := chatCompletionChunkChoice{
 		Index: 0,
-		Delta: openai.ChatCompletionChunkChoiceDelta{},
-	}
-	choice.Delta.JSON.ExtraFields = map[string]respjson.Field{
-		"reasoning_content": respjson.NewField(`"thinking text"`),
+		Delta: chatCompletionDelta{
+			ReasoningContent: json.RawMessage(`"thinking text"`),
+		},
 	}
 
 	textBlockStarted := false
@@ -67,12 +65,11 @@ func TestHandleChoice_ReasoningContent(t *testing.T) {
 func TestHandleChoice_ReasoningContentNull(t *testing.T) {
 	p := NewCompletionsProvider("test-api-key")
 
-	choice := openai.ChatCompletionChunkChoice{
+	choice := chatCompletionChunkChoice{
 		Index: 0,
-		Delta: openai.ChatCompletionChunkChoiceDelta{},
-	}
-	choice.Delta.JSON.ExtraFields = map[string]respjson.Field{
-		"reasoning_content": respjson.NewField("null"),
+		Delta: chatCompletionDelta{
+			ReasoningContent: json.RawMessage("null"),
+		},
 	}
 
 	textBlockStarted := false
@@ -80,7 +77,8 @@ func TestHandleChoice_ReasoningContentNull(t *testing.T) {
 	stopSent := false
 	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 
-	// null 值: Valid() 返回 false，应跳过
+	// null 值解析为字符串 "null"，非空但语义无效 — parseReasoningRaw 会返回 "null"
+	// 这里验证 null 不会产生有效推理增量
 	if len(events) != 0 {
 		t.Fatalf("expected 0 events for null reasoning_content, got %d", len(events))
 	}
@@ -92,12 +90,11 @@ func TestHandleChoice_ReasoningContentNull(t *testing.T) {
 func TestHandleChoice_ReasoningContentEmpty(t *testing.T) {
 	p := NewCompletionsProvider("test-api-key")
 
-	choice := openai.ChatCompletionChunkChoice{
+	choice := chatCompletionChunkChoice{
 		Index: 0,
-		Delta: openai.ChatCompletionChunkChoiceDelta{},
-	}
-	choice.Delta.JSON.ExtraFields = map[string]respjson.Field{
-		"reasoning_content": respjson.NewField(`""`),
+		Delta: chatCompletionDelta{
+			ReasoningContent: json.RawMessage(`""`),
+		},
 	}
 
 	textBlockStarted := false
@@ -105,7 +102,7 @@ func TestHandleChoice_ReasoningContentEmpty(t *testing.T) {
 	stopSent := false
 	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 
-	// 空字符串: 反序列化成功但 reasoning == ""，应跳过
+	// 空字符串: 解析后 reasoning == ""，应跳过
 	if len(events) != 0 {
 		t.Fatalf("expected 0 events for empty reasoning_content, got %d", len(events))
 	}
@@ -118,12 +115,11 @@ func TestHandleChoice_ReasoningBeforeText(t *testing.T) {
 	p := NewCompletionsProvider("test-api-key")
 
 	// 第一次调用: 仅 reasoning_content，无 Content
-	reasoningChoice := openai.ChatCompletionChunkChoice{
+	reasoningChoice := chatCompletionChunkChoice{
 		Index: 0,
-		Delta: openai.ChatCompletionChunkChoiceDelta{},
-	}
-	reasoningChoice.Delta.JSON.ExtraFields = map[string]respjson.Field{
-		"reasoning_content": respjson.NewField(`"step 1: analyze"`),
+		Delta: chatCompletionDelta{
+			ReasoningContent: json.RawMessage(`"step 1: analyze"`),
+		},
 	}
 
 	textBlockStarted := false
@@ -146,9 +142,9 @@ func TestHandleChoice_ReasoningBeforeText(t *testing.T) {
 	}
 
 	// 第二次调用: 仅 Content，无 reasoning_content
-	textChoice := openai.ChatCompletionChunkChoice{
+	textChoice := chatCompletionChunkChoice{
 		Index: 0,
-		Delta: openai.ChatCompletionChunkChoiceDelta{
+		Delta: chatCompletionDelta{
 			Content: "final answer",
 		},
 	}
@@ -170,12 +166,11 @@ func TestHandleChoice_ReasoningBeforeText(t *testing.T) {
 func TestHandleChoice_OnlyReasoning(t *testing.T) {
 	p := NewCompletionsProvider("test-api-key")
 
-	choice := openai.ChatCompletionChunkChoice{
+	choice := chatCompletionChunkChoice{
 		Index: 0,
-		Delta: openai.ChatCompletionChunkChoiceDelta{},
-	}
-	choice.Delta.JSON.ExtraFields = map[string]respjson.Field{
-		"reasoning_content": respjson.NewField(`"deep thought"`),
+		Delta: chatCompletionDelta{
+			ReasoningContent: json.RawMessage(`"deep thought"`),
+		},
 	}
 
 	textBlockStarted := false
@@ -203,14 +198,11 @@ func TestHandleChoice_OnlyReasoning(t *testing.T) {
 // （如 CompletionTokens=0 但 PromptTokens>0 的场景）。修复后条件为
 // TotalTokens>0 || PromptTokens>0 || CompletionTokens>0，确保只要有
 // 任一非零字段就提取 usage。
-//
-// 构造 ChatCompletionChunk{Usage:{PromptTokens:100, CompletionTokens:0, TotalTokens:0}}，
-// 断言 events 包含 UsageDelta。
 func TestHandleChunk_RelaxedUsageCondition(t *testing.T) {
 	p := NewCompletionsProvider("test-api-key")
 
-	chunk := openai.ChatCompletionChunk{
-		Usage: openai.CompletionUsage{
+	chunk := chatCompletionChunk{
+		Usage: &chunkUsage{
 			PromptTokens:     100,
 			CompletionTokens: 0,
 			TotalTokens:      0,
@@ -252,8 +244,9 @@ func TestHandleChoice_AllowsFinishReasonUpgradeAfterStop(t *testing.T) {
 	thinkingBlockStarted := false
 	stopSent := false
 
-	stopEvents := p.handleChoice(openai.ChatCompletionChunkChoice{
-		FinishReason: "stop",
+	stopReason := "stop"
+	stopEvents := p.handleChoice(chatCompletionChunkChoice{
+		FinishReason: &stopReason,
 	}, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 	if len(stopEvents) != 1 {
 		t.Fatalf("stop choice events = %d, want 1", len(stopEvents))
@@ -262,13 +255,41 @@ func TestHandleChoice_AllowsFinishReasonUpgradeAfterStop(t *testing.T) {
 		t.Fatalf("first finish reason = %q, want %q", stopEvents[0].FinishReason, provider.FinishReasonStop)
 	}
 
-	toolEvents := p.handleChoice(openai.ChatCompletionChunkChoice{
-		FinishReason: "tool_calls",
+	toolReason := "tool_calls"
+	toolEvents := p.handleChoice(chatCompletionChunkChoice{
+		FinishReason: &toolReason,
 	}, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 	if len(toolEvents) != 1 {
 		t.Fatalf("tool_calls choice events = %d, want 1; stopSent must not swallow finish reason upgrades", len(toolEvents))
 	}
 	if toolEvents[0].FinishReason != provider.FinishReasonToolCalls {
 		t.Fatalf("second finish reason = %q, want %q", toolEvents[0].FinishReason, provider.FinishReasonToolCalls)
+	}
+}
+
+// TestParseReasoningRaw_ObjectFormat 验证 JSON 对象格式的 reasoning_content 解析。
+func TestParseReasoningRaw_ObjectFormat(t *testing.T) {
+	// {"text": "..."} 格式
+	got := parseReasoningRaw(json.RawMessage(`{"text": "object reasoning"}`))
+	if got != "object reasoning" {
+		t.Errorf("parseReasoningRaw({text:...}) = %q, want %q", got, "object reasoning")
+	}
+
+	// {"content": "..."} 格式
+	got = parseReasoningRaw(json.RawMessage(`{"content": "content field"}`))
+	if got != "content field" {
+		t.Errorf("parseReasoningRaw({content:...}) = %q, want %q", got, "content field")
+	}
+
+	// 纯字符串格式
+	got = parseReasoningRaw(json.RawMessage(`"plain string"`))
+	if got != "plain string" {
+		t.Errorf("parseReasoningRaw(string) = %q, want %q", got, "plain string")
+	}
+
+	// 空值
+	got = parseReasoningRaw(nil)
+	if got != "" {
+		t.Errorf("parseReasoningRaw(nil) = %q, want empty", got)
 	}
 }

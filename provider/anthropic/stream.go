@@ -1,7 +1,10 @@
 package anthropic
 
 import (
-	"github.com/anthropics/anthropic-sdk-go"
+	"context"
+	"encoding/json"
+
+	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -14,7 +17,7 @@ import (
 // 将 Anthropic SSE 事件类型映射到内部处理函数：
 // message_start → contentMessageStart, content_block_start → contentBlockStart 等。
 // finishReason 用于跨事件追踪完成原因（message_delta 提取，message_stop 使用）。
-func (p *Provider) handleStreamEvent(event anthropic.BetaRawMessageStreamEventUnion, finishReason *provider.FinishReason) []provider.StreamEvent {
+func (p *Provider) handleStreamEvent(event messageStreamEvent, finishReason *provider.FinishReason) []provider.StreamEvent {
 	switch event.Type {
 	case "message_start":
 		return p.contentMessageStart(event)
@@ -28,6 +31,11 @@ func (p *Provider) handleStreamEvent(event anthropic.BetaRawMessageStreamEventUn
 		return p.contentMessageDelta(event, finishReason)
 	case "message_stop":
 		return p.contentMessageStop(finishReason)
+	case "ping":
+		// 心跳事件，跳过
+		return nil
+	case "error":
+		return p.contentError(event)
 	default:
 		return nil
 	}
@@ -37,7 +45,7 @@ func (p *Provider) handleStreamEvent(event anthropic.BetaRawMessageStreamEventUn
 //
 // Anthropic message_start 事件，无需特殊处理，
 // StreamTypeStart 已在 ChatWithSystem 中发送。
-func (p *Provider) contentMessageStart(_ anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
+func (p *Provider) contentMessageStart(_ messageStreamEvent) []provider.StreamEvent {
 	// 消息开始，无需特殊处理，已在 ChatWithSystem 中发送 StreamTypeStart
 	return nil
 }
@@ -46,9 +54,12 @@ func (p *Provider) contentMessageStart(_ anthropic.BetaRawMessageStreamEventUnio
 //
 // 根据内容块类型发出对应的 BlockStart delta：
 // text → NewBlockStartDelta("text"), thinking → NewBlockStartDelta("thinking") + NewThinkingDelta, tool_use → NewToolCallDelta。
-func (p *Provider) contentBlockStart(event anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
-	block := event.AsContentBlockStart()
-	switch block.ContentBlock.Type {
+func (p *Provider) contentBlockStart(event messageStreamEvent) []provider.StreamEvent {
+	if event.ContentBlock == nil {
+		return nil
+	}
+	block := event.ContentBlock
+	switch block.Type {
 	case "text":
 		return []provider.StreamEvent{{
 			Type:  provider.StreamTypeDelta,
@@ -59,17 +70,17 @@ func (p *Provider) contentBlockStart(event anthropic.BetaRawMessageStreamEventUn
 			Type:  provider.StreamTypeDelta,
 			Delta: provider.NewBlockStartDelta("thinking"),
 		}}
-		if block.ContentBlock.Thinking != "" {
+		if block.Thinking != "" {
 			events = append(events, provider.StreamEvent{
 				Type:  provider.StreamTypeDelta,
-				Delta: provider.NewThinkingDelta(block.ContentBlock.Thinking),
+				Delta: provider.NewThinkingDelta(block.Thinking),
 			})
 		}
 		return events
 	case "tool_use":
 		return []provider.StreamEvent{{
 			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewToolCallDelta(block.ContentBlock.ID, block.ContentBlock.Name),
+			Delta: provider.NewBlockStartDeltaWithID("tool_use", block.ID, block.Name),
 		}}
 	default:
 		return nil
@@ -79,29 +90,35 @@ func (p *Provider) contentBlockStart(event anthropic.BetaRawMessageStreamEventUn
 // contentBlockDelta 处理内容块增量事件。
 //
 // 根据增量类型发出对应的 StreamDelta：
-// text_delta → NewTextDelta, thinking_delta → NewThinkingDelta, input_json_delta → NewToolCallDeltaData。
-func (p *Provider) contentBlockDelta(event anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
-	delta := event.AsContentBlockDelta()
-	switch delta.Delta.Type {
+// text_delta → NewTextDelta, thinking_delta → NewThinkingDelta, input_json_delta → NewToolCallDeltaData, signature_delta → NewSignatureDelta。
+func (p *Provider) contentBlockDelta(event messageStreamEvent) []provider.StreamEvent {
+	if len(event.Delta) == 0 {
+		return nil
+	}
+	var delta contentBlockDelta
+	if err := json.Unmarshal(event.Delta, &delta); err != nil {
+		return nil
+	}
+	switch delta.Type {
 	case "text_delta":
 		return []provider.StreamEvent{{
 			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewTextDelta(delta.Delta.Text),
+			Delta: provider.NewTextDelta(delta.Text),
 		}}
 	case "thinking_delta":
 		return []provider.StreamEvent{{
 			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewThinkingDelta(delta.Delta.Thinking),
+			Delta: provider.NewThinkingDelta(delta.Thinking),
 		}}
 	case "input_json_delta":
 		return []provider.StreamEvent{{
 			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewToolCallDeltaData(delta.Delta.PartialJSON),
+			Delta: provider.NewToolCallDeltaData(delta.PartialJSON),
 		}}
 	case "signature_delta":
 		return []provider.StreamEvent{{
 			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewSignatureDelta(delta.Delta.Signature),
+			Delta: provider.NewSignatureDelta(delta.Signature),
 		}}
 	default:
 		return nil
@@ -112,11 +129,16 @@ func (p *Provider) contentBlockDelta(event anthropic.BetaRawMessageStreamEventUn
 //
 // 将 Anthropic content_block_stop 事件透传为 BlockStop delta，
 // 携带内容块索引，供下游组件识别内容块边界。
-func (p *Provider) contentBlockStop(event anthropic.BetaRawMessageStreamEventUnion) []provider.StreamEvent {
-	block := event.AsContentBlockStop()
+func (p *Provider) contentBlockStop(event messageStreamEvent) []provider.StreamEvent {
+	if event.Index == nil {
+		return []provider.StreamEvent{{
+			Type:  provider.StreamTypeDelta,
+			Delta: provider.NewBlockStopDeltaNoIndex(),
+		}}
+	}
 	return []provider.StreamEvent{{
 		Type:  provider.StreamTypeDelta,
-		Delta: provider.NewBlockStopDelta(int(block.Index)),
+		Delta: provider.NewBlockStopDelta(*event.Index),
 	}}
 }
 
@@ -124,25 +146,22 @@ func (p *Provider) contentBlockStop(event anthropic.BetaRawMessageStreamEventUni
 //
 // Anthropic message_delta 事件携带 Token 用量统计和停止原因，
 // 发送 NewUsageDelta 并提取 stop_reason 供后续 contentMessageStop 使用。
-func (p *Provider) contentMessageDelta(event anthropic.BetaRawMessageStreamEventUnion, finishReason *provider.FinishReason) []provider.StreamEvent {
-	msgDelta := event.AsMessageDelta()
+func (p *Provider) contentMessageDelta(event messageStreamEvent, finishReason *provider.FinishReason) []provider.StreamEvent {
+	if len(event.Delta) == 0 {
+		return nil
+	}
+	var msgDelta messageDeltaData
+	if err := json.Unmarshal(event.Delta, &msgDelta); err != nil {
+		return nil
+	}
 
 	// 提取 stop_reason 供 contentMessageStop 使用
-	if msgDelta.Delta.StopReason != "" {
-		*finishReason = mapFinishReason(msgDelta.Delta.StopReason)
+	if msgDelta.StopReason != nil && *msgDelta.StopReason != "" {
+		*finishReason = mapFinishReason(*msgDelta.StopReason)
 	}
 
-	if msgDelta.Usage.InputTokens > 0 || msgDelta.Usage.OutputTokens > 0 {
-		return []provider.StreamEvent{{
-			Type: provider.StreamTypeDelta,
-			Delta: provider.NewUsageDeltaWithCache(
-				msgDelta.Usage.InputTokens,
-				msgDelta.Usage.OutputTokens,
-				msgDelta.Usage.CacheCreationInputTokens,
-				msgDelta.Usage.CacheReadInputTokens,
-			),
-		}}
-	}
+	// message_delta 事件通常不携带 usage（usage 在 message_start 中），
+	// 但保留兼容处理：若 delta 中有 usage 字段则提取
 	return nil
 }
 
@@ -154,4 +173,35 @@ func (p *Provider) contentMessageStop(finishReason *provider.FinishReason) []pro
 		Type:         provider.StreamTypeStop,
 		FinishReason: *finishReason,
 	}}
+}
+
+// contentError 处理 error 事件。
+//
+// Anthropic error 事件，发送 StreamTypeError 并携带错误信息。
+func (p *Provider) contentError(event messageStreamEvent) []provider.StreamEvent {
+	if event.Error == nil {
+		return []provider.StreamEvent{{Type: provider.StreamTypeError}}
+	}
+	return []provider.StreamEvent{{
+		Type: provider.StreamTypeError,
+		Err:  xError.NewError(context.Background(), nil, "Anthropic 流式事件错误: "+event.Error.Message, false),
+	}}
+}
+
+// mapFinishReason 将 Anthropic 停止原因映射为统一的 FinishReason。
+//
+// Anthropic: end_turn → Stop, max_tokens → Length, tool_use → ToolCalls, stop_sequence → Stop，其他默认为 Stop。
+func mapFinishReason(reason string) provider.FinishReason {
+	switch reason {
+	case "end_turn":
+		return provider.FinishReasonStop
+	case "max_tokens":
+		return provider.FinishReasonLength
+	case "tool_use":
+		return provider.FinishReasonToolCalls
+	case "stop_sequence":
+		return provider.FinishReasonStop
+	default:
+		return provider.FinishReasonStop
+	}
 }

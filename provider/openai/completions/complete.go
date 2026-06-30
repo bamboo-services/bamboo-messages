@@ -3,19 +3,19 @@ package completions
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 
 	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"github.com/openai/openai-go/v3"
 )
 
 // Complete 非流式对话。
 //
 // 将统一的 provider.Message 转换为 OpenAI Chat Completions 格式，
-// 通过底层 SDK 发起同步请求，返回完整的 CompletionResult。
+// 通过 httpClient 发起同步请求，返回完整的 CompletionResult。
 func (p *CompletionsProvider) Complete(ctx context.Context, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
 	return p.CompleteWithSystem(ctx, "", messages, config)
 }
@@ -23,58 +23,83 @@ func (p *CompletionsProvider) Complete(ctx context.Context, messages []provider.
 // CompleteWithSystem 带系统提示的非流式对话。
 //
 // 在消息列表前插入系统提示，然后发起同步对话。
+// 使用 httpClient.DoWithDebug 发送 HTTP 请求，不依赖 openai-go SDK。
 func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
 	params := p.buildParams(systemPrompt, messages, config)
 
-	provider.DebugRequest(
-		"openai-completions",
-		"POST /chat/completions (non-stream, model="+config.Model+")",
-		nil,
-		params,
-	)
-
-	response, err := p.Client.Chat.Completions.New(ctx, params)
+	bodyBytes, err := json.Marshal(params)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, formatUpstreamError(err), false, err)
+		return nil, xError.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 请求参数序列化失败: %v", err), false, err)
+	}
+
+	endpoint := "POST /chat/completions (non-stream, model=" + config.Model + ")"
+	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, "/chat/completions", bodyBytes, string(p.GetProviderType()), endpoint)
+	if err != nil {
+		return nil, xError.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 非流式对话请求失败: %v", err), false, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, xError.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 读取响应体失败: %v", err), false, err)
+	}
+
+	// HTTP 状态码检查
+	if resp.StatusCode >= 400 {
+		return nil, xError.NewError(ctx, nil, formatUpstreamError(resp.StatusCode, body), false, nil)
+	}
+
+	// 解析响应
+	var chatResp chatCompletionResponse
+	if err := json.Unmarshal(body, &chatResp); err != nil {
+		if provider.DebugEnabled {
+			log.Printf("[provider/openai-completions] 响应 JSON 解析失败, raw=%s", truncateBody(body))
+		}
+		return nil, xError.NewError(ctx, nil, fmt.Sprintf(
+			"OpenAI Completions 响应解析失败: %v, raw=%s", err, truncateBody(body),
+		), false, err)
 	}
 
 	// 检查响应
-	if len(response.Choices) == 0 {
+	if len(chatResp.Choices) == 0 {
 		if provider.DebugEnabled {
-			log.Printf("[provider/openai-completions] 上游返回空响应, raw=%s", truncateResponseJSON(response))
+			log.Printf("[provider/openai-completions] 上游返回空响应, raw=%s", truncateBody(body))
 		}
 		diag := fmt.Sprintf(
 			"OpenAI Completions 返回空响应 (choices=0), model=%s, legacyCompat=%v, tools=%d, maxTokens=%d, resp=%s",
-			config.Model, p.legacyCompat, len(config.Tools), config.MaxTokens, truncateResponseJSON(response),
+			config.Model, p.legacyCompat, len(config.Tools), config.MaxTokens, truncateBody(body),
 		)
 		return nil, xError.NewError(ctx, nil, diag, false, nil)
 	}
 
-	choice := response.Choices[0]
+	choice := chatResp.Choices[0]
 
 	// 解析响应内容
 	result := &provider.CompletionResult{
-		Content:      choice.Message.Content,
-		FinishReason: mapFinishReason(choice.FinishReason),
-		Usage: provider.UsageData{
-			InputTokens:          response.Usage.PromptTokens,
-			OutputTokens:         response.Usage.CompletionTokens,
-			CacheReadInputTokens: response.Usage.PromptTokensDetails.CachedTokens,
-		},
+		Content: choice.Message.Content,
+	}
+
+	// FinishReason 映射
+	if choice.FinishReason != nil {
+		result.FinishReason = mapFinishReason(*choice.FinishReason)
+	}
+
+	// Usage 统计
+	if chatResp.Usage != nil {
+		var cached int
+		if chatResp.Usage.PromptTokensDetails != nil {
+			cached = chatResp.Usage.PromptTokensDetails.CachedTokens
+		}
+		result.Usage = provider.UsageData{
+			InputTokens:          int64(chatResp.Usage.PromptTokens),
+			OutputTokens:         int64(chatResp.Usage.CompletionTokens),
+			CacheReadInputTokens: int64(cached),
+		}
 	}
 
 	// 推理内容提取：兼容 reasoning_content 和 reasoning 两种字段名
-	reasoningRaw := ""
-	if field, ok := choice.Message.JSON.ExtraFields["reasoning_content"]; ok && field.Raw() != "" {
-		reasoningRaw = field.Raw()
-	} else if field, ok := choice.Message.JSON.ExtraFields["reasoning"]; ok && field.Raw() != "" {
-		reasoningRaw = field.Raw()
-	}
-	if reasoningRaw != "" {
-		var reasoning string
-		if err := json.Unmarshal([]byte(reasoningRaw), &reasoning); err == nil && reasoning != "" {
-			result.Thinking = reasoning
-		}
+	if reasoningStr := parseReasoningRaw(choice.Message.ReasoningContent); reasoningStr != "" {
+		result.Thinking = reasoningStr
 	}
 
 	// 解析工具调用
@@ -88,6 +113,9 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 			},
 		})
 	}
+
+	// 响应 ID
+	result.ResponseID = chatResp.ID
 
 	return result, nil
 }
@@ -122,37 +150,34 @@ func mapFinishReason(reason string) provider.FinishReason {
 // maxResponseLogLen 响应体日志最大长度（字符数），超过截断。
 const maxResponseLogLen = 500
 
-// truncateResponseJSON 将 OpenAI 响应序列化为 JSON 并截断，用于错误日志。
+// truncateBody 将响应体截断到最大日志长度，用于错误日志。
 //
 // 仅在错误路径调用，帮助诊断 GLM 等第三方端点返回空响应的原因。
-func truncateResponseJSON[T any](resp T) string {
-	raw, err := json.Marshal(resp)
-	if err != nil {
-		return "<marshal error>"
-	}
-	s := string(raw)
+func truncateBody(body []byte) string {
+	s := string(body)
 	if len(s) <= maxResponseLogLen {
 		return s
 	}
 	return s[:maxResponseLogLen] + "...(truncated)"
 }
 
-// maxUpstreamDumpLen openai.Error DumpResponse 快照最大长度。
+// maxUpstreamDumpLen 上游错误响应快照最大长度。
 const maxUpstreamDumpLen = 1000
 
-// formatUpstreamError 从 openai-go SDK 错误中提取 HTTP 状态码和响应快照，
+// formatUpstreamError 从 HTTP 状态码和响应体中提取错误信息，
 // 生成包含完整诊断信息的错误消息。
 //
-// openai-go v3 SDK 在非 200 时返回 *openai.Error，包含 StatusCode、Request、Response。
-// 若不是该类型，退化为原始错误消息。
-func formatUpstreamError(err error) string {
-	var apierr *openai.Error
-	if errors.As(err, &apierr) {
-		dump := string(apierr.DumpResponse(true))
-		if len(dump) > maxUpstreamDumpLen {
-			dump = dump[:maxUpstreamDumpLen] + "...(truncated)"
-		}
-		return fmt.Sprintf("OpenAI Completions 上游错误 (HTTP %d): %s", apierr.StatusCode, dump)
+// 尝试解析响应体为 openaiError 结构体提取结构化错误信息；
+// 解析失败时退化为原始响应体文本。
+func formatUpstreamError(statusCode int, body []byte) string {
+	var apiErr openaiError
+	if err := json.Unmarshal(body, &apiErr); err == nil && apiErr.Error.Message != "" {
+		return fmt.Sprintf("OpenAI Completions 上游错误 (HTTP %d): %s", statusCode, apiErr.Error.Message)
 	}
-	return "OpenAI Completions 非流式对话失败"
+
+	dump := string(body)
+	if len(dump) > maxUpstreamDumpLen {
+		dump = dump[:maxUpstreamDumpLen] + "...(truncated)"
+	}
+	return fmt.Sprintf("OpenAI Completions 上游错误 (HTTP %d): %s", statusCode, dump)
 }

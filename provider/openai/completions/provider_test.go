@@ -225,16 +225,16 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		chunk   openai.ChatCompletionChunk
+		chunk   chatCompletionChunk
 		wantLen int
 		check   func(t *testing.T, events []provider.StreamEvent)
 	}{
 		{
 			name: "chunk with usage only",
-			chunk: openai.ChatCompletionChunk{
+			chunk: chatCompletionChunk{
 				ID:      "chunk-1",
-				Choices: []openai.ChatCompletionChunkChoice{},
-				Usage: openai.CompletionUsage{
+				Choices: []chatCompletionChunkChoice{},
+				Usage: &chunkUsage{
 					TotalTokens:      150,
 					PromptTokens:     100,
 					CompletionTokens: 50,
@@ -249,26 +249,24 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 		},
 		{
 			name: "chunk with text content",
-			chunk: openai.ChatCompletionChunk{
+			chunk: chatCompletionChunk{
 				ID: "chunk-2",
-				Choices: []openai.ChatCompletionChunkChoice{
+				Choices: []chatCompletionChunkChoice{
 					{
 						Index: 0,
-						Delta: openai.ChatCompletionChunkChoiceDelta{
+						Delta: chatCompletionDelta{
 							Content: "Hello",
 						},
-						FinishReason: "",
+						FinishReason: nil,
 					},
 				},
-				Usage: openai.CompletionUsage{},
+				Usage: &chunkUsage{},
 			},
 			wantLen: 2,
 			check: func(t *testing.T, events []provider.StreamEvent) {
-				// 第一个事件是合成的 BlockStart
 				if events[0].Delta.Type != provider.StreamDeltaTypeBlockStart {
 					t.Errorf("expected block_start delta, got %v", events[0].Delta.Type)
 				}
-				// 第二个事件是文本增量
 				if events[1].Delta.Type != provider.StreamDeltaTypeTextOutput {
 					t.Errorf("expected text delta, got %v", events[1].Delta.Type)
 				}
@@ -276,16 +274,16 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 		},
 		{
 			name: "chunk with finish reason stop",
-			chunk: openai.ChatCompletionChunk{
+			chunk: chatCompletionChunk{
 				ID: "chunk-4",
-				Choices: []openai.ChatCompletionChunkChoice{
+				Choices: []chatCompletionChunkChoice{
 					{
 						Index:        0,
-						Delta:        openai.ChatCompletionChunkChoiceDelta{},
-						FinishReason: "stop",
+						Delta:        chatCompletionDelta{},
+						FinishReason: strPtr("stop"),
 					},
 				},
-				Usage: openai.CompletionUsage{},
+				Usage: &chunkUsage{},
 			},
 			wantLen: 1,
 			check: func(t *testing.T, events []provider.StreamEvent) {
@@ -296,16 +294,16 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 		},
 		{
 			name: "chunk with finish reason tool_calls",
-			chunk: openai.ChatCompletionChunk{
+			chunk: chatCompletionChunk{
 				ID: "chunk-tc",
-				Choices: []openai.ChatCompletionChunkChoice{
+				Choices: []chatCompletionChunkChoice{
 					{
 						Index:        0,
-						Delta:        openai.ChatCompletionChunkChoiceDelta{},
-						FinishReason: "tool_calls",
+						Delta:        chatCompletionDelta{},
+						FinishReason: strPtr("tool_calls"),
 					},
 				},
-				Usage: openai.CompletionUsage{},
+				Usage: &chunkUsage{},
 			},
 			wantLen: 1,
 			check: func(t *testing.T, events []provider.StreamEvent) {
@@ -316,16 +314,16 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 		},
 		{
 			name: "chunk with finish reason length",
-			chunk: openai.ChatCompletionChunk{
+			chunk: chatCompletionChunk{
 				ID: "chunk-len",
-				Choices: []openai.ChatCompletionChunkChoice{
+				Choices: []chatCompletionChunkChoice{
 					{
 						Index:        0,
-						Delta:        openai.ChatCompletionChunkChoiceDelta{},
-						FinishReason: "length",
+						Delta:        chatCompletionDelta{},
+						FinishReason: strPtr("length"),
 					},
 				},
-				Usage: openai.CompletionUsage{},
+				Usage: &chunkUsage{},
 			},
 			wantLen: 1,
 			check: func(t *testing.T, events []provider.StreamEvent) {
@@ -336,10 +334,10 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 		},
 		{
 			name: "empty chunk returns nil",
-			chunk: openai.ChatCompletionChunk{
+			chunk: chatCompletionChunk{
 				ID:      "chunk-5",
-				Choices: []openai.ChatCompletionChunkChoice{},
-				Usage:   openai.CompletionUsage{},
+				Choices: []chatCompletionChunkChoice{},
+				Usage:   &chunkUsage{},
 			},
 			wantLen: 0,
 		},
@@ -360,6 +358,11 @@ func TestCompletionsProvider_handleChunk(t *testing.T) {
 			}
 		})
 	}
+}
+
+// strPtr 辅助函数，返回字符串指针。
+func strPtr(s string) *string {
+	return &s
 }
 
 // ==============================

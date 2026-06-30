@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 
 	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -20,29 +22,51 @@ func (p *Provider) Complete(ctx context.Context, messages []provider.Message, co
 // CompleteWithSystem 带系统提示的非流式对话。
 //
 // 将统一 provider.Message 转换为 Gemini 协议格式，
-// 通过底层 SDK 发起同步请求（GenerateContent），返回 CompletionResult。
+// 通过 httpClient 直接调用 Gemini REST API（generateContent 端点），
+// 返回 CompletionResult。
 // 支持系统提示、温度、TopP、MaxTokens、Stop 序列、工具调用、Thinking 配置、ToolChoice 等参数。
 func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
 	if config == nil {
 		config = &provider.ChatConfig{}
 	}
 
-	contents := p.buildMessages(messages)
-	gc := p.buildContentConfig(systemPrompt, config)
-
-	provider.DebugRequest(
-		"gemini",
-		"GenerateContent (model="+config.Model+")",
-		nil,
-		map[string]any{
-			"contents": contents,
-			"config":   gc,
-		},
-	)
-
-	resp, err := p.Client.Models.GenerateContent(ctx, config.Model, contents, gc)
+	// 构建请求体
+	reqBody := p.buildRequestBody(messages, systemPrompt, config, false)
+	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, "Gemini 非流式对话失败", false, err)
+		return nil, xError.NewError(ctx, nil, "Gemini 非流式对话请求序列化失败", false, err)
+	}
+
+	// Gemini 非流式端点：/v1beta/models/{model}:generateContent
+	endpoint := fmt.Sprintf("/v1beta/models/%s:generateContent", config.Model)
+
+	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, endpoint, bodyBytes, "gemini", endpoint)
+	if err != nil {
+		return nil, xError.NewError(ctx, nil, "Gemini 非流式对话请求失败", false, err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应体
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, xError.NewError(ctx, nil, "Gemini 非流式对话响应读取失败", false, err)
+	}
+
+	// HTTP 状态码 >= 400 → 解析错误响应
+	if resp.StatusCode >= 400 {
+		var errResp geminiErrorResponse
+		_ = json.Unmarshal(respBytes, &errResp)
+		errMsg := "Gemini API 返回错误"
+		if errResp.Error != nil && errResp.Error.Message != "" {
+			errMsg = errResp.Error.Message
+		}
+		return nil, xError.NewError(ctx, nil, errMsg, false, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBytes)))
+	}
+
+	// 反序列化响应
+	var geminiResp generateContentResponse
+	if err := json.Unmarshal(respBytes, &geminiResp); err != nil {
+		return nil, xError.NewError(ctx, nil, "Gemini 非流式对话响应解析失败", false, err)
 	}
 
 	result := &provider.CompletionResult{
@@ -50,17 +74,17 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	}
 
 	// 提取 Token 用量
-	if resp.UsageMetadata != nil {
+	if geminiResp.UsageMetadata != nil {
 		result.Usage = provider.UsageData{
-			InputTokens:          int64(resp.UsageMetadata.PromptTokenCount),
-			OutputTokens:         int64(resp.UsageMetadata.CandidatesTokenCount),
-			CacheReadInputTokens: int64(resp.UsageMetadata.CachedContentTokenCount),
+			InputTokens:          int64(geminiResp.UsageMetadata.PromptTokenCount),
+			OutputTokens:         int64(geminiResp.UsageMetadata.CandidatesTokenCount),
+			CacheReadInputTokens: int64(geminiResp.UsageMetadata.CachedContentTokenCount),
 		}
 	}
 
 	// 遍历响应内容
-	if len(resp.Candidates) > 0 {
-		candidate := resp.Candidates[0]
+	if len(geminiResp.Candidates) > 0 {
+		candidate := &geminiResp.Candidates[0]
 		result.FinishReason = mapFinishReason(candidate.FinishReason)
 
 		if candidate.Content != nil {
@@ -79,13 +103,16 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 					if id == "" {
 						id = fmt.Sprintf("gemini_call_%s_%d", part.FunctionCall.Name, i)
 					}
-					argsBytes, _ := json.Marshal(part.FunctionCall.Args)
+					argsStr := string(part.FunctionCall.Args)
+					if argsStr == "" {
+						argsStr = "{}"
+					}
 					result.ToolCalls = append(result.ToolCalls, provider.ToolCall{
 						ID:   id,
 						Type: "function",
 						Function: provider.FunctionCall{
 							Name:      part.FunctionCall.Name,
-							Arguments: string(argsBytes),
+							Arguments: argsStr,
 						},
 					})
 					// 如果有工具调用且 FinishReason 未明确指定，设为 ToolCalls
