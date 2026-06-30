@@ -47,6 +47,21 @@ type Config struct {
 	// 参数为 (从流开始的经过秒数, 该 tick 的 token/s 速率, 采样类型)。
 	// 通过 WithRateSampleCallback(fn) 设置。
 	OnRateSample func(elapsedSec, tokensPerSec float64, kind provider.RateSampleKind)
+
+	// EstimateOnMissingUsage 当上游流中断导致 usage 数据缺失时，
+	// 是否用累积的流内容估算 token 用量并触发 OnUsage 回调。
+	//
+	// 适用场景：部分上游（如智谱 GLM Coding-MAX）存在 SSE 帧截断 Bug，
+	// 流式请求在 finish_reason 到达后、usage chunk 到达前中断，
+	// 导致 OnUsage 回调永远不被触发，上层业务报 "上游没有返回计费信息"。
+	//
+	// 启用后，RelayStream 在 goroutine 退出时检测 usage 是否缺失，
+	// 若缺失则基于已输出的文本内容（CJK 1:1, Latin 4:1 估算规则）
+	// 和请求 messages 估算 input/output tokens。
+	//
+	// 估算精度的偏差约 ±20%，适用于按次计费等容错场景。
+	// 通过 WithUsageEstimation(true) 启用。
+	EstimateOnMissingUsage bool
 }
 
 // Option relay 配置选项函数。
@@ -96,6 +111,16 @@ func WithDebug(enabled bool) Option {
 func WithRateSampleCallback(fn func(elapsedSec, tokensPerSec float64, kind provider.RateSampleKind)) Option {
 	return func(c *Config) {
 		c.OnRateSample = fn
+	}
+}
+
+// WithUsageEstimation 启用 usage 缺失时的估算回退。
+//
+// 当上游流中断导致 usage 数据未到达时，RelayStream 在退出时
+// 基于已输出的文本内容估算 token 用量并触发 OnUsage 回调。
+func WithUsageEstimation(enabled bool) Option {
+	return func(c *Config) {
+		c.EstimateOnMissingUsage = enabled
 	}
 }
 

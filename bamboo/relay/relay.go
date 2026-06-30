@@ -3,6 +3,8 @@ package relay
 import (
 	"context"
 	"fmt"
+	"strings"
+	"unicode"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
@@ -182,6 +184,7 @@ func RelayStream(
 	go func() {
 		var lastUsage *bamboo.Usage
 		usageTriggered := false
+		var accumulatedOutput strings.Builder
 
 		// ── 平滑缓冲器（可选）──
 		var pacer *SmoothPacer
@@ -210,8 +213,13 @@ func RelayStream(
 			}
 		}()
 		defer func() {
-			if !usageTriggered && lastUsage != nil {
-				cfg.triggerUsage(*lastUsage)
+			if !usageTriggered {
+				if lastUsage != nil {
+					cfg.triggerUsage(*lastUsage)
+				} else if cfg.EstimateOnMissingUsage {
+					estimated := estimateUsage(req.Messages, req.System, accumulatedOutput)
+					cfg.triggerUsage(estimated)
+				}
 			}
 		}()
 
@@ -222,10 +230,26 @@ func RelayStream(
 			}
 
 			// 处理 Usage 事件
-			if event.Usage != nil {
+			// 注意：StreamConverter.handleStop() 在 usage 缺失时会生成零值 &Usage{}，
+			// 需要检查 InputTokens/OutputTokens 是否全零以区分真实 usage 和占位 usage。
+			if event.Usage != nil && (event.Usage.InputTokens > 0 || event.Usage.OutputTokens > 0) {
 				lastUsage = event.Usage
 				cfg.triggerUsage(*event.Usage)
 				usageTriggered = true
+			}
+
+			// 累积输出文本（用于 usage 缺失时的估算回退）
+			if cfg.EstimateOnMissingUsage && !usageTriggered {
+				if delta, ok := event.Delta.(*bamboo.StreamDelta); ok {
+					switch delta.Type {
+					case bamboo.DeltaTextDelta:
+						accumulatedOutput.WriteString(delta.Text)
+					case bamboo.DeltaThinkingDelta:
+						accumulatedOutput.WriteString(delta.Thinking)
+					case bamboo.DeltaInputJSON:
+						accumulatedOutput.WriteString(delta.PartialJSON)
+					}
+				}
 			}
 
 			// 序列化事件
@@ -282,4 +306,65 @@ func RelayStream(
 	}()
 
 	return out, nil
+}
+
+// estimateTokenCount 基于 CJK 1:1 / Latin 4:1 / Other 2:1 规则估算 token 数。
+//
+// 与 provider.charCounter.estimateTokens() 逻辑一致，
+// 在 relay 层独立实现以避免跨包依赖。
+func estimateTokenCount(text string) int64 {
+	var cjk, latin, other int64
+	for _, r := range text {
+		switch {
+		case isCJKRune(r):
+			cjk++
+		case isLatinAlnumRune(r):
+			latin++
+		default:
+			other++
+		}
+	}
+	return cjk + latin/4 + other/2
+}
+
+// isCJKRune 判断是否为 CJK 字符（汉字/平假名/片假名/谚文）。
+func isCJKRune(r rune) bool {
+	return unicode.Is(unicode.Han, r) ||
+		unicode.Is(unicode.Hiragana, r) ||
+		unicode.Is(unicode.Katakana, r) ||
+		unicode.Is(unicode.Hangul, r)
+}
+
+// isLatinAlnumRune 判断是否为 ASCII Latin 字母或数字。
+func isLatinAlnumRune(r rune) bool {
+	return (r >= 'a' && r <= 'z') ||
+		(r >= 'A' && r <= 'Z') ||
+		(r >= '0' && r <= '9')
+}
+
+// estimateUsage 在上游 usage 缺失时，基于请求内容和输出内容估算 token 用量。
+//
+// input_tokens: 请求 messages 中的文本内容 + system prompt 的 token 估算。
+// output_tokens: 流式过程中累积的输出文本（text/thinking/tool_call JSON）的 token 估算。
+// cache 字段无法估算，设为 0。
+func estimateUsage(messages []bamboo.BambooMessage, system string, output strings.Builder) bamboo.Usage {
+	var inputText strings.Builder
+	inputText.WriteString(system)
+	for _, msg := range messages {
+		for _, block := range msg.Content {
+			switch b := block.(type) {
+			case *bamboo.TextBlock:
+				inputText.WriteString(b.Text)
+			case *bamboo.ToolUseBlock:
+				inputText.WriteString(b.Name)
+			case *bamboo.ToolResultBlock:
+				inputText.WriteString(b.Content)
+			}
+		}
+	}
+
+	return bamboo.Usage{
+		InputTokens:  estimateTokenCount(inputText.String()),
+		OutputTokens: estimateTokenCount(output.String()),
+	}
 }
