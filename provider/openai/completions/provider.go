@@ -1,17 +1,17 @@
 package completions
 
 import (
+	"time"
+
 	"github.com/bamboo-services/bamboo-messages/provider"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 )
 
-// CompletionsProvider OpenAI Chat Completions 协议适配器实现。
-//
-// 基于泛型基座 provider.BaseProvider，封装 OpenAI Chat Completions SDK Client。
 type CompletionsProvider struct {
 	provider.BaseProvider[openai.Client]
-	legacyCompat bool
+	legacyCompat      bool
+	streamDrainTimeout time.Duration
 }
 
 // ============================================
@@ -27,15 +27,13 @@ type Option func(*config)
 //
 // 存储 API Key、BaseURL、Headers 等配置项。
 type config struct {
-	apiKey       string
-	baseURL      string
-	headers      map[string]string
-	legacyCompat bool
-	debug        bool
-	// interceptors 请求拦截器链，通过 WithInterceptor 注册。
-	// 构造 Provider 时若非空，会用 interceptorTransport 包装 HTTP client，
-	// 让所有上游请求都先经过拦截器链。
-	interceptors []provider.RequestInterceptor
+	apiKey             string
+	baseURL            string
+	headers            map[string]string
+	legacyCompat       bool
+	debug              bool
+	streamDrainTimeout time.Duration
+	interceptors       []provider.RequestInterceptor
 }
 
 // WithAPIKey 设置 API 密钥。
@@ -73,6 +71,10 @@ func WithHeader(key, value string) Option {
 // 用于兼容早期 API 响应格式或特定第三方端点的非标准行为。
 func WithLegacyCompat() Option {
 	return func(c *config) { c.legacyCompat = true }
+}
+
+func WithStreamDrainTimeout(d time.Duration) Option {
+	return func(c *config) { c.streamDrainTimeout = d }
 }
 
 // WithDebug 启用 debug 日志。
@@ -137,7 +139,8 @@ func NewCompletionsProviderWithOptions(opts ...Option) *CompletionsProvider {
 		BaseProvider: provider.BaseProvider[openai.Client]{
 			Client: client,
 		},
-		legacyCompat: cfg.legacyCompat,
+		legacyCompat:       cfg.legacyCompat,
+		streamDrainTimeout: cfg.streamDrainTimeout,
 	}
 }
 

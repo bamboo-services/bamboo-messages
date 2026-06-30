@@ -92,9 +92,14 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 	return result, nil
 }
 
-// mapFinishReason 将 OpenAI 停止原因映射为统一的 FinishReason。
+// mapFinishReason 将上游停止原因映射为统一的 FinishReason。
 //
-// 将 OpenAI 的 stop/length/tool_calls 映射为 provider.FinishReason 的对应值。
+// 标准 OpenAI 值（stop/length/tool_calls）直接映射。
+// 同时兼容智谱 GLM 等第三方端点的非标准 finish_reason 值：
+//   - network_error：推理过程中网络中断，语义等价于 stop（流已结束）
+//   - sensitive：内容策略违规，语义等价于 content_filter
+//
+// 未知值降级为 FinishReasonStop，保证流式传输不会因枚举校验而中断。
 func mapFinishReason(reason string) provider.FinishReason {
 	switch reason {
 	case "stop":
@@ -103,6 +108,12 @@ func mapFinishReason(reason string) provider.FinishReason {
 		return provider.FinishReasonLength
 	case "tool_calls":
 		return provider.FinishReasonToolCalls
+	case "network_error":
+		// GLM 推理过程中网络中断，流已终止，降级为 stop
+		return provider.FinishReasonStop
+	case "sensitive", "content_filter":
+		// GLM 内容策略违规，等价于 OpenAI content_filter
+		return provider.FinishReasonStop
 	default:
 		return provider.FinishReasonStop
 	}
