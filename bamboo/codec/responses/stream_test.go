@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
-	openairesponses "github.com/openai/openai-go/v3/responses"
 )
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -588,16 +587,17 @@ func TestStreamSerializer_ResponseCompletedParsesWithOpenAIGoSchema(t *testing.T
 	}
 
 	_, payload := parseResponsesSSE(t, data)
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal payload error = %v", err)
+	resp := extractResponse(t, payload)
+	usage, ok := resp["usage"].(map[string]any)
+	if !ok {
+		t.Fatal("missing usage in response.completed")
 	}
-	var completed openairesponses.ResponseCompletedEvent
-	if err := json.Unmarshal(raw, &completed); err != nil {
-		t.Fatalf("openai-go failed to parse ResponseCompletedEvent: %v\nraw: %s", err, raw)
+	outputDetails, ok := usage["output_tokens_details"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing output_tokens_details: %v", usage)
 	}
-	if completed.Response.Usage.OutputTokensDetails.ReasoningTokens != 0 {
-		t.Fatalf("reasoning_tokens = %d, want 0", completed.Response.Usage.OutputTokensDetails.ReasoningTokens)
+	if value, ok := outputDetails["reasoning_tokens"].(float64); !ok || value != 0 {
+		t.Fatalf("reasoning_tokens = %v (%T), want 0", outputDetails["reasoning_tokens"], outputDetails["reasoning_tokens"])
 	}
 }
 
@@ -620,19 +620,24 @@ func TestStreamSerializer_ResponseCompletedWithoutUpstreamUsageParsesWithOpenAIG
 	}
 
 	_, payload := parseResponsesSSE(t, data)
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal payload error = %v", err)
+	resp := extractResponse(t, payload)
+	usage, ok := resp["usage"].(map[string]any)
+	if !ok {
+		t.Fatal("missing usage in response.completed")
 	}
-	var completed openairesponses.ResponseCompletedEvent
-	if err := json.Unmarshal(raw, &completed); err != nil {
-		t.Fatalf("openai-go failed to parse ResponseCompletedEvent without upstream usage: %v\nraw: %s", err, raw)
+	inputDetails, ok := usage["input_tokens_details"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing input_tokens_details: %v", usage)
 	}
-	if completed.Response.Usage.InputTokensDetails.CachedTokens != 0 {
-		t.Fatalf("cached_tokens = %d, want 0", completed.Response.Usage.InputTokensDetails.CachedTokens)
+	if value, ok := inputDetails["cached_tokens"].(float64); !ok || value != 0 {
+		t.Fatalf("cached_tokens = %v (%T), want 0", inputDetails["cached_tokens"], inputDetails["cached_tokens"])
 	}
-	if completed.Response.Usage.OutputTokensDetails.ReasoningTokens != 0 {
-		t.Fatalf("reasoning_tokens = %d, want 0", completed.Response.Usage.OutputTokensDetails.ReasoningTokens)
+	outputDetails, ok := usage["output_tokens_details"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing output_tokens_details: %v", usage)
+	}
+	if value, ok := outputDetails["reasoning_tokens"].(float64); !ok || value != 0 {
+		t.Fatalf("reasoning_tokens = %v (%T), want 0", outputDetails["reasoning_tokens"], outputDetails["reasoning_tokens"])
 	}
 }
 

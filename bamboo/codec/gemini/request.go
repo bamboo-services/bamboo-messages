@@ -7,7 +7,6 @@ import (
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
-	"google.golang.org/genai"
 )
 
 // ── Gemini 请求 JSON 结构体 ──
@@ -153,7 +152,10 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 		config.ToolChoice = mapToolChoiceMode(req.ToolConfig.FunctionCallingConfig.Mode)
 	}
 
-	// ── 6. safetySettings 转换为 []*genai.SafetySetting 后透传到 ProviderExtra ──
+	// ── 6. safetySettings 转换为 []map[string]string 后透传到 ProviderExtra ──
+	//
+	// codec 层使用通用 map 类型，避免引入 genai SDK 依赖。
+	// provider/gemini 适配器通过 GetExtraAny 提取后原样序列化到请求体。
 	if len(req.SafetySettings) > 0 {
 		if config.ProviderExtra == nil {
 			config.ProviderExtra = make(map[string]any)
@@ -450,51 +452,19 @@ func parseTools(tools []geminiTool) []bamboo.Tool {
 	return result
 }
 
-// convertSafetySettings 将 geminiSafetySetting 列表转换为 []*genai.SafetySetting。
+// convertSafetySettings 将 geminiSafetySetting 列表转换为 []map[string]string。
 //
-// 确保 codec 层输出的类型与 provider 期望的类型一致，
-// 避免 relay 路径上类型断言失败导致 safety_settings 被静默丢弃。
-func convertSafetySettings(settings []geminiSafetySetting) []*genai.SafetySetting {
-	result := make([]*genai.SafetySetting, 0, len(settings))
+// codec 层使用通用 map 类型输出，避免引入 genai SDK 依赖。
+// provider/gemini 适配器通过 GetExtraAny 提取后原样序列化到请求体。
+func convertSafetySettings(settings []geminiSafetySetting) []map[string]string {
+	result := make([]map[string]string, 0, len(settings))
 	for _, s := range settings {
-		result = append(result, &genai.SafetySetting{
-			Category:  mapHarmCategory(s.Category),
-			Threshold: mapHarmBlockThreshold(s.Threshold),
+		result = append(result, map[string]string{
+			"category":  s.Category,
+			"threshold": s.Threshold,
 		})
 	}
 	return result
-}
-
-// mapHarmCategory 将字符串形式的 harm category 映射为 genai.HarmCategory。
-func mapHarmCategory(category string) genai.HarmCategory {
-	switch category {
-	case "HARM_CATEGORY_HARASSMENT":
-		return genai.HarmCategoryHarassment
-	case "HARM_CATEGORY_HATE_SPEECH":
-		return genai.HarmCategoryHateSpeech
-	case "HARM_CATEGORY_SEXUALLY_EXPLICIT":
-		return genai.HarmCategorySexuallyExplicit
-	case "HARM_CATEGORY_DANGEROUS_CONTENT":
-		return genai.HarmCategoryDangerousContent
-	default:
-		return genai.HarmCategoryUnspecified
-	}
-}
-
-// mapHarmBlockThreshold 将字符串形式的 threshold 映射为 genai.HarmBlockThreshold。
-func mapHarmBlockThreshold(threshold string) genai.HarmBlockThreshold {
-	switch threshold {
-	case "BLOCK_NONE":
-		return genai.HarmBlockThresholdBlockNone
-	case "BLOCK_ONLY_HIGH":
-		return genai.HarmBlockThresholdBlockOnlyHigh
-	case "BLOCK_MEDIUM_AND_ABOVE":
-		return genai.HarmBlockThresholdBlockMediumAndAbove
-	case "BLOCK_LOW_AND_ABOVE":
-		return genai.HarmBlockThresholdBlockLowAndAbove
-	default:
-		return genai.HarmBlockThresholdUnspecified
-	}
 }
 
 // mapThinkingBudgetToEffort 将 Gemini thinkingBudget 映射为 ThinkingConfig。

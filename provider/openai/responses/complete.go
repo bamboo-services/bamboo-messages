@@ -63,7 +63,7 @@ type completeResponseItem struct {
 	Role string `json:"role,omitempty"`
 	// Status 输出项状态。
 	Status string `json:"status,omitempty"`
-	// Content 消息内容块列表（message 类型使用）。
+	// Content 内容块列表（message 和 reasoning 类型共用，结构相同）。
 	Content []responseContentPart `json:"content,omitempty"`
 	// Name 工具名称（function_call 类型使用）。
 	Name string `json:"name,omitempty"`
@@ -73,8 +73,6 @@ type completeResponseItem struct {
 	Arguments string `json:"arguments,omitempty"`
 	// Summary 推理摘要文本数组（reasoning 类型使用）。
 	Summary []completeSummaryPart `json:"summary,omitempty"`
-	// Content 推理内容数组（reasoning 类型使用，部分模型通过此字段返回推理文本）。
-	ReasoningContent []completeSummaryPart `json:"content,omitempty"`
 	// EncryptedContent 服务端加密的推理内容（reasoning 类型使用）。
 	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
@@ -177,14 +175,14 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 					result.Thinking += sum.Text
 				}
 			}
-			// summary 为空时回退到 content 数组
-			if result.Thinking == "" {
-				for _, content := range item.ReasoningContent {
-					if content.Text != "" {
-						result.Thinking += content.Text
-					}
+		// summary 为空时回退到 content 数组
+		if result.Thinking == "" {
+			for _, content := range item.Content {
+				if content.Text != "" {
+					result.Thinking += content.Text
 				}
 			}
+		}
 			// encrypted_content 是 OpenAI 服务端加密的不透明 token，
 			// Responses → Responses 直连时原样传回可保持推理上下文连续性。
 			if item.EncryptedContent != "" {

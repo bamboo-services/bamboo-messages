@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
-	"google.golang.org/genai"
 )
 
 // helper: 将 BambooMessage 的 Content 转为具体类型方便断言
@@ -363,13 +362,19 @@ func TestParseRequest_SafetySettings_Transparent(t *testing.T) {
 	if !ok {
 		t.Fatal("safety_settings not in ProviderExtra")
 	}
-	// safety_settings 现在应该是 []*genai.SafetySetting 类型
-	settings, ok := ss.([]*genai.SafetySetting)
+	// safety_settings 现在应该是 []map[string]string 类型
+	settings, ok := ss.([]map[string]string)
 	if !ok {
-		t.Fatalf("safety_settings type = %T, want []*genai.SafetySetting", ss)
+		t.Fatalf("safety_settings type = %T, want []map[string]string", ss)
 	}
 	if len(settings) != 1 {
 		t.Fatalf("settings count = %d, want 1", len(settings))
+	}
+	if settings[0]["category"] != "HARM_CATEGORY_DANGEROUS_CONTENT" {
+		t.Errorf("category = %q", settings[0]["category"])
+	}
+	if settings[0]["threshold"] != "BLOCK_ONLY_HIGH" {
+		t.Errorf("threshold = %q", settings[0]["threshold"])
 	}
 }
 

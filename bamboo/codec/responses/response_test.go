@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
-	openairesponses "github.com/openai/openai-go/v3/responses"
 )
 
 func TestSerializeResponse_TextOnly(t *testing.T) {
@@ -122,11 +121,6 @@ func TestSerializeResponse_UsageDetailsIncludeZeroRequiredFields(t *testing.T) {
 	}
 	if value, ok := outputDetails["reasoning_tokens"].(float64); !ok || value != 0 {
 		t.Fatalf("reasoning_tokens = %v (%T), want explicit 0", outputDetails["reasoning_tokens"], outputDetails["reasoning_tokens"])
-	}
-
-	var parsed openairesponses.Response
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("openai-go failed to parse Response: %v\nraw: %s", err, data)
 	}
 }
 

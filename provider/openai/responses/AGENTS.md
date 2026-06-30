@@ -2,7 +2,7 @@
 
 ## 概述
 
-OpenAI Responses 协议适配器，将 OpenAI Responses API 转换为统一的 `provider.Provider` 接口。基于 `openai-go/v3` SDK 构建，与 `completions` 适配器共享同一 SDK 但使用不同的 API 端点（Responses 端点）。
+OpenAI Responses 协议适配器，将 OpenAI Responses API 转换为统一的 `provider.Provider` 接口。基于 `net/http` + JSON 构建，不依赖外部 SDK，与 `completions` 适配器共享相同的 HTTP 基座但使用不同的 API 端点（Responses 端点）。
 
 ## 目录结构
 
@@ -18,6 +18,7 @@ provider/openai/responses/
 ├── models.go         # 模型常量 + GetAvailableModels
 ├── option.go         # OpenaiResponsesOption + WithStore/WithModalities/WithPreviousResponseID/WithTruncation
 ├── tools.go          # 工具定义转换 (buildTools)
+├── types.go          # OpenAI Responses 协议原生请求/响应 DTO
 ├── provider_test.go  # 集成测试
 └── params_audit_test.go  # Metadata/Stop 审计测试
 ```
@@ -43,7 +44,7 @@ provider/openai/responses/
 
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
-| `ResponsesProvider` | 类型别名 | provider.go | `BaseProvider[openai.Client]` |
+| `ResponsesProvider` | 结构体 | provider.go | 持有 `*provider.HTTPClient` 的 OpenAI Responses 协议适配器实现 |
 | `Option` | 函数类型 | provider.go | `func(*config)` — Provider 配置选项 |
 | `OpenaiResponsesOption` | 函数类型 | option.go | `func(*responsesRequestConfig)` — 请求级配置选项 |
 | `WithInterceptor` | 函数 | provider.go | 注册请求拦截器（转发到 `provider.WithInterceptor`） |
@@ -57,17 +58,19 @@ provider/openai/responses/
 ## 约定
 
 - **参数构建集中化** — `params.go` 的 `buildParams` 是 Chat 和 Complete 的共享参数构建入口，确保流式和非流式路径参数一致
+- **统一 HTTP 传输** — 通过 `provider.NewHTTPClient` 创建 `*provider.HTTPClient`，认证使用 `Authorization: Bearer` 模式；流式响应通过 `provider.NewSSEScanner` 解析 SSE 帧
+- **本地 DTO 模型** — 请求/响应结构通过 `types.go` 本地定义（`responseCreateRequest`、`responseStreamEvent`、`responseObject` 等），不依赖外部 SDK
 - **事件类型丰富** — OpenAI Responses 协议提供更多事件类型：`response.created`, `response.output_item.added`, `response.output_text.delta`, `response.reasoning_text.delta`, `response.function_call_arguments.delta`, `response.function_call_arguments.done`, `response.completed`, `response.failed`, `response.incomplete`
 - **BlockStart 合成** — 同 Completions，没有原生 `content_block_start`，通过 `textBlockStarted` / `thinkingBlockStarted` 合成
-- **Reasoning items 提取（非流式）** — `complete.go` 处理 `"reasoning"` 类型的 output item，提取 `rc.Content[].Text` 填充到 `CompletionResult.Thinking`
+- **Reasoning items 提取（非流式）** — `complete.go` 处理 `"reasoning"` 类型的 output item，优先从 `item.Summary` 数组提取文本填充到 `CompletionResult.Thinking`，其次回退到 `item.ReasoningContent`；`item.EncryptedContent` 填充到 `CompletionResult.ThinkingSignature`
 - **FinishReason 流式携带** — `contentResponseCompleted` 和 `contentResponseIncomplete` 均发送 `StreamTypeStop` 事件并携带 `FinishReason`
 - **FinishReason 推断逻辑** — `mapResponseFinishReason` 根据 `Status` 和是否有 `function_call` 输出推断：`incomplete + function_call → ToolCalls`；`incomplete + 无 function_call → Length`；`completed + function_call → ToolCalls`；`completed + 无 function_call → Stop`
-- **Reasoning 参数** — `ThinkingConfig.Effort` 映射为 `ReasoningEffort`，`Summary` 按 effort 自动推导（none→""、low→"concise"、medium→"auto"、high→"detailed"），映射到 `shared.ReasoningParam`
+- **Reasoning 参数** — `ThinkingConfig.Effort` 映射为请求 DTO 的 `reasoning.effort`，`Summary` 按 effort 自动推导（none→""、low→"concise"、medium→"auto"、high→"detailed"），映射到请求 DTO 的 `reasoning.summary`
 - **ResponseFormat 字符串模式** — 支持 `"text"` 和 `"json_object"` 两种简单字符串值
-- **ToolChoice 字符串模式** — 支持 `"auto"` / `"none"` / `"required"` 等值
-- **输入格式差异** — 使用 `ResponseInputItemUnionParam` 而非 `Message` 数组，支持更丰富的输入类型
-- **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
-- **拦截器 Transport 注入** — 构造函数中调用 `provider.NewInterceptorHTTPClient(nil, cfg.interceptors)`，非 nil 时通过 `option.WithHTTPClient(httpCli)` 注入 SDK；无拦截器时返回 nil，保留 SDK 默认 client
+- **ToolChoice 字符串模式** — 支持 `"auto"` / `"none"` / `"required"` 等值，序列化到请求 DTO 的 `tool_choice` 字段
+- **输入格式差异** — 使用请求 DTO 的 `Input` 字段（字符串或消息数组），支持更丰富的输入类型
+- **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
+- **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client
 
 ## 反模式
 
@@ -86,7 +89,7 @@ provider/openai/responses/
 5. FinishReason 不正确 → 检查 `mapResponseFinishReason` 的推断逻辑（特别是 `incomplete + function_call` 组合）
 6. 响应格式不生效 → 检查 `ResponseFormat` 字符串值是否为 `"text"` 或 `"json_object"`
 7. 完成原因错误 → 检查 `complete.go` 中根据 `Status` 和 ToolCalls 推断的逻辑
-8. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成 `ToolUnionParam`
+8. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成工具定义（`map[string]any` 数组）
 9. 请求参数不确定 → 启用 `WithDebug()` 或设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
 
 ## 引用

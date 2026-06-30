@@ -10,9 +10,11 @@
 
 ```text
 provider/
-├── provider.go              # Provider 接口 (6 方法) + BaseProvider[T] 泛型基座
+├── provider.go              # Provider 接口 (6 方法)
 ├── type.go                  # Message / ChatConfig / ThinkingConfig / Tool / CompletionResult / CacheControl / ProviderExtra helpers
 ├── stream.go                # StreamEvent / StreamDelta[E] + 7 种 Delta 构造函数 (含 NewUsageDeltaWithCache) + IndexedToolCallDeltaData
+├── http_client.go           # 统一 HTTP 客户端 HTTPClient + NewHTTPClient（认证/拦截器/User-Agent/URL 拼接）
+├── sse_scanner.go           # 共享 SSE 帧解析器 SSEScanner + GLM 截断容错
 ├── debug.go                 # Debug 全局开关 + DebugRequest / FormatDebugRequest + 敏感字段脱敏 + 长文本截断
 ├── version.go               # SDKName + GetUserAgent() + GetSDKVersion() (sync.Once 并发安全)
 ├── interceptor.go           # RequestInterceptor 函数类型 + ApplyInterceptors 链式执行
@@ -62,8 +64,11 @@ provider/
 
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
-| `BaseProvider[T]` | 泛型结构体 | provider.go:14 | 适配器基座，嵌入底层 SDK Client |
-| `Provider` | 接口 | provider.go:23 | 6 方法统一接口（GetProviderType 返回 `ProviderType` 类型） |
+| `Provider` | 接口 | provider.go | 6 方法统一接口（GetProviderType 返回 `ProviderType` 类型） |
+| `HTTPClient` | 结构体 | http_client.go | 统一 HTTP 通信基座（认证/自定义头/拦截器/User-Agent/URL 拼接） |
+| `NewHTTPClient` | 函数 | http_client.go | 创建统一 HTTP 客户端实例 |
+| `SSEScanner` | 结构体 | sse_scanner.go | 共享 SSE 帧解析器，内置 json.Valid 容错与 GLM 截断恢复 |
+| `NewSSEScanner` | 函数 | sse_scanner.go | 从 io.ReadCloser 创建 SSE 帧解析器 |
 | `ProviderType` | 类型 | type.go | 协议类型标识 (string) |
 | `ProviderAnthropic` / `ProviderOpenAIResponses` / `ProviderOpenAICompletions` | 常量 | type.go | 3 种 ProviderType 常量 |
 | `MessageRole` | 类型 | type.go | 消息角色标识 (string) |
@@ -166,11 +171,11 @@ provider/
 ## 约定
 
 - **值类型传递** — `Message`, `StreamEvent` 为值类型，通过 channel 安全传递，传递后视为只读
-- **泛型基座** — `BaseProvider[T any]` 通过泛型参数嵌入不同 SDK Client，适配器通过类型别名使用（如 `type Provider = BaseProvider[anthropic.Client]`）
+- **统一 HTTP 基座** — `BaseProvider[T]` 已移除，所有适配器统一持有 `*provider.HTTPClient` 字段，通过 `provider.NewHTTPClient` 创建，认证头、User-Agent、自定义头、请求拦截器均由其统一处理
 - **Channel 模式** — 流式通过 `make(chan StreamEvent)` 返回，在 goroutine 中发送，发送完 close
 - **参数透传三层方案** — Layer 1: `ChatConfig` 类型化字段 (UserID/ToolChoice/ResponseFormat/ParallelToolCalls/TopP/Stop/SystemCacheControl/PromptCacheKey/Metadata)；Layer 2: Provider 包独立的 Options 体系 (AnthropicMessagesOption / OpenaiCompletionsOption / OpenaiResponsesOption) + 公共 `provider.Options` (拦截器)；Layer 3: `WithExtra()` 兜底
 - **ProviderExtra 安全取值** — 适配器中使用 GetExtra* 类型安全 helper，不做裸类型断言
-- **统一 UserAgent** — 所有适配器通过 `provider.GetUserAgent()` 获取 `"BM-SDK/{version}"` 格式 UserAgent
+- **统一 UserAgent** — 所有适配器通过 `provider.HTTPClient` 自动注入 `"BM-SDK/{version}"` 格式 UserAgent
 - **版本读取策略** — `GetSDKVersion()` 优先 `info.Main.Version`，回退到依赖列表查找，最终 `"dev"`
 - **sync.Once 并发安全** — `GetUserAgent()` 和 `GetSDKVersion()` 使用 sync.Once 保证只初始化一次
 - **ContentBlock 接口** — 多媒体内容块统一实现 `BlockType() string` 方法，`ContentBlocks` 字段优先于 `Content` 字符串字段
@@ -183,9 +188,10 @@ provider/
 - **Debug 长文本截断** — `content` / `text` / `system` / `thinking` / `reasoning_content` / `arguments` 等长文本字段超过 `MaxDebugBodyLen` (500) 时自动截断
 - **Prompt Caching 统一抽象** — `CacheControl` 统一结构体表达缓存断点：Anthropic 显式标记、OpenAI 自动缓存（`PromptCacheKey` 仅作路由粘性键）、Gemini 通过 `cached_content` ProviderExtra 引用外部资源
 - **拦截器链契约** — `RequestInterceptor` 接收已 marshal 完成的上游请求 body（`[]byte`），返回处理后的 body；nil 拦截器被防御性跳过；nil/空切片零开销原样返回
-- **拦截器 Transport 零包装** — `NewInterceptorHTTPClient` 无拦截器时返回 nil，Provider 保留 SDK 默认 client（避免无谓包装）
+- **拦截器 Transport 零包装** — `NewInterceptorHTTPClient` 无拦截器时返回 nil，Provider 保留标准库默认 client（避免无谓包装）
 - **拦截器 Content-Length 重算** — Transport 修改 body 后自动重算 `Content-Length`
 - **公共 Options 嵌入模式** — `provider.Options` 通过匿名嵌入为各 Provider 提供统一的拦截器注册能力；`Interceptors` 字段首字母大写保证嵌入子包后仍可访问
+- **统一 SSE 解析** — 所有适配器流式响应使用 `provider.SSEScanner` 解析，内置 json.Valid 校验与 GLM 截断容错
 - **TimingCollector 零侵入** — 用户代码主动创建 `TimingCollector` 并在事件循环中调用 `Observe(event)`，不修改 StreamEvent 结构；非并发安全（单 goroutine 使用）
 - **TimingCollector 阶段状态机** — 内部 `collectorPhase` (init → thinking → content → tool) 驱动耗时计算
 - **Token 估算规则标准化** — CJK 1:1, Latin 4:1, Other 2:1（与 `SmoothPacer.TokenSplitter` 的 CJK 切分规则互补）

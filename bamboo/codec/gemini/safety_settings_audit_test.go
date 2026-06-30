@@ -2,15 +2,13 @@ package gemini
 
 import (
 	"testing"
-
-	"google.golang.org/genai"
 )
 
 // TestAudit_SafetySettings_CodecToProviderTypeMatch 验证 safety_settings 在
 // codec->relay->provider 路径上的类型匹配。
 //
-// Fix: codec 现在将 []geminiSafetySetting 转换为 []*genai.SafetySetting，
-// 确保与 provider 期望的类型一致，safety_settings 不再被静默丢弃。
+// Fix: codec 现在将 []geminiSafetySetting 转换为 []map[string]string，
+// 避免引入 genai SDK 依赖，provider 适配器通过 GetExtraAny 原样透传。
 func TestAudit_SafetySettings_CodecToProviderTypeMatch(t *testing.T) {
 	body := []byte(`{
 		"contents": [{"role":"user","parts":[{"text":"test"}]}],
@@ -33,21 +31,21 @@ func TestAudit_SafetySettings_CodecToProviderTypeMatch(t *testing.T) {
 		t.Fatal("safety_settings not found in ProviderExtra")
 	}
 
-	// Fix: 现在存储的类型是 []*genai.SafetySetting（与 provider 期望一致）
-	safetySlice, ok := settings.([]*genai.SafetySetting)
+	// Fix: 现在存储的类型是 []map[string]string（通用 map 类型，无 SDK 依赖）
+	safetySlice, ok := settings.([]map[string]string)
 	if !ok {
-		t.Fatalf("safety_settings type = %T, want []*genai.SafetySetting", settings)
+		t.Fatalf("safety_settings type = %T, want []map[string]string", settings)
 	}
 
 	if len(safetySlice) != 1 {
 		t.Fatalf("safety_settings count = %d, want 1", len(safetySlice))
 	}
 
-	if safetySlice[0].Category != genai.HarmCategoryDangerousContent {
-		t.Errorf("Category = %v, want HarmCategoryDangerousContent", safetySlice[0].Category)
+	if safetySlice[0]["category"] != "HARM_CATEGORY_DANGEROUS_CONTENT" {
+		t.Errorf("Category = %v, want HARM_CATEGORY_DANGEROUS_CONTENT", safetySlice[0]["category"])
 	}
-	if safetySlice[0].Threshold != genai.HarmBlockThresholdBlockNone {
-		t.Errorf("Threshold = %v, want HarmBlockNone", safetySlice[0].Threshold)
+	if safetySlice[0]["threshold"] != "BLOCK_NONE" {
+		t.Errorf("Threshold = %v, want BLOCK_NONE", safetySlice[0]["threshold"])
 	}
 }
 
@@ -66,14 +64,14 @@ func TestAudit_SafetySettings_MultipleCategories(t *testing.T) {
 		t.Fatalf("parseRequest() error = %v", err)
 	}
 
-	safetySlice := req.Config.ProviderExtra["safety_settings"].([]*genai.SafetySetting)
+	safetySlice := req.Config.ProviderExtra["safety_settings"].([]map[string]string)
 	if len(safetySlice) != 2 {
 		t.Fatalf("safety_settings count = %d, want 2", len(safetySlice))
 	}
-	if safetySlice[0].Category != genai.HarmCategoryHarassment {
-		t.Errorf("safetySlice[0].Category = %v, want Harassment", safetySlice[0].Category)
+	if safetySlice[0]["category"] != "HARM_CATEGORY_HARASSMENT" {
+		t.Errorf("safetySlice[0].category = %v, want HARM_CATEGORY_HARASSMENT", safetySlice[0]["category"])
 	}
-	if safetySlice[1].Category != genai.HarmCategoryHateSpeech {
-		t.Errorf("safetySlice[1].Category = %v, want HateSpeech", safetySlice[1].Category)
+	if safetySlice[1]["category"] != "HARM_CATEGORY_HATE_SPEECH" {
+		t.Errorf("safetySlice[1].category = %v, want HARM_CATEGORY_HATE_SPEECH", safetySlice[1]["category"])
 	}
 }

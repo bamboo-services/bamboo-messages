@@ -2,7 +2,7 @@
 
 ## 概述
 
-OpenAI Chat Completions 协议适配器，将 OpenAI Chat Completions API 转换为统一的 `provider.Provider` 接口。基于 `openai-go/v3` SDK 构建，与 `responses` 适配器共享同一 SDK 但使用不同的 API 端点。支持 Legacy 兼容模式，可对接旧版 OpenAI 兼容端点（如第三方代理）。
+OpenAI Chat Completions 协议适配器，将 OpenAI Chat Completions API 转换为统一的 `provider.Provider` 接口。基于 `net/http` + JSON 构建，不依赖外部 SDK，与 `responses` 适配器共享相同的 HTTP 基座但使用不同的 API 端点。支持 Legacy 兼容模式，可对接旧版 OpenAI 兼容端点（如第三方代理）。
 
 ## 目录结构
 
@@ -18,6 +18,7 @@ provider/openai/completions/
 ├── models.go                # 模型常量 + GetAvailableModels
 ├── option.go                # OpenaiCompletionsOption + WithFrequencyPenalty/WithPresencePenalty/WithSeed/WithPrediction
 ├── tools.go                 # 工具定义转换 (buildTools/buildStop)
+├── types.go                 # OpenAI Completions 协议原生请求/响应 DTO
 ├── provider_test.go         # 集成测试
 ├── legacy_compat_test.go    # Legacy 兼容模式单元测试
 ├── message_test.go          # 空 tool_calls 序列化测试
@@ -46,7 +47,7 @@ provider/openai/completions/
 
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
-| `CompletionsProvider` | 结构体 | provider.go | 嵌入 `BaseProvider[openai.Client]` + `legacyCompat bool` |
+| `CompletionsProvider` | 结构体 | provider.go | 持有 `*provider.HTTPClient` + `legacyCompat bool` + `streamDrainTimeout time.Duration` |
 | `Option` | 函数类型 | provider.go | `func(*config)` — Provider 配置选项 |
 | `OpenaiCompletionsOption` | 函数类型 | option.go | `func(*completionsRequestConfig)` — 请求级配置选项 |
 | `WithInterceptor` | 函数 | provider.go | 注册请求拦截器（转发到 `provider.WithInterceptor`） |
@@ -60,19 +61,21 @@ provider/openai/completions/
 ## 约定
 
 - **参数构建集中化** — `params.go` 的 `buildParams` 是 Chat 和 Complete 的共享参数构建入口，通过 `p.legacyCompat` 标志做条件分支
-- **Legacy 兼容模式** — `legacyCompat` 标志控制旧版端点兼容行为：MaxTokens 使用旧字段名 `max_tokens`（非 `max_completion_tokens`）；ParallelToolCalls 仅在有工具时设置；跳过 ReasoningEffort 自动映射；thinking 从 ProviderExtra 提取并通过 `SetExtraFields` 注入
+- **统一 HTTP 传输** — 通过 `provider.NewHTTPClient` 创建 `*provider.HTTPClient`，认证使用 `Authorization: Bearer` 模式；流式响应通过 `provider.NewSSEScanner` 解析 SSE 帧
+- **本地 DTO 模型** — 请求/响应结构通过 `types.go` 本地定义（`chatCompletionChunk`、`chatCompletionResponse` 等），不依赖外部 SDK
+- **Legacy 兼容模式** — `legacyCompat` 标志控制旧版端点兼容行为：MaxTokens 使用旧字段名 `max_tokens`（非 `max_completion_tokens`）；ParallelToolCalls 仅在有工具时设置；thinking 从 ProviderExtra 提取并通过 `params["thinking"]` 注入
 - **BlockStart 合成** — OpenAI Completions 没有原生 `content_block_start` 事件，通过 `textBlockStarted *bool` 在首个文本增量前合成 `NewBlockStartDelta("text")`
-- **Reasoning 内容提取（流式）** — 从 `delta.JSON.ExtraFields["reasoning_content"]` 提取推理内容，首次推理增量前合成 `NewBlockStartDelta("thinking")`
-- **Reasoning 内容提取（非流式）** — `complete.go` 从 `choice.Message.JSON.ExtraFields["reasoning_content"]` 提取推理内容，填充到 `CompletionResult.Thinking`
+- **Reasoning 内容提取（流式）** — 从 `delta.ReasoningContent` 提取推理内容，兼容 `delta.Reasoning` 字段，首次推理增量前合成 `NewBlockStartDelta("thinking")`
+- **Reasoning 内容提取（非流式）** — `complete.go` 从 `choice.Message.ReasoningContent` 提取推理内容，兼容 `reasoning` 字段，填充到 `CompletionResult.Thinking`
 - **FinishReason 流式携带** — `handleChoice` 在 `choice.FinishReason != ""` 时，通过 `mapFinishReason` 映射并填充到 `StreamEvent.FinishReason`
 - **空 tool_calls 防御** — `buildAssistantMessage` 仅在 `len(msg.ToolCalls) > 0` 时填充 `ToolCalls` 字段，避免序列化出 `"tool_calls": []` 空数组。部分第三方兼容端点（如 Kimi coding API）会将空数组视为无效请求
 - **Prediction JSON 回退** — `buildParams` 中 Prediction 参数的类型断言失败时，通过 `json.Marshal` → `json.Unmarshal` 做安全转换，避免 `map[string]any` 类型的 Prediction 被静默丢弃
 - **双 Block 状态追踪** — `textBlockStarted` 和 `thinkingBlockStarted` 独立追踪，互不干扰
-- **Usage 流式返回** — 通过 `params.StreamOptions.IncludeUsage=true` 启用，在最后一个 chunk 中提取
+- **Usage 流式返回** — 通过请求 DTO 的 `stream_options.include_usage=true` 启用，在最后一个 chunk 中提取
 - **参数透传** — FrequencyPenalty / PresencePenalty / Seed / Prediction 通过 `OpenaiCompletionsOption` 设置，合并到 ProviderExtra 后透传；ToolChoice / ResponseFormat 通过 `ChatConfig` 类型化字段传递
-- **ReasoningEffort 映射** — `ThinkingConfig.Effort` → `shared.ReasoningEffort`（Legacy 模式跳过）
-- **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
-- **拦截器 Transport 注入** — 构造函数中调用 `provider.NewInterceptorHTTPClient(nil, cfg.interceptors)`，非 nil 时通过 `option.WithHTTPClient(httpCli)` 注入 SDK；无拦截器时返回 nil，保留 SDK 默认 client
+- **ReasoningEffort 映射** — `ThinkingConfig.Effort` → 请求 DTO 的 `reasoning_effort` 字段（Legacy 模式仍透传 thinking）
+- **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
+- **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client
 
 ## 反模式
 
@@ -93,21 +96,21 @@ provider/openai/completions/
 6. Legacy 兼容失败 → 检查 `legacyCompat` 标志是否正确设置，max_tokens / parallel_tool_calls / reasoning_effort 行为是否符合预期
 7. Prediction 被丢弃 → 检查类型断言是否失败，启用 debug 查看 JSON 回退日志
 8. 空 tool_calls 问题 → 检查 `buildAssistantMessage` 是否正确跳过空 ToolCalls
-9. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成 `ChatCompletionToolUnionParam`
+9. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成工具定义（`[]map[string]any`）
 10. Usage 统计缺失 → 确认 `StreamOptions.IncludeUsage` 已设置
 11. 请求参数不确定 → 启用 `WithDebug()` 或设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
 
 ## BaseURL 配置说明
 
-OpenAI Completions 适配器使用 openai-go SDK，SDK 会在 BaseURL 后自动拼接 `/chat/completions`。
+OpenAI Completions 适配器通过 `provider.HTTPClient` 发起请求，请求路径为 `/chat/completions`。`HTTPClient` 将 BaseURL 与路径简单拼接，因此 BaseURL 必须包含 `/v1` 版本路径（或 `/v4`、`v3` 等），否则拼接出的路径会缺少版本前缀。
 
 ### 版本路径要求
 
-BaseURL **必须包含 `/v1` 版本路径**（或 `/v4`、`/v3` 等其他版本号），否则 SDK 拼出的路径会缺少版本前缀，导致上游返回错误。
+BaseURL **必须包含 `/v1` 版本路径**（或 `/v4`、`/v3` 等其他版本号），否则 `HTTPClient` 拼出的路径会缺少版本前缀，导致上游返回错误。
 
 ### 正确示例
 
-| 端点 | BaseURL | SDK 实际请求路径 |
+| 端点 | BaseURL | 实际请求路径 |
 |------|---------|-----------------|
 | OpenAI 官方 | `https://api.openai.com/v1` | `https://api.openai.com/v1/chat/completions` |
 | 智谱 GLM Coding | `https://open.bigmodel.cn/api/coding/paas/v4` | `.../paas/v4/chat/completions` |
@@ -117,11 +120,11 @@ BaseURL **必须包含 `/v1` 版本路径**（或 `/v4`、`/v3` 等其他版本�
 ### ⚠️ 常见错误
 
 ```
-❌ https://ai.akass.cn         → SDK 请求 https://ai.akass.cn/chat/completions（缺少 /v1）
-✅ https://ai.akass.cn/v1      → SDK 请求 https://ai.akass.cn/v1/chat/completions
+❌ https://ai.akass.cn         → HTTPClient 请求 https://ai.akass.cn/chat/completions（缺少 /v1）
+✅ https://ai.akass.cn/v1      → HTTPClient 请求 https://ai.akass.cn/v1/chat/completions
 ```
 
-> **注意**: newapi bridge 层会自动检测并补全 `/v1`，但直接使用 SDK 时需手动确保 BaseURL 包含版本路径。
+> **注意**: newapi bridge 层会自动检测并补全 `/v1`，但直接配置 Provider 时需手动确保 BaseURL 包含版本路径。
 
 ## 引用
 

@@ -13,9 +13,11 @@ Bamboo Messages — AI 对话协议标准化适配层，纯 Go SDK 库。通过�
 ```text
 bamboo-messages/
 ├── provider/                       # 核心抽象层（公共包）— 接口 + 通用类型 + 流模型 + Debug + 拦截器 + 耗时统计
-│   ├── provider.go                # Provider 接口 (6 methods) + BaseProvider[T] 泛型基座
+│   ├── provider.go                # Provider 接口 (6 methods)
 │   ├── type.go                    # Message / ChatConfig / ThinkingConfig / Tool / CompletionResult / CacheControl / ContentBlock / ProviderExtra helpers
 │   ├── stream.go                  # StreamEvent / StreamDelta[E] + 11 种 Delta 构造函数 (含 NewUsageDeltaWithCache) + IndexedToolCallDeltaData
+│   ├── http_client.go             # 统一 HTTP 客户端 HTTPClient + NewHTTPClient（认证/拦截器/User-Agent/URL 拼接）
+│   ├── sse_scanner.go             # 共享 SSE 帧解析器 SSEScanner + GLM 截断容错
 │   ├── debug.go                   # Debug 全局开关 + DebugRequest/FormatDebugRequest + 敏感字段脱敏 + 长文本截断
 │   ├── version.go                 # SDKName + GetUserAgent() + GetSDKVersion()
 │   ├── interceptor.go             # RequestInterceptor 函数类型 + ApplyInterceptors 链式执行
@@ -77,7 +79,7 @@ bamboo-messages/
 │   ├── new-api-feasibility.md
 │   └── new-api-integration.md
 │
-└── go.mod                         # Go 1.25, anthropic-sdk-go v1.27, openai-go v3.30, genai v1.60
+└── go.mod                         # Go 1.25，纯标准库 + 无外部 SDK 依赖
 ```
 
 ## 导航指南
@@ -115,8 +117,11 @@ bamboo-messages/
 
 | 符号 | 类型 | 文件 | 作用 |
 |------|------|------|------|
-| `BaseProvider[T]` | 泛型结构体 | provider.go:14 | 适配器基座，嵌入底层 SDK Client |
-| `Provider` | 接口 | provider.go:23 | 6 方法：Chat, ChatWithSystem, Complete, CompleteWithSystem, GetProviderType, GetAvailableModels |
+| `Provider` | 接口 | provider.go | 6 方法：Chat, ChatWithSystem, Complete, CompleteWithSystem, GetProviderType, GetAvailableModels |
+| `HTTPClient` | 结构体 | http_client.go | 统一 HTTP 通信基座（认证/自定义头/拦截器/User-Agent/URL 拼接） |
+| `NewHTTPClient` | 函数 | http_client.go | 创建统一 HTTP 客户端实例 |
+| `SSEScanner` | 结构体 | sse_scanner.go | 共享 SSE 帧解析器，内置 json.Valid 容错与 GLM 截断恢复 |
+| `NewSSEScanner` | 函数 | sse_scanner.go | 从 io.ReadCloser 创建 SSE 帧解析器 |
 | `Message` | 结构体 | type.go | 统一消息模型 (Role + Content + ContentBlocks + ToolCalls + ToolCallID + ToolName + IsError + CacheControl + ThinkingContent + ThinkingSignature + ReasoningID) |
 | `ChatConfig` | 结构体 | type.go | 请求配置 (Model, Temperature, TopP, MaxTokens, Stop, Tools, Metadata, UserID, ToolChoice, ResponseFormat, ParallelToolCalls, ThinkingConfig, SystemCacheControl, PromptCacheKey, ProviderExtra) |
 | `ThinkingConfig` | 结构体 | type.go | 思考/推理配置 (Effort: none/low/medium/high) |
@@ -159,12 +164,12 @@ bamboo-messages/
 
 ### 适配器层 (结构完全一致)
 
-| 适配器 | 包路径 | 底层 SDK | Provider 类型名 |
+| 适配器 | 包路径 | 底层传输 | Provider 类型名 |
 |--------|--------|----------|----------------|
-| Anthropic Messages | `provider/anthropic` | `anthropic-sdk-go` | `Provider` |
-| OpenAI Completions | `provider/openai/completions` | `openai-go/v3` | `CompletionsProvider` |
-| OpenAI Responses | `provider/openai/responses` | `openai-go/v3` | `ResponsesProvider` |
-| Google Gemini | `provider/gemini` | `google.golang.org/genai` | `Provider` |
+| Anthropic Messages | `provider/anthropic` | `*provider.HTTPClient` (x-api-key) | `Provider` |
+| OpenAI Completions | `provider/openai/completions` | `*provider.HTTPClient` (Authorization Bearer) | `CompletionsProvider` |
+| OpenAI Responses | `provider/openai/responses` | `*provider.HTTPClient` (Authorization Bearer) | `ResponsesProvider` |
+| Google Gemini | `provider/gemini` | `*provider.HTTPClient` (x-goog-api-key) | `Provider` |
 
 ### 公共 SDK 层 (`bamboo/`)
 
@@ -308,14 +313,15 @@ bamboo-messages/
 2. **Functional Options** — 所有适配器统一使用 `Option func(*config)` 模式，提供 `WithAPIKey`, `WithBaseURL`, `WithHeader`, `WithDebug`, `WithInterceptor` 五个选项
 3. **双构造函数** — 每个适配器提供 `New*(apiKey)` 最简形式 + `New*WithOptions(opts...)` 完整形式，前者调用后者
 4. **参数构建集中化** — 每个适配器通过 `params.go` 的 `buildParams`（Gemini 为 `buildContentConfig`）方法统一构建请求参数，Chat 和 Complete 共享同一入口，避免重复逻辑
-5. **文件分工固定** — 每个适配器固定文件：`provider.go` / `params.go` / `chat.go` / `complete.go` / `stream.go` / `message.go` / `models.go` / `option.go` / `tools.go` / `provider_test.go`
-6. **中文注释** — 所有文档注释使用中文，遵循 Go doc 规范
+5. **文件分工固定** — 每个适配器固定文件：`provider.go` / `params.go` / `chat.go` / `complete.go` / `stream.go` / `message.go` / `models.go` / `option.go` / `tools.go` / `types.go` / `provider_test.go`
+6. **本地 DTO 与统一 HTTP 传输** — 每个适配器通过 `types.go` 定义协议原生的请求/响应 DTO，通过 `*provider.HTTPClient` 发起请求，流式响应统一使用 `provider.SSEScanner` 解析
+7. **中文注释** — 所有文档注释使用中文，遵循 Go doc 规范
 7. **错误透传** — 使用 `internal/xerr.Error` 类型（替代原 bamboo-base-go 的 xError.Error），`StreamEvent.Err` 字段为 `*xerr.Error`，保留完整上下文
-8. **泛型基座** — `BaseProvider[T any]` 通过泛型参数嵌入不同 SDK Client
+8. **统一 HTTP 基座** — 所有适配器统一持有 `*provider.HTTPClient` 字段，通过 `provider.NewHTTPClient` 创建，认证头、User-Agent、自定义头、请求拦截器均由其统一处理
 9. **参数透传三层方案** — Layer 1: `ChatConfig` 类型化字段 (UserID/ToolChoice/ResponseFormat/ParallelToolCalls/TopP/Stop/SystemCacheControl/PromptCacheKey/Metadata)；Layer 2: Provider 包独立的 Options 体系 + 公共 `provider.Options` (拦截器)；Layer 3: `WithExtra()` 兜底传递任意 key-value
 10. **BlockStart 事件** — 所有适配器在首个文本增量前必须发出 BlockStart delta；Anthropic 原生支持，OpenAI/Gemini 适配器通过 textBlockStarted/thinkingBlockStarted 参数合成
 11. **ProviderExtra 取值** — 适配器中使用 GetExtra* 类型安全 helper，不做裸类型断言
-12. **统一 UserAgent** — 所有适配器在构造函数中通过设置统一 UserAgent，格式为 `BM-SDK/{version}`
+12. **统一 UserAgent** — 所有适配器通过 `provider.HTTPClient` 自动注入统一 UserAgent，格式为 `BM-SDK/{version}`
 13. **Reasoning 内容独立追踪** — OpenAI/Gemini 适配器使用 `textBlockStarted` 和 `thinkingBlockStarted` 两个独立布尔标志追踪不同内容块状态
 14. **StreamConverter 防御性自动补发** — 若 Provider 未发送 BlockStart，在首个文本/推理增量时自动合成对应类型的 BlockStart
 15. **Legacy 兼容模式** — OpenAI Completions 适配器通过 `legacyCompat` 标志支持旧版端点兼容（max_tokens 旧字段名、条件性 ParallelToolCalls、跳过 ReasoningEffort 映射）
@@ -334,7 +340,7 @@ bamboo-messages/
 28. **CJK 文本切分** — `TokenSplitter` 按 rune 切分：CJK 独立 token、Latin 连续合并、标点附着前 token、空格前缀附着后 token；跨帧残余保留在 `pendingTail`
 29. **积压感知缩减** — NORMAL 模式下队列积压增长时，有效间隔从 `baseInterval` 线性缩减到 `minIntervalFloor`（2ms），避免过度积压
 30. **请求拦截器链** — `RequestInterceptor` 在 HTTP Transport 层对已序列化的请求 body 进行任意修改；nil 拦截器防御性跳过；空切片零开销原样返回
-31. **拦截器 Transport 零包装** — `NewInterceptorHTTPClient` 无拦截器时返回 nil，Provider 保留 SDK 默认 client
+31. **拦截器 Transport 零包装** — `NewInterceptorHTTPClient` 无拦截器时返回 nil，Provider 保留标准库默认 client
 32. **公共 Options 嵌入模式** — `provider.Options` 通过匿名嵌入为各 Provider 提供统一的拦截器注册能力
 33. **TimingCollector 零侵入** — 用户代码主动创建并调用 `Observe(event)`；非并发安全，单 goroutine 使用
 34. **Token 估算规则标准化** — TimingCollector: CJK 1:1, Latin 4:1, Other 2:1（与 TokenSplitter 互补）
@@ -345,6 +351,7 @@ bamboo-messages/
 39. **Chat 首事件 peek 模式** — `Chat` 同步 peek 首个 provider 事件，若为 Error 立即返回 `(nil, error)`
 40. **速率采样回调** — `Config.OnRateSample` 在 SmoothPacer 输出 tick 时触发，区分 thinking/output 阶段；仅 SmoothBuffer 启用时生效
 41. **Relay 失败返回协议格式错误** — `Relay` 在 provider 失败时调用 `outCodec.SerializeError(err)` 返回协议格式化错误
+42. **Adapter 本地 DTO 不暴露外部类型** — 适配器内部使用本地 `types.go` 定义的请求/响应结构，禁止在公共 API 或返回类型中暴露任何外部 SDK 类型
 
 ## 反模式
 
@@ -363,7 +370,7 @@ bamboo-messages/
 
 ## 独特风格
 
-- `BaseProvider[T]` 泛型基座 + 类型别名 (`type Provider = BaseProvider[anthropic.Client]`) 模式，既统一又保留 SDK 特有能力
+- `HTTPClient` 统一 HTTP 通信基座 + `SSEScanner` 共享 SSE 帧解析器 — 替代 `BaseProvider[T]` 泛型基座，使所有适配器不依赖具体 SDK，基于 `net/http` + JSON 构建
 - `StreamDelta[E any]` 泛型增量，统一使用时通过 `StreamDelta[any]` + 具体 DeltaData 类型 (TextData / ThinkingData / ToolCallData / ToolCallDeltaData / IndexedToolCallDeltaData / UsageData) 做类型区分
 - 配置可选字段用指针 (`*float64`) 区分"未设置"和"零值"
 - `ThinkingConfig` 统一结构体，通过 `Effort` (none/low/medium/high) 适配所有 Provider 的思考/推理模式，各适配器自动映射为 Provider 特有参数
