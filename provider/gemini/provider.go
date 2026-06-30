@@ -1,17 +1,16 @@
 package gemini
 
 import (
-	"context"
-
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"google.golang.org/genai"
 )
 
 // Provider Gemini 协议适配器实现。
 //
-// 类型别名自 BaseProvider，嵌入 genai.Client。
-// genai.Client 由 Google Gen AI Go SDK 提供，支持 Gemini API 与 Vertex AI 两种后端。
-type Provider provider.BaseProvider[genai.Client]
+// 在去 SDK 化重构后，不再嵌入 genai.Client，
+// 而是统一持有 *provider.HTTPClient 进行 HTTP 通信。
+type Provider struct {
+	httpClient *provider.HTTPClient
+}
 
 // ============================================
 // Options 模式 — Functional Options
@@ -93,6 +92,8 @@ func WithInterceptor(fn provider.RequestInterceptor) Option {
 // 构造函数
 // ============================================
 
+const defaultBaseURL = "https://generativelanguage.googleapis.com"
+
 // NewProvider 创建 Gemini 协议适配器实例（最简形式）
 //
 // 仅指定 API Key，默认连接 Gemini API 官方端点。
@@ -103,39 +104,26 @@ func NewProvider(apiKey string) *Provider {
 // NewProviderWithOptions 创建 Gemini 协议适配器实例（Options 模式）
 //
 // 支持完整的配置选项，包括自定义 BaseURL、Headers 等。
-// genai.NewClient 内部仅构建客户端，不发起网络请求，可在构造函数中安全调用。
+// 认证使用 x-goog-api-key 模式。
 func NewProviderWithOptions(opts ...Option) *Provider {
 	cfg := applyOptions(opts...)
 
-	clientCfg := &genai.ClientConfig{
-		APIKey:  cfg.apiKey,
-		Backend: genai.BackendGeminiAPI,
-		HTTPOptions: genai.HTTPOptions{
-			Headers: make(map[string][]string),
-		},
-	}
-	// 设置统一 UserAgent
-	clientCfg.HTTPOptions.Headers.Set("User-Agent", provider.GetUserAgent())
-	if cfg.baseURL != "" {
-		clientCfg.HTTPOptions.BaseURL = cfg.baseURL
-	}
-	for k, v := range cfg.headers {
-		clientCfg.HTTPOptions.Headers.Set(k, v)
-	}
-	// 若注册了拦截器，用 interceptorTransport 包装 HTTP client 并注入到 genai
-	if httpCli := provider.NewInterceptorHTTPClient(nil, cfg.interceptors); httpCli != nil {
-		clientCfg.HTTPClient = httpCli
+	baseURL := cfg.baseURL
+	if baseURL == "" {
+		baseURL = defaultBaseURL
 	}
 
-	client, err := genai.NewClient(context.Background(), clientCfg)
-	if err != nil {
-		// genai.NewClient 在仅配置 ClientConfig 字段时不会返回 error，
-		// 这里做防御性处理，返回零值 Client 保证不 panic。
-		_ = err
-	}
+	httpClient := provider.NewHTTPClient(
+		baseURL,
+		cfg.apiKey,
+		"x-goog-api-key",
+		"",
+		cfg.headers,
+		cfg.interceptors,
+	)
 
 	return &Provider{
-		Client: *client,
+		httpClient: httpClient,
 	}
 }
 
@@ -159,6 +147,3 @@ func applyOptions(opts ...Option) *config {
 func (p *Provider) GetProviderType() provider.ProviderType {
 	return "gemini"
 }
-
-// 编译期接口检查，确保 Provider 完整实现 provider.Provider 接口。
-var _ provider.Provider = (*Provider)(nil)

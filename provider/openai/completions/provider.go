@@ -4,13 +4,16 @@ import (
 	"time"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
 )
 
+// CompletionsProvider OpenAI Chat Completions 协议适配器实现。
+//
+// 在去 SDK 化重构后，不再嵌入 openai-go Client，
+// 而是统一持有 *provider.HTTPClient 进行 HTTP 通信。
+// legacyCompat 标志控制旧版端点兼容行为。
 type CompletionsProvider struct {
-	provider.BaseProvider[openai.Client]
-	legacyCompat      bool
+	httpClient         *provider.HTTPClient
+	legacyCompat       bool
 	streamDrainTimeout time.Duration
 }
 
@@ -103,6 +106,8 @@ func WithInterceptor(fn provider.RequestInterceptor) Option {
 // 构造函数
 // ============================================
 
+const defaultBaseURL = "https://api.openai.com/v1"
+
 // NewCompletionsProvider 创建 OpenAI Chat Completions 协议适配器实例（最简形式）。
 //
 // 仅指定 API Key，默认连接 SDK 默认端点。
@@ -113,32 +118,26 @@ func NewCompletionsProvider(apiKey string) *CompletionsProvider {
 // NewCompletionsProviderWithOptions 创建 OpenAI Chat Completions 协议适配器实例（Options 模式）。
 //
 // 支持完整的配置选项，包括自定义 BaseURL、Headers 等。
+// 认证使用 Authorization: Bearer 模式。
 func NewCompletionsProviderWithOptions(opts ...Option) *CompletionsProvider {
 	cfg := applyOptions(opts...)
 
-	sdkOpts := []option.RequestOption{
-		option.WithHeader("User-Agent", provider.GetUserAgent()),
-	}
-	if cfg.apiKey != "" {
-		sdkOpts = append(sdkOpts, option.WithAPIKey(cfg.apiKey))
-	}
-	if cfg.baseURL != "" {
-		sdkOpts = append(sdkOpts, option.WithBaseURL(cfg.baseURL))
-	}
-	for k, v := range cfg.headers {
-		sdkOpts = append(sdkOpts, option.WithHeader(k, v))
-	}
-	// 若注册了拦截器，用 interceptorTransport 包装 HTTP client 并注入到 SDK
-	if httpCli := provider.NewInterceptorHTTPClient(nil, cfg.interceptors); httpCli != nil {
-		sdkOpts = append(sdkOpts, option.WithHTTPClient(httpCli))
+	baseURL := cfg.baseURL
+	if baseURL == "" {
+		baseURL = defaultBaseURL
 	}
 
-	client := openai.NewClient(sdkOpts...)
+	httpClient := provider.NewHTTPClient(
+		baseURL,
+		cfg.apiKey,
+		"Authorization",
+		"Bearer ",
+		cfg.headers,
+		cfg.interceptors,
+	)
 
 	return &CompletionsProvider{
-		BaseProvider: provider.BaseProvider[openai.Client]{
-			Client: client,
-		},
+		httpClient:         httpClient,
 		legacyCompat:       cfg.legacyCompat,
 		streamDrainTimeout: cfg.streamDrainTimeout,
 	}

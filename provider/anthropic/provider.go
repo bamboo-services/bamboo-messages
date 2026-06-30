@@ -1,15 +1,16 @@
 package anthropic
 
 import (
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // Provider Anthropic Messages 协议适配器实现。
 //
-// 类型别名自 BaseProvider，嵌入 Anthropic SDK Client。
-type Provider provider.BaseProvider[anthropic.Client]
+// 在去 SDK 化重构后，不再嵌入 anthropic-sdk-go Client，
+// 而是统一持有 *provider.HTTPClient 进行 HTTP 通信。
+type Provider struct {
+	httpClient *provider.HTTPClient
+}
 
 // ============================================
 // Options 模式 — Functional Options
@@ -94,6 +95,8 @@ func WithInterceptor(fn provider.RequestInterceptor) Option {
 // 构造函数
 // ============================================
 
+const defaultBaseURL = "https://api.anthropic.com"
+
 // NewProvider 创建 Anthropic Messages 协议适配器实例（最简形式）
 //
 // 仅指定 API Key，默认连接 SDK 默认端点。
@@ -104,34 +107,36 @@ func NewProvider(apiKey string) *Provider {
 // NewProviderWithOptions 创建 Anthropic Messages 协议适配器实例（Options 模式）
 //
 // 支持完整的配置选项，包括自定义 BaseURL、Headers 等。
+// 构造时注入 anthropic-version 请求头，认证使用 x-api-key 模式。
 func NewProviderWithOptions(opts ...Option) *Provider {
 	cfg := applyOptions(opts...)
 
-	sdkOpts := []option.RequestOption{
-		option.WithHeader("User-Agent", provider.GetUserAgent()),
+	// Anthropic 必须的版本头
+	if cfg.headers == nil {
+		cfg.headers = make(map[string]string)
 	}
-	if cfg.apiKey != "" {
-		sdkOpts = append(sdkOpts, option.WithAPIKey(cfg.apiKey))
-	}
-	if cfg.baseURL != "" {
-		sdkOpts = append(sdkOpts, option.WithBaseURL(cfg.baseURL))
-	}
-	for k, v := range cfg.headers {
-		sdkOpts = append(sdkOpts, option.WithHeader(k, v))
-	}
-	// 若注册了拦截器，用 interceptorTransport 包装 HTTP client 并注入到 SDK
-	if httpCli := provider.NewInterceptorHTTPClient(nil, cfg.interceptors); httpCli != nil {
-		sdkOpts = append(sdkOpts, option.WithHTTPClient(httpCli))
+	cfg.headers["anthropic-version"] = "2023-06-01"
+
+	baseURL := cfg.baseURL
+	if baseURL == "" {
+		baseURL = defaultBaseURL
 	}
 
-	client := anthropic.NewClient(sdkOpts...)
+	httpClient := provider.NewHTTPClient(
+		baseURL,
+		cfg.apiKey,
+		"x-api-key",
+		"",
+		cfg.headers,
+		cfg.interceptors,
+	)
 
 	if cfg.debug {
 		provider.SetDebug(true)
 	}
 
 	return &Provider{
-		Client: client,
+		httpClient: httpClient,
 	}
 }
 
