@@ -5,160 +5,161 @@ import (
 	"math"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"google.golang.org/genai"
 )
 
-// buildContentConfig 构建 Gemini GenerateContentConfig。
+// buildRequestBody 构建 Gemini generateContent / streamGenerateContent 完整请求体。
 //
-// 将 provider.ChatConfig 的统一字段映射到 Gemini 配置：
-//   - Temperature / TopP → *float32
-//   - MaxTokens → MaxOutputTokens (int32)
-//   - Stop → StopSequences
-//   - Tools → []*genai.Tool
-//   - ThinkingConfig.Effort → genai.ThinkingConfig + ThinkingLevel
-//   - ToolChoice → ToolConfig.FunctionCallingConfig.Mode
-//   - TopK / SafetySettings → 从 ProviderExtra 提取
-func (p *Provider) buildContentConfig(systemPrompt string, config *provider.ChatConfig) *genai.GenerateContentConfig {
-	gc := &genai.GenerateContentConfig{}
+// 将消息历史、系统提示、生成配置、工具声明与工具调用策略组装为 map[string]any，
+// 直接对应 Gemini REST API 的 JSON 结构。stream 参数用于调用方区分端点
+// （streamGenerateContent?alt=sse / generateContent），不影响 body 本身。
+func (p *Provider) buildRequestBody(messages []provider.Message, systemPrompt string, config *provider.ChatConfig, stream bool) map[string]any {
+	if config == nil {
+		config = &provider.ChatConfig{}
+	}
 
-	// 设置系统提示
+	body := map[string]any{"contents": p.buildMessages(messages)}
+
+	// 系统提示 — Gemini 使用顶层 systemInstruction 字段
 	if systemPrompt != "" {
-		gc.SystemInstruction = genai.NewContentFromText(systemPrompt, "")
+		body["systemInstruction"] = map[string]any{
+			"parts": []map[string]any{{"text": systemPrompt}},
+		}
 	}
 
-	// 设置可选参数（检查 nil 避免空指针解引用）
+	// 生成配置
+	if gc := p.buildContentConfig(config); len(gc) > 0 {
+		body["generationConfig"] = gc
+	}
+
+	// 工具声明
+	if tools := buildTools(config.Tools); tools != nil {
+		body["tools"] = tools
+	}
+
+	// 工具调用策略
+	if tc := buildToolConfig(config.ToolChoice); tc != nil {
+		body["toolConfig"] = tc
+	}
+
+	return body
+}
+
+// buildContentConfig 构建 Gemini generationConfig。
+//
+// 将 provider.ChatConfig 的统一字段映射到 Gemini REST API 的 generationConfig：
+//   - Temperature / TopP → 顶层浮点字段
+//   - TopK → 从 ProviderExtra 提取（Gemini 特有参数）
+//   - MaxTokens → maxOutputTokens（int32 溢出保护）
+//   - Stop → stopSequences
+//   - ThinkingConfig.Effort → thinkingConfig {includeThoughts, thinkingLevel}
+//   - ResponseFormat → responseMimeType
+//   - SafetySettings → 从 ProviderExtra 提取
+//   - Labels → UserID 映射到 labels["user_id"] + Metadata 合并
+//   - CachedContent → 从 ProviderExtra 提取（Gemini 外部缓存引用）
+func (p *Provider) buildContentConfig(config *provider.ChatConfig) map[string]any {
+	if config == nil {
+		config = &provider.ChatConfig{}
+	}
+
+	gc := map[string]any{}
+
+	// 温度
 	if config.Temperature != nil {
-		temp := float32(*config.Temperature)
-		gc.Temperature = &temp
-	}
-	if config.TopP != nil {
-		topP := float32(*config.TopP)
-		gc.TopP = &topP
+		gc["temperature"] = *config.Temperature
 	}
 
-	// MaxTokens（溢出保护：超过 int32 最大值时截断）
+	// Top-P
+	if config.TopP != nil {
+		gc["topP"] = *config.TopP
+	}
+
+	// TopK — Gemini 特有参数，从 ProviderExtra 提取
+	if topK, ok := provider.GetExtraFloat64(config.ProviderExtra, "top_k"); ok && topK > 0 {
+		gc["topK"] = topK
+	}
+
+	// MaxOutputTokens — int64 → int32 溢出保护
 	if config.MaxTokens > 0 {
 		if config.MaxTokens > math.MaxInt32 {
-			gc.MaxOutputTokens = math.MaxInt32
+			gc["maxOutputTokens"] = math.MaxInt32
 		} else {
-			gc.MaxOutputTokens = int32(config.MaxTokens)
+			gc["maxOutputTokens"] = int(config.MaxTokens)
 		}
 	}
 
-	// Stop sequences
+	// 停止序列
 	if len(config.Stop) > 0 {
-		gc.StopSequences = config.Stop
+		gc["stopSequences"] = config.Stop
 	}
 
-	// Tools
-	if tools := buildTools(config.Tools); tools != nil {
-		gc.Tools = tools
-	}
-
-	// ThinkingConfig 映射: none→不设置, low/medium/high→对应 ThinkingLevel
-	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
-		gc.ThinkingConfig = mapThinkingConfig(config.ThinkingConfig.Effort)
-	}
-
-	// TopK（从 ProviderExtra 提取）
-	if topK, ok := provider.GetExtraFloat64(config.ProviderExtra, "top_k"); ok {
-		topK32 := float32(topK)
-		gc.TopK = &topK32
-	}
-
-	// SafetySettings（从 ProviderExtra 提取）
-	if settings, ok := provider.GetExtraAny(config.ProviderExtra, "safety_settings"); ok {
-		if safetySettings, ok := settings.([]*genai.SafetySetting); ok {
-			gc.SafetySettings = safetySettings
+	// ThinkingConfig 映射: none→不设置, 其他非空值→{includeThoughts:true, thinkingLevel:effort}
+	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" && config.ThinkingConfig.Effort != "none" {
+		gc["thinkingConfig"] = map[string]any{
+			"includeThoughts": true,
+			"thinkingLevel":   config.ThinkingConfig.Effort,
 		}
 	}
 
-	// ToolChoice 映射
-	if config.ToolChoice != "" {
-		gc.ToolConfig = &genai.ToolConfig{
-			FunctionCallingConfig: mapToolChoice(config.ToolChoice),
-		}
-	}
-
-	// ResponseFormat 映射
+	// 响应格式 — json_object → application/json
 	if config.ResponseFormat == "json_object" {
-		gc.ResponseMIMEType = "application/json"
+		gc["responseMimeType"] = "application/json"
 	}
 
-	// Labels（元数据）
-	if len(config.Metadata) > 0 {
-		gc.Labels = config.Metadata
+	// SafetySettings — 从 ProviderExtra 提取（Gemini 特有参数）
+	if settings, ok := provider.GetExtraAny(config.ProviderExtra, "safety_settings"); ok {
+		gc["safetySettings"] = settings
 	}
 
-	// UserID — Gemini 无原生 UserID 字段，best-effort 存入 Labels
+	// Labels — UserID 映射到 labels["user_id"]，合并 Metadata
+	labels := map[string]string{}
 	if config.UserID != "" {
-		if gc.Labels == nil {
-			gc.Labels = make(map[string]string)
-		}
-		gc.Labels["user_id"] = config.UserID
+		labels["user_id"] = config.UserID
 		if provider.DebugEnabled {
 			log.Printf("[provider/gemini] UserID=%q 已映射到 Labels[user_id]（Gemini 无原生 UserID 支持）", config.UserID)
 		}
 	}
+	for k, v := range config.Metadata {
+		labels[k] = v
+	}
+	if len(labels) > 0 {
+		gc["labels"] = labels
+	}
 
-	// ParallelToolCalls — Gemini 不支持此参数，记录 debug 日志
+	// ParallelToolCalls — Gemini 不支持此参数，仅记录 debug 日志
 	if config.ParallelToolCalls && provider.DebugEnabled {
 		log.Printf("[provider/gemini] ParallelToolCalls=true 不被 Gemini 协议支持，已忽略")
 	}
 
 	// CachedContent — Gemini 外部缓存资源引用（从 ProviderExtra 提取）
 	if cc, ok := provider.GetExtraString(config.ProviderExtra, "cached_content"); ok && cc != "" {
-		gc.CachedContent = cc
+		gc["cachedContent"] = cc
 	}
 
 	return gc
 }
 
-// mapThinkingConfig 将统一的 ThinkingConfig.Effort 映射为 genai.ThinkingConfig。
+// buildToolConfig 将统一的 ToolChoice 字符串映射为 Gemini toolConfig。
 //
-// Gemini ThinkingLevel 仅支持 LOW/MEDIUM/HIGH 三档，对标准值域做降级映射：
-//   - "none" → nil
-//   - "minimal" → LOW
-//   - "low" → LOW
-//   - "medium" → MEDIUM
-//   - "high" → HIGH
-//   - "xhigh" → HIGH
-func mapThinkingConfig(effort string) *genai.ThinkingConfig {
-	switch effort {
-	case "minimal", "low":
-		return &genai.ThinkingConfig{
-			IncludeThoughts: true,
-			ThinkingLevel:   genai.ThinkingLevelLow,
+// Gemini FunctionCallingConfig.Mode 取值：AUTO / NONE / ANY。
+//   - "auto"     → AUTO
+//   - "none"     → NONE
+//   - "required" / "forced" / "any" → ANY
+//   - 空         → nil（不设置 toolConfig）
+func buildToolConfig(toolChoice string) map[string]any {
+	switch toolChoice {
+	case "auto":
+		return map[string]any{
+			"functionCallingConfig": map[string]any{"mode": "AUTO"},
 		}
-	case "medium":
-		return &genai.ThinkingConfig{
-			IncludeThoughts: true,
-			ThinkingLevel:   genai.ThinkingLevelMedium,
+	case "none":
+		return map[string]any{
+			"functionCallingConfig": map[string]any{"mode": "NONE"},
 		}
-	case "high", "xhigh":
-		return &genai.ThinkingConfig{
-			IncludeThoughts: true,
-			ThinkingLevel:   genai.ThinkingLevelHigh,
+	case "required", "forced", "any":
+		return map[string]any{
+			"functionCallingConfig": map[string]any{"mode": "ANY"},
 		}
 	default:
 		return nil
-	}
-}
-
-// mapToolChoice 将统一的 ToolChoice 字符串映射为 genai.FunctionCallingConfig。
-//
-//   - "auto" → ModeAuto
-//   - "none" → ModeNone
-//   - "required" / "forced" → ModeAny
-func mapToolChoice(choice string) *genai.FunctionCallingConfig {
-	switch choice {
-	case "auto":
-		return &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeAuto}
-	case "none":
-		return &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeNone}
-	case "required", "forced", "any":
-		return &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeAny}
-	default:
-		return &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeAuto}
 	}
 }

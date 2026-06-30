@@ -4,34 +4,38 @@ import (
 	"encoding/json"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"google.golang.org/genai"
 )
 
-// buildTools 将内部工具定义转换为 Gemini SDK 工具参数格式。
+// buildTools 将内部工具定义转换为 Gemini REST API 工具参数格式。
 //
-// 仅转换 type="function" 的工具，合并到单个 genai.Tool 的 FunctionDeclarations 中。
-// 使用 ParametersJsonSchema 字段直接传递 JSON Schema map，避免 Schema 结构体转换。
-func buildTools(tools []provider.Tool) []*genai.Tool {
+// 将 provider.Tool 映射为 [{"functionDeclarations": [...]}] 的 map 格式，
+// 仅转换 type="function" 的工具。Parameters 使用 json.RawMessage 直接透传 JSON Schema，
+// 避免引入外部 Schema 类型。
+func buildTools(tools []provider.Tool) []map[string]any {
 	if len(tools) == 0 {
 		return nil
 	}
-	funcDecls := make([]*genai.FunctionDeclaration, 0, len(tools))
+	decls := make([]map[string]any, 0, len(tools))
 	for _, tool := range tools {
 		if tool.Type != "function" {
 			continue
 		}
-		funcDecls = append(funcDecls, &genai.FunctionDeclaration{
-			Name:                 tool.Function.Name,
-			Description:          tool.Function.Description,
-			ParametersJsonSchema: tool.Function.Parameters,
-		})
+		d := map[string]any{"name": tool.Function.Name}
+		if tool.Function.Description != "" {
+			d["description"] = tool.Function.Description
+		}
+		if tool.Function.Parameters != nil {
+			// Parameters 为 map[string]any，序列化为 json.RawMessage 保留原始 JSON Schema
+			if paramsBytes, err := json.Marshal(tool.Function.Parameters); err == nil {
+				d["parameters"] = json.RawMessage(paramsBytes)
+			}
+		}
+		decls = append(decls, d)
 	}
-	if len(funcDecls) == 0 {
+	if len(decls) == 0 {
 		return nil
 	}
-	return []*genai.Tool{{
-		FunctionDeclarations: funcDecls,
-	}}
+	return []map[string]any{{"functionDeclarations": decls}}
 }
 
 // jsonUnmarshal 是 encoding/json.Unmarshal 的薄包装，便于测试 mock。

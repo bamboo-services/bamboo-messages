@@ -3,7 +3,6 @@ package anthropic
 import (
 	"encoding/json"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -11,124 +10,108 @@ import (
 // 内部方法
 // ==============================
 
-// buildMessages 将内部消息格式转换为 Anthropic SDK 消息格式。
+// buildMessages 将内部消息格式转换为 Anthropic Messages 协议格式。
 //
-// 根据 Role 构建对应的 Anthropic BetaMessageParam：
-// - RoleUser: NewBetaUserMessage(BetaTextBlock)
-// - RoleAssistant: 支持普通文本和工具调用，工具调用时需包含 text 和 tool_use blocks
-// - RoleTool: NewBetaUserMessage(BetaToolResultBlock)
-func (p *Provider) buildMessages(messages []provider.Message) []anthropic.BetaMessageParam {
-	result := make([]anthropic.BetaMessageParam, 0, len(messages))
+// 根据 Role 构建对应的 Anthropic 消息结构：
+//   - RoleUser:     {"role":"user","content":[{"type":"text","text":...}]}
+//   - RoleAssistant: 支持文本、thinking block 和 tool_use blocks
+//   - RoleTool:     {"role":"user","content":[{"type":"tool_result","tool_use_id":...}]}
+//
+// Anthropic API 要求同一轮的多个 tool_result 放在同一个 user 消息内，
+// 因此当连续出现 RoleTool 时会自动合并而非新建消息。
+func (p *Provider) buildMessages(messages []provider.Message) []map[string]any {
+	result := make([]map[string]any, 0, len(messages))
 	for _, msg := range messages {
 		switch msg.Role {
 		case provider.RoleTool:
-			block := anthropic.NewBetaToolResultBlock(msg.ToolCallID, msg.Content, msg.IsError)
-			if msg.CacheControl != nil && block.OfToolResult != nil {
-				block.OfToolResult.CacheControl = toAnthropicCacheControl(msg.CacheControl)
+			block := map[string]any{
+				"type":         "tool_result",
+				"tool_use_id":  msg.ToolCallID,
+				"content":      msg.Content,
+				"is_error":     msg.IsError,
 			}
-			// Anthropic API 要求同一轮的多个 tool_result 在同一个 user 消息内。
-			// messagesToProvider 将每个 ToolResultBlock 拆为独立的 RoleTool 消息，
-			// 这里检测前一条是否也是 RoleTool（已转为 user），若是则合并而非新建。
+			if msg.CacheControl != nil {
+				block["cache_control"] = buildCacheControl(msg.CacheControl)
+			}
+			// 检测前一条是否也是 tool_result（已转为 user），若是则合并到同一 user 消息
 			if len(result) > 0 {
-				last := &result[len(result)-1]
-				if last.Role == anthropic.BetaMessageParamRoleUser && len(last.Content) > 0 && last.Content[0].OfToolResult != nil {
-					last.Content = append(last.Content, block)
-					continue
+				last := result[len(result)-1]
+				if last["role"] == "user" {
+					if content, ok := last["content"].([]map[string]any); ok && len(content) > 0 {
+						if content[0]["type"] == "tool_result" {
+							last["content"] = append(content, block)
+							continue
+						}
+					}
 				}
 			}
-			result = append(result, anthropic.NewBetaUserMessage(block))
+			result = append(result, map[string]any{
+				"role":    "user",
+				"content": []map[string]any{block},
+			})
 		default:
-			p.appendMessage(&result, msg)
+			result = p.appendMessage(result, msg)
 		}
 	}
 	return result
 }
 
 // appendMessage 处理 RoleUser 和 RoleAssistant 消息（从 buildMessages 提取）。
-func (p *Provider) appendMessage(result *[]anthropic.BetaMessageParam, msg provider.Message) {
+func (p *Provider) appendMessage(result []map[string]any, msg provider.Message) []map[string]any {
 	switch msg.Role {
 	case provider.RoleUser:
+		// ContentBlocks 优先于纯文本 Content
 		if len(msg.ContentBlocks) > 0 {
-			blocks := make([]anthropic.BetaContentBlockParamUnion, 0, len(msg.ContentBlocks)+1)
+			blocks := make([]map[string]any, 0, len(msg.ContentBlocks)+1)
 			if msg.Content != "" {
-				blocks = append(blocks, anthropic.NewBetaTextBlock(msg.Content))
+				blocks = append(blocks, map[string]any{"type": "text", "text": msg.Content})
 			}
 			for _, cb := range msg.ContentBlocks {
 				switch cb.BlockType() {
 				case "image":
 					if img, ok := cb.(provider.ImageContentBlock); ok {
-						if img.Source.Type == "base64" {
-							blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
-								OfImage: &anthropic.BetaImageBlockParam{
-									Source: anthropic.BetaImageBlockParamSourceUnion{
-										OfBase64: &anthropic.BetaBase64ImageSourceParam{
-											Data:      img.Source.Data,
-											MediaType: anthropic.BetaBase64ImageSourceMediaType(img.Source.MediaType),
-										},
-									},
-								},
-							})
-						} else if img.Source.Type == "url" {
-							blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
-								OfImage: &anthropic.BetaImageBlockParam{
-									Source: anthropic.BetaImageBlockParamSourceUnion{
-										OfURL: &anthropic.BetaURLImageSourceParam{
-											URL: img.Source.URL,
-										},
-									},
-								},
-							})
-						}
+						blocks = append(blocks, buildImageBlock(img.Source))
 					}
 				case "document":
 					if doc, ok := cb.(provider.DocumentContentBlock); ok {
-						if doc.Source.Type == "base64" {
-							blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
-								OfDocument: &anthropic.BetaRequestDocumentBlockParam{
-									Source: anthropic.BetaRequestDocumentBlockSourceUnionParam{
-										OfBase64: &anthropic.BetaBase64PDFSourceParam{
-											Data: doc.Source.Data,
-										},
-									},
-								},
-							})
-						} else if doc.Source.Type == "url" {
-							blocks = append(blocks, anthropic.BetaContentBlockParamUnion{
-								OfDocument: &anthropic.BetaRequestDocumentBlockParam{
-									Source: anthropic.BetaRequestDocumentBlockSourceUnionParam{
-										OfURL: &anthropic.BetaURLPDFSourceParam{
-											URL: doc.Source.URL,
-										},
-									},
-								},
-							})
-						}
+						blocks = append(blocks, buildDocumentBlock(doc.Source))
 					}
 				}
 			}
 			applyMsgCacheControl(blocks, msg.CacheControl)
-			*result = append(*result, anthropic.BetaMessageParam{
-				Role:    anthropic.BetaMessageParamRoleUser,
-				Content: blocks,
+			result = append(result, map[string]any{
+				"role":    "user",
+				"content": blocks,
 			})
 		} else {
-			block := anthropic.NewBetaTextBlock(msg.Content)
-			if msg.CacheControl != nil && block.OfText != nil {
-				block.OfText.CacheControl = toAnthropicCacheControl(msg.CacheControl)
+			block := map[string]any{"type": "text", "text": msg.Content}
+			if msg.CacheControl != nil {
+				block["cache_control"] = buildCacheControl(msg.CacheControl)
 			}
-			*result = append(*result, anthropic.NewBetaUserMessage(block))
+			result = append(result, map[string]any{
+				"role":    "user",
+				"content": []map[string]any{block},
+			})
 		}
+
 	case provider.RoleAssistant:
-		blocks := make([]anthropic.BetaContentBlockParamUnion, 0, len(msg.ToolCalls)+2)
+		blocks := make([]map[string]any, 0, len(msg.ToolCalls)+2)
 
+		// Thinking block（多轮对话中保留 extended thinking 签名）
 		if msg.ThinkingSignature != "" {
-			blocks = append(blocks, anthropic.NewBetaThinkingBlock(msg.ThinkingSignature, msg.ThinkingContent))
+			blocks = append(blocks, map[string]any{
+				"type":      "thinking",
+				"thinking":  msg.ThinkingContent,
+				"signature": msg.ThinkingSignature,
+			})
 		}
 
+		// 文本内容
 		if msg.Content != "" {
-			blocks = append(blocks, anthropic.NewBetaTextBlock(msg.Content))
+			blocks = append(blocks, map[string]any{"type": "text", "text": msg.Content})
 		}
 
+		// 工具调用
 		for _, tc := range msg.ToolCalls {
 			var input any
 			if tc.Function.Arguments != "" {
@@ -136,54 +119,78 @@ func (p *Provider) appendMessage(result *[]anthropic.BetaMessageParam, msg provi
 			} else {
 				input = map[string]any{}
 			}
-			blocks = append(blocks, anthropic.NewBetaToolUseBlock(tc.ID, input, tc.Function.Name))
+			blocks = append(blocks, map[string]any{
+				"type":  "tool_use",
+				"id":    tc.ID,
+				"name":  tc.Function.Name,
+				"input": input,
+			})
 		}
 
+		// 确保至少有一个 content block
 		if len(blocks) == 0 {
-			blocks = append(blocks, anthropic.NewBetaTextBlock(""))
+			blocks = append(blocks, map[string]any{"type": "text", "text": ""})
 		}
 
 		applyMsgCacheControl(blocks, msg.CacheControl)
-		*result = append(*result, anthropic.BetaMessageParam{
-			Role:    anthropic.BetaMessageParamRoleAssistant,
-			Content: blocks,
+		result = append(result, map[string]any{
+			"role":    "assistant",
+			"content": blocks,
 		})
 	}
+	return result
 }
 
 // applyMsgCacheControl 将消息级别的 CacheControl 标记应用到最后一个 content block。
 //
 // Anthropic 的 cache_control 是块级断点，provider.Message.CacheControl 表示
 // "这条消息的最后一个块需要缓存"，因此将标记设置到最后一个 block 上。
-func applyMsgCacheControl(blocks []anthropic.BetaContentBlockParamUnion, cc *provider.CacheControl) {
+func applyMsgCacheControl(blocks []map[string]any, cc *provider.CacheControl) {
 	if cc == nil || len(blocks) == 0 {
 		return
 	}
-	last := &blocks[len(blocks)-1]
-	anthropicCC := toAnthropicCacheControl(cc)
-	if last.OfText != nil {
-		last.OfText.CacheControl = anthropicCC
-	} else if last.OfToolUse != nil {
-		last.OfToolUse.CacheControl = anthropicCC
-	} else if last.OfImage != nil {
-		last.OfImage.CacheControl = anthropicCC
-	} else if last.OfDocument != nil {
-		last.OfDocument.CacheControl = anthropicCC
-	} else if last.OfToolResult != nil {
-		last.OfToolResult.CacheControl = anthropicCC
-	}
+	blocks[len(blocks)-1]["cache_control"] = buildCacheControl(cc)
 }
 
-func toAnthropicCacheControl(cc *provider.CacheControl) anthropic.BetaCacheControlEphemeralParam {
-	param := anthropic.NewBetaCacheControlEphemeralParam()
-	if cc == nil {
-		return param
+// buildImageBlock 根据图片来源构建 Anthropic 图片内容块。
+//
+// 支持两种来源：base64 内联数据和远程 URL。
+func buildImageBlock(src provider.ImageSource) map[string]any {
+	block := map[string]any{"type": "image"}
+	switch src.Type {
+	case "base64":
+		block["source"] = map[string]any{
+			"type":      "base64",
+			"media_type": src.MediaType,
+			"data":       src.Data,
+		}
+	case "url":
+		block["source"] = map[string]any{
+			"type": "url",
+			"url":  src.URL,
+		}
 	}
-	if cc.Type != "" && cc.Type != "ephemeral" {
-		return param
+	return block
+}
+
+// buildDocumentBlock 根据文档来源构建 Anthropic 文档内容块。
+//
+// 支持两种来源：base64 内联数据和远程 URL。
+func buildDocumentBlock(src provider.DocumentSource) map[string]any {
+	block := map[string]any{"type": "document"}
+	switch src.Type {
+	case "base64":
+		source := map[string]any{
+			"type":      "base64",
+			"media_type": src.MediaType,
+			"data":       src.Data,
+		}
+		block["source"] = source
+	case "url":
+		block["source"] = map[string]any{
+			"type": "url",
+			"url":  src.URL,
+		}
 	}
-	if cc.TTL == provider.CacheTTL1h {
-		param.TTL = anthropic.BetaCacheControlEphemeralTTLTTL1h
-	}
-	return param
+	return block
 }

@@ -5,14 +5,11 @@ import (
 	"log"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/packages/param"
-	"github.com/openai/openai-go/v3/shared"
 )
 
 // buildParams 构建 OpenAI Chat Completions 请求参数。
 //
-// 将统一的 provider.ChatConfig 转换为 openai.ChatCompletionNewParams，
+// 将统一的 provider.ChatConfig 转换为 map[string]any 形式的请求体，
 // 包含所有共享参数构建逻辑（Model/Messages/MaxTokens/Temperature 等），
 // 并根据 p.legacyCompat 做条件分支处理 Legacy 兼容场景。
 //
@@ -20,40 +17,41 @@ import (
 //   - MaxTokens → 使用旧字段名 max_tokens（而非 max_completion_tokens）
 //   - ParallelToolCalls → 仅在有工具时设置（而非无条件设置）
 //   - ReasoningEffort → 跳过自动映射（不设置 reasoning_effort）
-//   - thinking 透传 → 从 ProviderExtra 提取 thinking 值，通过 SetExtraFields 注入
-func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provider.Message, config *provider.ChatConfig) openai.ChatCompletionNewParams {
+//   - StreamOptions → 省略（部分第三方端点不支持）
+//   - thinking 透传 → 从 ProviderExtra 提取 thinking 值，注入为顶层字段
+func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provider.Message, config *provider.ChatConfig) map[string]any {
 	if config == nil {
 		config = &provider.ChatConfig{}
 	}
 
-	params := openai.ChatCompletionNewParams{
-		Model:    config.Model,
-		Messages: p.buildMessages(systemPrompt, messages),
+	params := map[string]any{
+		"model":    config.Model,
+		"messages": p.buildMessages(systemPrompt, messages),
 	}
 
 	// === MaxTokens — Legacy 使用旧字段名 max_tokens ===
 	if config.MaxTokens > 0 {
 		if p.legacyCompat {
-			params.MaxTokens = openai.Int(config.MaxTokens)
+			params["max_tokens"] = config.MaxTokens
 		} else {
-			params.MaxCompletionTokens = openai.Int(config.MaxTokens)
+			params["max_completion_tokens"] = config.MaxTokens
 		}
 	}
 
 	if config.Temperature != nil {
-		params.Temperature = openai.Float(*config.Temperature)
+		params["temperature"] = *config.Temperature
 	}
 
 	if config.TopP != nil {
-		params.TopP = openai.Float(*config.TopP)
+		params["top_p"] = *config.TopP
 	}
 
 	if len(config.Stop) > 0 {
-		params.Stop = buildStop(config.Stop)
+		params["stop"] = config.Stop
 	}
 
-	if tools := buildTools(config.Tools); tools != nil {
-		params.Tools = tools
+	if tools := buildTools(config.Tools); len(tools) > 0 {
+		params["tools"] = tools
 	}
 
 	// === ReasoningEffort ===
@@ -61,7 +59,7 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 	// GLM-5.2 等第三方端点原生支持 none/minimal/low/medium/high/xhigh/max 全部值，
 	// 服务端会做兼容映射（xhigh→max、low/medium→high），无需客户端降级。
 	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
-		params.ReasoningEffort = shared.ReasoningEffort(config.ThinkingConfig.Effort)
+		params["reasoning_effort"] = config.ThinkingConfig.Effort
 	}
 
 	// === thinking 透传 — Legacy only ===
@@ -71,29 +69,29 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 	//   2. ThinkingConfig.Effort — 合成 {type:"enabled"} 或 {type:"disabled"}
 	if p.legacyCompat {
 		if thinking, ok := provider.GetExtraAny(config.ProviderExtra, "thinking"); ok {
-			params.SetExtraFields(map[string]any{"thinking": normalizeLegacyThinking(thinking)})
+			params["thinking"] = normalizeLegacyThinking(thinking)
 		} else if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
 			if synthesized := effortToLegacyThinking(config.ThinkingConfig.Effort); synthesized != nil {
-				params.SetExtraFields(map[string]any{"thinking": synthesized})
+				params["thinking"] = synthesized
 			}
 		}
 	}
 
 	if fp, ok := provider.GetExtraFloat64(config.ProviderExtra, "frequency_penalty"); ok {
-		params.FrequencyPenalty = openai.Float(fp)
+		params["frequency_penalty"] = fp
 	}
 
 	if pp, ok := provider.GetExtraFloat64(config.ProviderExtra, "presence_penalty"); ok {
-		params.PresencePenalty = openai.Float(pp)
+		params["presence_penalty"] = pp
 	}
 
 	if seed, ok := provider.GetExtraInt64(config.ProviderExtra, "seed"); ok {
-		params.Seed = openai.Int(seed)
+		params["seed"] = seed
 	}
 
 	// 用户标识
 	if config.UserID != "" {
-		params.User = openai.String(config.UserID)
+		params["user"] = config.UserID
 	}
 
 	// PromptCacheKey — OpenAI prompt cache 路由粘性键。
@@ -103,68 +101,45 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 	// OpenAI 会自动处理 prompt 缓存，此处仅记录 debug 提示。
 	if !p.legacyCompat {
 		if config.PromptCacheKey != "" {
-			params.PromptCacheKey = openai.String(config.PromptCacheKey)
+			params["prompt_cache_key"] = config.PromptCacheKey
 		} else if key, ok := provider.GetExtraString(config.ProviderExtra, "prompt_cache_key"); ok && key != "" {
-			params.PromptCacheKey = openai.String(key)
+			params["prompt_cache_key"] = key
 		} else if config.SystemCacheControl != nil && provider.DebugEnabled {
 			log.Printf("[provider/openai-completions] SystemCacheControl (type=%s) 由 OpenAI 自动缓存处理", config.SystemCacheControl.Type)
 		}
 	}
 
 	// 预测内容（用于加速已知内容的生成）
+	// 去 SDK 化后直接透传原始值（map[string]any 或其他可序列化类型）
 	if pred, ok := provider.GetExtraAny(config.ProviderExtra, "prediction"); ok {
-		if prediction, ok := pred.(openai.ChatCompletionPredictionContentParam); ok {
-			params.Prediction = prediction
-		} else {
-			// 类型断言失败时，尝试通过 JSON marshal/unmarshal 做安全转换
-			if provider.DebugEnabled {
-				log.Printf("[provider/openai-completions] Prediction 类型断言失败，尝试 JSON 回退转换")
-			}
-			data, err := json.Marshal(pred)
-			if err == nil {
-				var prediction openai.ChatCompletionPredictionContentParam
-				if err := json.Unmarshal(data, &prediction); err == nil {
-					params.Prediction = prediction
-				} else if provider.DebugEnabled {
-					log.Printf("[provider/openai-completions] Prediction JSON 反序列化失败: %v", err)
-				}
-			} else if provider.DebugEnabled {
-				log.Printf("[provider/openai-completions] Prediction JSON 序列化失败: %v", err)
-			}
-		}
+		params["prediction"] = pred
 	}
 
-	// ParallelToolCalls：bool 零值无法区分“未设置”与“显式 false”。
+	// ParallelToolCalls：bool 零值无法区分"未设置"与"显式 false"。
 	// 为兼容智谱 GLM / Kimi 等第三方端点（发送 false 可能触发 400/空响应），
 	// 默认与 Legacy 模式统一：仅当 tools 非空且显式 true 时才发送。
 	if len(config.Tools) > 0 && config.ParallelToolCalls {
-		params.ParallelToolCalls = openai.Bool(config.ParallelToolCalls)
+		params["parallel_tool_calls"] = config.ParallelToolCalls
 	}
 
 	// 附加元数据
 	if len(config.Metadata) > 0 {
-		params.Metadata = shared.Metadata(config.Metadata)
+		params["metadata"] = config.Metadata
 	}
 
 	// 工具选择策略
 	if config.ToolChoice != "" {
 		tc := config.ToolChoice
 		if tc == "forced" {
-			tc = "required" // map forced→required for OpenAI
+			tc = "required" // 映射 forced→required，OpenAI 标准
 		}
-		params.ToolChoice = openai.ChatCompletionToolChoiceOptionUnionParam{OfAuto: param.NewOpt(tc)}
+		params["tool_choice"] = tc
 	}
 
 	// 响应格式
 	if config.ResponseFormat != "" {
-		if config.ResponseFormat == "json_object" {
-			params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
-				OfJSONObject: openai.Ptr(shared.NewResponseFormatJSONObjectParam()),
-			}
-		} else if config.ResponseFormat == "text" {
-			params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
-				OfText: openai.Ptr(shared.NewResponseFormatTextParam()),
-			}
+		if rf := buildResponseFormat(config.ResponseFormat); rf != nil {
+			params["response_format"] = rf
 		}
 	}
 
@@ -222,12 +197,12 @@ func normalizeLegacyThinking(thinking any) any {
 // buildStreamOptions 构建流式请求的 StreamOptions。
 //
 // 智谱 GLM 等第三方 OpenAI 兼容端点不支持 stream_options 参数，
-// 发送该参数会导致 400 code:1210 参数错误，因此 Legacy 模式下返回零值（序列化时省略）。
-func (p *CompletionsProvider) buildStreamOptions() openai.ChatCompletionStreamOptionsParam {
+// 发送该参数会导致 400 code:1210 参数错误，因此 Legacy 模式下返回 nil（序列化时省略）。
+func (p *CompletionsProvider) buildStreamOptions() map[string]any {
 	if p.legacyCompat {
-		return openai.ChatCompletionStreamOptionsParam{}
+		return nil
 	}
-	return openai.ChatCompletionStreamOptionsParam{
-		IncludeUsage: openai.Bool(true),
+	return map[string]any{
+		"include_usage": true,
 	}
 }

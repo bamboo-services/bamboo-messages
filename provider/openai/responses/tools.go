@@ -2,32 +2,36 @@ package responses
 
 import (
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"github.com/openai/openai-go/v3/packages/param"
-	"github.com/openai/openai-go/v3/responses"
 )
 
-// buildTools 将内部工具定义转换为 OpenAI Responses SDK 工具参数格式。
+// buildTools 将内部工具定义转换为 OpenAI Responses API 工具参数格式。
 //
-// 将 provider.Tool 数组转换为 openai-go/v3 的 ToolUnionParam 列表，
-// 目前仅支持 function 类型的工具。
-func buildTools(tools []provider.Tool) []responses.ToolUnionParam {
+// Responses API 的工具定义格式与 Completions API 不同：
+// function 相关字段位于顶层，而非嵌套在 "function" 字段下。
+//
+// 格式示例:
+//
+//	{"type":"function","name":"get_weather","description":"...","parameters":{...}}
+func buildTools(tools []provider.Tool) []map[string]any {
 	if len(tools) == 0 {
 		return nil
 	}
-	result := make([]responses.ToolUnionParam, 0, len(tools))
+	result := make([]map[string]any, 0, len(tools))
 	for _, tool := range tools {
-		if tool.Type == "function" {
-			function := responses.FunctionToolParam{
-				Name:       tool.Function.Name,
-				Parameters: tool.Function.Parameters,
-			}
-			if tool.Function.Description != "" {
-				function.Description = param.NewOpt(tool.Function.Description)
-			}
-			result = append(result, responses.ToolUnionParam{
-				OfFunction: &function,
-			})
+		if tool.Type != "function" {
+			continue
 		}
+		fn := map[string]any{
+			"type": "function",
+			"name": tool.Function.Name,
+		}
+		if tool.Function.Description != "" {
+			fn["description"] = tool.Function.Description
+		}
+		if tool.Function.Parameters != nil {
+			fn["parameters"] = tool.Function.Parameters
+		}
+		result = append(result, fn)
 	}
 	return result
 }

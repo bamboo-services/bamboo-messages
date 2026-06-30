@@ -2,158 +2,156 @@ package responses
 
 import (
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
-	"github.com/openai/openai-go/v3/shared"
 )
 
-// buildResponseNewParams 从 ChatConfig 构建 OpenAI Responses API 请求参数。
+// buildParams 从 ChatConfig 构建 OpenAI Responses API 请求参数。
 //
 // 将统一的 ChatConfig 中的模型配置、温度、采样参数、工具定义、
-// 思考/推理配置以及 ProviderExtra 透传参数映射到 OpenAI Responses SDK 的
-// ResponseNewParams 结构体。
+// 思考/推理配置以及 ProviderExtra 透传参数映射到 OpenAI Responses API 的
+// 请求体（map[string]any 格式），后续由 chat.go / complete.go 序列化为 JSON
+// 并通过 HTTP 发送。
 //
 // 参数:
-//   - model - 模型名称（直接设置到 params.Model）
-//   - input - 已构建的输入消息联合体
+//   - model - 模型名称
+//   - systemPrompt - 系统提示词（映射到 instructions 字段）
+//   - messages - 统一消息数组
 //   - config - 统一的聊天请求配置
+//   - stream - 是否使用流式响应
 //
 // 此方法由 ChatWithSystem 和 CompleteWithSystem 共享调用，
 // 确保流式和非流式路径使用一致的参数构建逻辑。
-func (p *ResponsesProvider) buildResponseNewParams(model string, input responses.ResponseNewParamsInputUnion, config *provider.ChatConfig) responses.ResponseNewParams {
-	params := responses.ResponseNewParams{
-		Model: model,
-		Input: input,
+func (p *ResponsesProvider) buildParams(model string, systemPrompt string, messages []provider.Message, config *provider.ChatConfig, stream bool) map[string]any {
+	params := map[string]any{
+		"model":  model,
+		"input":  p.buildInput(messages),
+		"stream": stream,
 	}
-	extraFields := make(map[string]any)
 
+	// Instructions — 系统提示词（优先使用显式 systemPrompt，回退到 ProviderExtra）
+	if systemPrompt != "" {
+		params["instructions"] = systemPrompt
+	} else if instructions, ok := provider.GetExtraString(config.ProviderExtra, "instructions"); ok && instructions != "" {
+		params["instructions"] = instructions
+	}
+
+	// MaxOutputTokens — 最大输出 token 数
 	if config.MaxTokens > 0 {
-		params.MaxOutputTokens = openai.Int(config.MaxTokens)
+		params["max_output_tokens"] = config.MaxTokens
 	}
 
+	// Temperature — 采样温度
 	if config.Temperature != nil {
-		params.Temperature = openai.Float(*config.Temperature)
+		params["temperature"] = *config.Temperature
 	}
 
+	// TopP — 核采样参数
 	if config.TopP != nil {
-		params.TopP = openai.Float(*config.TopP)
+		params["top_p"] = *config.TopP
 	}
 
-	// Stop 参数 — Responses SDK 无原生 Stop 字段，通过 ExtraFields 传递
+	// Stop — 停止词（Responses API 无原生字段，直接透传）
 	if len(config.Stop) > 0 {
-		extraFields["stop"] = config.Stop
+		params["stop"] = config.Stop
 	}
 
-	// UserID — 统一字段，标识终端用户，用于缓存优化和安全审计
+	// User — 终端用户标识，用于缓存优化和安全审计
 	if config.UserID != "" {
-		params.User = openai.Opt(config.UserID)
+		params["user"] = config.UserID
 	}
 
 	// PromptCacheKey — OpenAI prompt cache 路由粘性键
 	if config.PromptCacheKey != "" {
-		params.PromptCacheKey = openai.Opt(config.PromptCacheKey)
+		params["prompt_cache_key"] = config.PromptCacheKey
 	} else if key, ok := provider.GetExtraString(config.ProviderExtra, "prompt_cache_key"); ok && key != "" {
-		params.PromptCacheKey = openai.Opt(key)
+		params["prompt_cache_key"] = key
 	}
 
 	// ParallelToolCalls — 是否允许并行工具调用
 	if config.ParallelToolCalls {
-		params.ParallelToolCalls = openai.Bool(true)
-	}
-
-	if instructions, ok := provider.GetExtraString(config.ProviderExtra, "instructions"); ok && instructions != "" {
-		params.Instructions = openai.String(instructions)
+		params["parallel_tool_calls"] = true
 	}
 
 	// ProviderExtra: store — 是否持久化存储响应
 	if store, ok := provider.GetExtraBool(config.ProviderExtra, "store"); ok {
-		params.Store = openai.Opt(store)
+		params["store"] = store
 	}
 
 	// ProviderExtra: truncation — 上下文截断策略 ("auto" / "disabled")
-	if truncation, ok := provider.GetExtraString(config.ProviderExtra, "truncation"); ok {
-		params.Truncation = responses.ResponseNewParamsTruncation(truncation)
+	if truncation, ok := provider.GetExtraString(config.ProviderExtra, "truncation"); ok && truncation != "" {
+		params["truncation"] = truncation
 	}
 
 	// ProviderExtra: previous_response_id — 关联上一轮响应实现多轮对话
-	if prevID, ok := provider.GetExtraString(config.ProviderExtra, "previous_response_id"); ok {
-		params.PreviousResponseID = openai.Opt(prevID)
+	if prevID, ok := provider.GetExtraString(config.ProviderExtra, "previous_response_id"); ok && prevID != "" {
+		params["previous_response_id"] = prevID
 	}
 
 	// ProviderExtra: include — 指定响应中需包含的附加数据（如 reasoning.encrypted_content）
 	if include, ok := provider.GetExtraAny(config.ProviderExtra, "include"); ok {
 		if items, ok := include.([]string); ok && len(items) > 0 {
-			includables := make([]responses.ResponseIncludable, len(items))
-			for i, item := range items {
-				includables[i] = responses.ResponseIncludable(item)
-			}
-			params.Include = includables
+			params["include"] = items
 		}
 	}
 
-	// Metadata — 附加键值对元数据
-	if len(config.Metadata) > 0 {
-		params.Metadata = shared.Metadata(config.Metadata)
-	}
-
-	// ProviderExtra: modalities — 输出模态（ResponseNewParams 无原生字段，通过 ExtraFields 传递）
+	// ProviderExtra: modalities — 输出模态
 	if modalities, ok := provider.GetExtraAny(config.ProviderExtra, "modalities"); ok {
-		extraFields["modalities"] = modalities
+		params["modalities"] = modalities
 	}
 
+	// Metadata — 附加键值对元数据（map[string]string → map[string]any）
+	if len(config.Metadata) > 0 {
+		meta := make(map[string]any, len(config.Metadata))
+		for k, v := range config.Metadata {
+			meta[k] = v
+		}
+		params["metadata"] = meta
+	}
+
+	// Tools — 工具定义
 	if tools := buildTools(config.Tools); tools != nil {
-		params.Tools = tools
+		params["tools"] = tools
 	}
 
-	// ThinkingConfig.Effort → Reasoning 参数 (Effort + Summary 自动推导)
-	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
-		reasoning := shared.ReasoningParam{
-			Effort: shared.ReasoningEffort(config.ThinkingConfig.Effort),
+	// Reasoning — 思考/推理配置（effort + summary 自动推导）
+	// effort 为 "none" 时不输出 reasoning 字段
+	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" && config.ThinkingConfig.Effort != "none" {
+		reasoning := map[string]any{
+			"effort": config.ThinkingConfig.Effort,
 		}
+		// Summary 按 effort 自动推导
 		switch config.ThinkingConfig.Effort {
-		case "none":
-		case "minimal":
-			reasoning.Summary = "concise"
-		case "low":
-			reasoning.Summary = "concise"
+		case "minimal", "low":
+			reasoning["summary"] = "concise"
 		case "medium":
-			reasoning.Summary = "auto"
+			reasoning["summary"] = "auto"
 		case "high", "xhigh":
-			reasoning.Summary = "detailed"
+			reasoning["summary"] = "detailed"
 		}
-		params.Reasoning = reasoning
+		params["reasoning"] = reasoning
 	}
 
-	// ToolChoice — 统一字段，工具选择策略
+	// ToolChoice — 工具选择策略（"forced" 统一映射为 "required"）
 	if config.ToolChoice != "" {
 		tc := config.ToolChoice
 		if tc == "forced" {
 			tc = "required"
 		}
-		params.ToolChoice = responses.ResponseNewParamsToolChoiceUnion{
-			OfToolChoiceMode: openai.Opt(responses.ToolChoiceOptions(tc)),
-		}
+		params["tool_choice"] = tc
 	}
 
-	// ResponseFormat — 统一字段，响应格式 (text / json_object)
+	// ResponseFormat — 响应格式 (text / json_object)
+	// Responses API 通过 text.format.type 字段指定响应格式
 	if config.ResponseFormat != "" {
-		if config.ResponseFormat == "text" {
-			params.Text = responses.ResponseTextConfigParam{
-				Format: responses.ResponseFormatTextConfigUnionParam{
-					OfText: openai.Ptr(shared.NewResponseFormatTextParam()),
-				},
+		switch config.ResponseFormat {
+		case "text":
+			params["text"] = map[string]any{
+				"format": map[string]any{"type": "text"},
 			}
-		} else if config.ResponseFormat == "json_object" {
-			params.Text = responses.ResponseTextConfigParam{
-				Format: responses.ResponseFormatTextConfigUnionParam{
-					OfJSONObject: openai.Ptr(shared.NewResponseFormatJSONObjectParam()),
-				},
+		case "json_object":
+			params["text"] = map[string]any{
+				"format": map[string]any{"type": "json_object"},
 			}
 		}
-	}
-
-	if len(extraFields) > 0 {
-		params.SetExtraFields(extraFields)
 	}
 
 	return params

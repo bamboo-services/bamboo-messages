@@ -4,8 +4,6 @@ import (
 	"log"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/packages/param"
 )
 
 // ==============================
@@ -14,21 +12,29 @@ import (
 
 // buildMessages 将内部消息格式转换为 OpenAI Chat Completions API 消息格式。
 //
-// 将 provider.Message 映射为 OpenAI SDK 的 System/User/Assistant/Tool 消息。
-func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []provider.Message) []openai.ChatCompletionMessageParamUnion {
-	result := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages)+1)
+// 将 provider.Message 映射为 map[string]any 形式的 System/User/Assistant/Tool 消息。
+// 当 ContentBlocks 不为空时，用户消息会构造为多模态 content 数组。
+func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []provider.Message) []map[string]any {
+	result := make([]map[string]any, 0, len(messages)+1)
 
 	if systemPrompt != "" {
-		result = append(result, openai.SystemMessage(systemPrompt))
+		result = append(result, map[string]any{
+			"role":    "system",
+			"content": systemPrompt,
+		})
 	}
 
 	for _, msg := range messages {
 		switch msg.Role {
 		case provider.RoleUser:
 			if len(msg.ContentBlocks) > 0 {
-				parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(msg.ContentBlocks)+1)
+				// 多模态消息：构造 content 数组
+				parts := make([]map[string]any, 0, len(msg.ContentBlocks)+1)
 				if msg.Content != "" {
-					parts = append(parts, openai.TextContentPart(msg.Content))
+					parts = append(parts, map[string]any{
+						"type": "text",
+						"text": msg.Content,
+					})
 				}
 				for _, cb := range msg.ContentBlocks {
 					switch cb.BlockType() {
@@ -36,19 +42,25 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 						if img, ok := cb.(provider.ImageContentBlock); ok {
 							if img.Source.Type == "base64" {
 								dataURI := "data:" + img.Source.MediaType + ";base64," + img.Source.Data
-								parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-									URL:    dataURI,
-									Detail: "auto",
-								}))
+								parts = append(parts, map[string]any{
+									"type": "image_url",
+									"image_url": map[string]any{
+										"url":    dataURI,
+										"detail": "auto",
+									},
+								})
 							} else if img.Source.Type == "url" {
-								parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-									URL:    img.Source.URL,
-									Detail: "auto",
-								}))
+								parts = append(parts, map[string]any{
+									"type": "image_url",
+									"image_url": map[string]any{
+										"url":    img.Source.URL,
+										"detail": "auto",
+									},
+								})
 							}
 						}
 					case "document":
-						// 文档内容块：text 类型转为文本部分，其余记录警告后忽略
+						// 文档内容块：OpenAI Completions 不支持，记录警告后忽略
 						if doc, ok := cb.(provider.DocumentContentBlock); ok {
 							if doc.Source.Type == "url" || doc.Source.Type == "base64" {
 								log.Printf("[provider/openai-completions] DocumentBlock(source=%q) 不支持，已忽略", doc.Source.Type)
@@ -58,20 +70,31 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 						}
 					}
 				}
-				result = append(result, openai.ChatCompletionMessageParamUnion{
-					OfUser: &openai.ChatCompletionUserMessageParam{
-						Content: openai.ChatCompletionUserMessageParamContentUnion{
-							OfArrayOfContentParts: parts,
-						},
-					},
+				result = append(result, map[string]any{
+					"role":    "user",
+					"content": parts,
 				})
 			} else {
-				result = append(result, openai.UserMessage(msg.Content))
+				result = append(result, map[string]any{
+					"role":    "user",
+					"content": msg.Content,
+				})
 			}
 		case provider.RoleAssistant:
 			result = append(result, p.buildAssistantMessage(msg))
 		case provider.RoleTool:
-			result = append(result, openai.ToolMessage(msg.Content, msg.ToolCallID))
+			result = append(result, map[string]any{
+				"role":         "tool",
+				"content":      msg.Content,
+				"tool_call_id": msg.ToolCallID,
+			})
+		case provider.RoleSystem:
+			// system 角色降级为 user（OpenAI 要求 system 仅在 messages 数组顶部出现一次）
+			log.Printf("[provider/openai-completions] 检测到 system 角色消息，降级为 user 角色")
+			result = append(result, map[string]any{
+				"role":    "user",
+				"content": msg.Content,
+			})
 		}
 	}
 
@@ -80,33 +103,34 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 
 // buildAssistantMessage 构建助手消息（支持文本和工具调用）。
 //
-// 将 provider.Message 映射为 OpenAI SDK 的 Assistant 消息，包含 Content 和 ToolCalls。
-func (p *CompletionsProvider) buildAssistantMessage(msg provider.Message) openai.ChatCompletionMessageParamUnion {
-	assistantMsg := openai.ChatCompletionAssistantMessageParam{}
-
-	if msg.Content != "" {
-		assistantMsg.Content = openai.ChatCompletionAssistantMessageParamContentUnion{
-			OfString: param.NewOpt(msg.Content),
-		}
+// 将 provider.Message 映射为 map[string]any 形式的 Assistant 消息，包含 Content 和 ToolCalls。
+// 仅在存在实际工具调用时填充 tool_calls，避免序列化出空数组 "tool_calls": []。
+// 部分第三方 OpenAI 兼容端点（如 Kimi coding API）会将空数组视为无效请求，
+// 导致返回 choices=0 的空响应。
+func (p *CompletionsProvider) buildAssistantMessage(msg provider.Message) map[string]any {
+	m := map[string]any{
+		"role": "assistant",
 	}
 
-	// 仅在存在实际工具调用时填充 ToolCalls，避免序列化出空数组 "tool_calls": []。
-	// 部分第三方 OpenAI 兼容端点（如 Kimi coding API）会将空数组视为无效请求，
-	// 导致返回 choices=0 的空响应。
+	if msg.Content != "" {
+		m["content"] = msg.Content
+	}
+
+	// 仅在存在实际工具调用时填充 tool_calls，避免序列化出空数组
 	if len(msg.ToolCalls) > 0 {
-		assistantMsg.ToolCalls = make([]openai.ChatCompletionMessageToolCallUnionParam, 0, len(msg.ToolCalls))
+		toolCalls := make([]map[string]any, 0, len(msg.ToolCalls))
 		for _, tc := range msg.ToolCalls {
-			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
-				OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-					ID: tc.ID,
-					Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-						Name:      tc.Function.Name,
-						Arguments: tc.Function.Arguments,
-					},
+			toolCalls = append(toolCalls, map[string]any{
+				"id":   tc.ID,
+				"type": "function",
+				"function": map[string]any{
+					"name":      tc.Function.Name,
+					"arguments": tc.Function.Arguments,
 				},
 			})
 		}
+		m["tool_calls"] = toolCalls
 	}
 
-	return openai.ChatCompletionMessageParamUnion{OfAssistant: &assistantMsg}
+	return m
 }
