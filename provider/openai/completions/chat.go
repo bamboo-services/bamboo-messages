@@ -7,54 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
-	"sync"
-	"time"
 
 	"github.com/bamboo-services/bamboo-base-go/common/error"
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
-
-var defaultStreamDrainTimeout = 5 * time.Second
-
-type streamErrKind int
-
-const (
-	errKindNone streamErrKind = iota
-	errKindJSONParse
-	errKindFatal
-)
-
-func classifyStreamError(err error) streamErrKind {
-	if err == nil {
-		return errKindNone
-	}
-
-	var syntaxErr *json.SyntaxError
-	var typeErr *json.UnmarshalTypeError
-	if errors.As(err, &syntaxErr) || errors.As(err, &typeErr) {
-		return errKindJSONParse
-	}
-
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return errKindFatal
-	}
-
-	msg := err.Error()
-	for _, kw := range []string{
-		"invalid character",
-		"unexpected end of JSON",
-		"JSON parse error",
-		"cannot unmarshal",
-		"error calling MarshalJSON",
-	} {
-		if strings.Contains(msg, kw) {
-			return errKindJSONParse
-		}
-	}
-	return errKindFatal
-}
 
 // Chat 流式对话。
 //
@@ -124,36 +81,11 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 		// 创建 SSE 扫描器
 		scanner := provider.NewSSEScanner(resp.Body)
 		defer func() {
+			// best-effort drain：读取残余数据以确保连接可被 Transport 复用（HTTP/1.1 keep-alive）
+			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = scanner.Close()
 			_ = resp.Body.Close()
 		}()
-
-		// 流式 drain 超时控制 — 仅在收到 finish_reason 后启动，
-		// 用于限时排空尾部残余帧（如 usage chunk）。
-		// 绝不能在流开始时启动，否则会变成全局超时，
-		// 导致 thinking 阶段较长（如 GLM-5.2）的模型被误断流。
-		drainTimeout := p.streamDrainTimeout
-		if drainTimeout <= 0 {
-			drainTimeout = defaultStreamDrainTimeout
-		}
-
-		var drainMu sync.Mutex
-		drainTimedOut := false
-		var drainTimer *time.Timer
-
-		startDrainTimer := func() {
-			drainMu.Lock()
-			defer drainMu.Unlock()
-			if drainTimer != nil {
-				return // 已启动，不重复
-			}
-			drainTimer = time.AfterFunc(drainTimeout, func() {
-				drainMu.Lock()
-				drainTimedOut = true
-				drainMu.Unlock()
-				_ = resp.Body.Close()
-			})
-		}
 
 		textBlockStarted := false
 		thinkingBlockStarted := false
@@ -171,29 +103,14 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 				if errors.Is(scanErr, io.EOF) {
 					break
 				}
-				// 其他错误交给 classifyStreamError 处理
-				errKind := classifyStreamError(scanErr)
-				if errKind == errKindJSONParse {
-					if !stopSent {
-						stopSent = true
-						select {
-						case eventCh <- provider.StreamEvent{
-							Type:         provider.StreamTypeStop,
-							FinishReason: provider.FinishReasonStop,
-						}:
-						case <-ctx.Done():
-							return
-						}
-					}
-				} else {
-					select {
-					case eventCh <- provider.StreamEvent{
-						Type: provider.StreamTypeError,
-						Err:  xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("OpenAI Completions 流读取错误: %v", scanErr)), false, scanErr),
-					}:
-					case <-ctx.Done():
-						return
-					}
+				// 其他读取错误直接上报（不区分错误类型，不做竞态断流）
+				select {
+				case eventCh <- provider.StreamEvent{
+					Type: provider.StreamTypeError,
+					Err:  xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("OpenAI Completions 流读取错误: %v", scanErr)), false, scanErr),
+				}:
+				case <-ctx.Done():
+					return
 				}
 				break
 			}
@@ -222,10 +139,6 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			// 处理 chunk → 事件
 			events := p.handleChunk(chunk, &textBlockStarted, &thinkingBlockStarted, &stopSent)
 
-			if stopSent {
-				startDrainTimer()
-			}
-
 			for _, e := range events {
 				select {
 				case eventCh <- e:
@@ -235,13 +148,8 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			}
 		}
 
-		// 检查 drain 是否超时
-		drainMu.Lock()
-		timedOut := drainTimedOut
-		drainMu.Unlock()
-
-		if !timedOut && !stopSent {
-			// 流正常结束但未收到 finish_reason，补发 Stop 事件
+		// 流正常结束但未收到 finish_reason，补发 Stop 事件
+		if !stopSent {
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type:         provider.StreamTypeStop,

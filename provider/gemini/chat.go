@@ -83,6 +83,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 		// 创建 SSE 扫描器
 		scanner := provider.NewSSEScanner(resp.Body)
 		defer func() {
+			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = scanner.Close()
 			_ = resp.Body.Close()
 		}()

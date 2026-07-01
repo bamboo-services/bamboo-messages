@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // ============================================
@@ -65,7 +66,16 @@ func NewHTTPClient(
 	if wrapped := NewInterceptorHTTPClient(nil, interceptors); wrapped != nil {
 		hc.client = wrapped
 	} else {
-		hc.client = &http.Client{}
+		hc.client = &http.Client{
+			Transport: &http.Transport{
+				// 连接建立阶段超时（不影响流式 body 读取）
+				TLSHandshakeTimeout:   10 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
+				IdleConnTimeout:       90 * time.Second,
+				ForceAttemptHTTP2:     true,
+			},
+			// 不设置 Timeout — 流式响应可能持续数分钟
+		}
 	}
 
 	return hc

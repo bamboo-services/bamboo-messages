@@ -1,8 +1,6 @@
 package completions
 
 import (
-	"time"
-
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -12,9 +10,8 @@ import (
 // 而是统一持有 *provider.HTTPClient 进行 HTTP 通信。
 // legacyCompat 标志控制旧版端点兼容行为。
 type CompletionsProvider struct {
-	httpClient         *provider.HTTPClient
-	legacyCompat       bool
-	streamDrainTimeout time.Duration
+	httpClient   *provider.HTTPClient
+	legacyCompat bool
 }
 
 // ============================================
@@ -30,13 +27,12 @@ type Option func(*config)
 //
 // 存储 API Key、BaseURL、Headers 等配置项。
 type config struct {
-	apiKey             string
-	baseURL            string
-	headers            map[string]string
-	legacyCompat       bool
-	debug              bool
-	streamDrainTimeout time.Duration
-	interceptors       []provider.RequestInterceptor
+	apiKey       string
+	baseURL      string
+	headers      map[string]string
+	legacyCompat bool
+	debug        bool
+	interceptors []provider.RequestInterceptor
 }
 
 // WithAPIKey 设置 API 密钥。
@@ -74,10 +70,6 @@ func WithHeader(key, value string) Option {
 // 用于兼容早期 API 响应格式或特定第三方端点的非标准行为。
 func WithLegacyCompat() Option {
 	return func(c *config) { c.legacyCompat = true }
-}
-
-func WithStreamDrainTimeout(d time.Duration) Option {
-	return func(c *config) { c.streamDrainTimeout = d }
 }
 
 // WithDebug 启用 debug 日志。
@@ -137,9 +129,8 @@ func NewCompletionsProviderWithOptions(opts ...Option) *CompletionsProvider {
 	)
 
 	return &CompletionsProvider{
-		httpClient:         httpClient,
-		legacyCompat:       cfg.legacyCompat,
-		streamDrainTimeout: cfg.streamDrainTimeout,
+		httpClient:   httpClient,
+		legacyCompat: cfg.legacyCompat,
 	}
 }
 

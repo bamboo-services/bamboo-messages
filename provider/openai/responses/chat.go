@@ -94,7 +94,11 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 
 		// 使用 SSEScanner 解析 SSE 流
 		scanner := provider.NewSSEScanner(resp.Body)
-		defer scanner.Close()
+		defer func() {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = scanner.Close()
+			_ = resp.Body.Close()
+		}()
 
 		textBlockStarted := false
 		thinkingBlockStarted := false
