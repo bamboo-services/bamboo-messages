@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bamboo-services/bamboo-messages/internal/xerr"
+	"github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -165,8 +165,8 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 
 				select {
 				case <-ctx.Done():
-					cancelErr := xerr.NewError(context.Background(), nil,
-						fmt.Sprintf("bamboo: chat cancelled: %s", ctx.Err()), false)
+					cancelErr := xError.NewError(context.Background(), nil,
+						xError.ErrMessage(fmt.Sprintf("bamboo: chat cancelled: %s", ctx.Err())), false)
 					writeAll(converter.Convert(provider.StreamEvent{
 						Type: provider.StreamTypeError,
 						Err:  cancelErr,

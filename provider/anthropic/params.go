@@ -1,8 +1,10 @@
 package anthropic
 
 import (
-	"log"
+	"context"
+	"fmt"
 
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -35,13 +37,15 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 			systemPrompt = instruction
 		}
 		if provider.DebugEnabled {
-			log.Printf("[provider/anthropic] ResponseFormat=%q 不被原生支持，已注入系统提示指令作为替代", config.ResponseFormat)
+			xLog.WithName("provider/anthropic").SugarWarn(context.Background(),
+			fmt.Sprintf("ResponseFormat=%q 不被原生支持，已注入系统提示指令作为替代", config.ResponseFormat))
 		}
 	}
 
 	// ParallelToolCalls — Anthropic 不支持此参数，仅记录 debug 日志
 	if config.ParallelToolCalls && provider.DebugEnabled {
-		log.Printf("[provider/anthropic] ParallelToolCalls=true 不被 Anthropic 协议支持，已忽略")
+		xLog.WithName("provider/anthropic").SugarWarn(context.Background(),
+			"ParallelToolCalls=true 不被 Anthropic 协议支持，已忽略")
 	}
 
 	params := messageCreateRequest{

@@ -3,7 +3,7 @@ package responses
 import (
 	"context"
 
-	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
+	"github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -313,7 +313,7 @@ func (p *ResponsesProvider) contentResponseFailed(ctx context.Context, event res
 	errMsg := "OpenAI 响应失败"
 	events = append(events, provider.StreamEvent{
 		Type: provider.StreamTypeError,
-		Err:  xError.NewError(ctx, nil, errMsg, false, nil),
+		Err:  xError.NewError(ctx, nil, xError.ErrMessage(errMsg), false, nil),
 	})
 
 	return events

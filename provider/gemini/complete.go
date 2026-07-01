@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
+	"github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -34,7 +34,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	reqBody := p.buildRequestBody(messages, systemPrompt, config, false)
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, "Gemini 非流式对话请求序列化失败", false, err)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage("Gemini 非流式对话请求序列化失败"), false, err)
 	}
 
 	// Gemini 非流式端点：/v1beta/models/{model}:generateContent
@@ -42,14 +42,14 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 
 	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, endpoint, bodyBytes, "gemini", endpoint)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, "Gemini 非流式对话请求失败", false, err)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage("Gemini 非流式对话请求失败"), false, err)
 	}
 	defer resp.Body.Close()
 
 	// 读取响应体
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, "Gemini 非流式对话响应读取失败", false, err)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage("Gemini 非流式对话响应读取失败"), false, err)
 	}
 
 	// HTTP 状态码 >= 400 → 解析错误响应
@@ -60,13 +60,13 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 		if errResp.Error != nil && errResp.Error.Message != "" {
 			errMsg = errResp.Error.Message
 		}
-		return nil, xError.NewError(ctx, nil, errMsg, false, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBytes)))
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage(errMsg), false, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBytes)))
 	}
 
 	// 反序列化响应
 	var geminiResp generateContentResponse
 	if err := json.Unmarshal(respBytes, &geminiResp); err != nil {
-		return nil, xError.NewError(ctx, nil, "Gemini 非流式对话响应解析失败", false, err)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage("Gemini 非流式对话响应解析失败"), false, err)
 	}
 
 	result := &provider.CompletionResult{

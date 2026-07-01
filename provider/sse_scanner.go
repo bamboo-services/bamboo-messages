@@ -3,9 +3,12 @@ package provider
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
-	"log"
+
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 )
 
 // sseScannerBufferCapacity 初始缓冲容量。
@@ -196,7 +199,8 @@ func (s *SSEScanner) dispatch() (eventType string, data json.RawMessage, done bo
 		// JSON 完整性校验
 		if !json.Valid(content) {
 			// GLM Issue #66 容错：截断/粘连帧，跳过并继续
-			log.Printf("[SSEScanner] 跳过无效 JSON 帧（长度 %d）: %s", len(content), truncateForLog(content, 200))
+			xLog.WithName("SSEScanner").SugarWarn(context.Background(),
+				fmt.Sprintf("跳过无效 JSON 帧（长度 %d）: %s", len(content), truncateForLog(content, 200)))
 			return "", nil, false
 		}
 	}

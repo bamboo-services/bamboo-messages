@@ -1,12 +1,13 @@
 package relay
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -50,10 +51,9 @@ func debugRelayInput(enabled bool, fn string, inFormat, outFormat any, body []by
 	if !enabled {
 		return
 	}
-	log.Printf(
-		"[bamboo/debug] relay input | fn=%s in=%v out=%v | raw body: %s",
-		fn, inFormat, outFormat, truncateContent(string(body)),
-	)
+	xLog.WithName("bamboo/debug").SugarInfo(context.Background(),
+		fmt.Sprintf("relay input | fn=%s in=%v out=%v | raw body: %s",
+			fn, inFormat, outFormat, truncateContent(string(body))))
 }
 
 // FormatRelayInput 格式化 relay 输入的 debug 信息并返回字符串。
@@ -92,10 +92,9 @@ func debugRelayParsed(enabled bool, fn string, inFormat any, req any) {
 			reqJSON = truncateContent(string(raw))
 		}
 	}
-	log.Printf(
-		"[bamboo/debug] relay parsed | fn=%s in=%v | RelayRequest: %s",
-		fn, inFormat, reqJSON,
-	)
+	xLog.WithName("bamboo/debug").SugarInfo(context.Background(),
+		fmt.Sprintf("relay parsed | fn=%s in=%v | RelayRequest: %s",
+			fn, inFormat, reqJSON))
 }
 
 // FormatRelayParsed 格式化 relay 解析结果的 debug 信息并返回字符串。

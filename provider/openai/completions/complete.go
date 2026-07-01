@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 
-	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
+	"github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -29,47 +29,49 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 
 	bodyBytes, err := json.Marshal(params)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 请求参数序列化失败: %v", err), false, err)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("OpenAI Completions 请求参数序列化失败: %v", err)), false, err)
 	}
 
 	endpoint := "POST /chat/completions (non-stream, model=" + config.Model + ")"
 	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, "/chat/completions", bodyBytes, string(p.GetProviderType()), endpoint)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 非流式对话请求失败: %v", err), false, err)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("OpenAI Completions 非流式对话请求失败: %v", err)), false, err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 读取响应体失败: %v", err), false, err)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("OpenAI Completions 读取响应体失败: %v", err)), false, err)
 	}
 
 	// HTTP 状态码检查
 	if resp.StatusCode >= 400 {
-		return nil, xError.NewError(ctx, nil, formatUpstreamError(resp.StatusCode, body), false, nil)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage(formatUpstreamError(resp.StatusCode, body)), false, nil)
 	}
 
 	// 解析响应
 	var chatResp chatCompletionResponse
 	if err := json.Unmarshal(body, &chatResp); err != nil {
 		if provider.DebugEnabled {
-			log.Printf("[provider/openai-completions] 响应 JSON 解析失败, raw=%s", truncateBody(body))
+			xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
+				fmt.Sprintf("响应 JSON 解析失败, raw=%s", truncateBody(body)))
 		}
-		return nil, xError.NewError(ctx, nil, fmt.Sprintf(
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf(
 			"OpenAI Completions 响应解析失败: %v, raw=%s", err, truncateBody(body),
-		), false, err)
+		)), false, err)
 	}
 
 	// 检查响应
 	if len(chatResp.Choices) == 0 {
 		if provider.DebugEnabled {
-			log.Printf("[provider/openai-completions] 上游返回空响应, raw=%s", truncateBody(body))
+			xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
+				fmt.Sprintf("上游返回空响应, raw=%s", truncateBody(body)))
 		}
 		diag := fmt.Sprintf(
 			"OpenAI Completions 返回空响应 (choices=0), model=%s, legacyCompat=%v, tools=%d, maxTokens=%d, resp=%s",
 			config.Model, p.legacyCompat, len(config.Tools), config.MaxTokens, truncateBody(body),
 		)
-		return nil, xError.NewError(ctx, nil, diag, false, nil)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage(diag), false, nil)
 	}
 
 	choice := chatResp.Choices[0]

@@ -1,13 +1,14 @@
 package bamboo
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
-	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
+	"github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -114,12 +115,14 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 				}
 			default:
 				// 未知的 ContentBlock 类型，记录详细信息以便排查
-				log.Printf("[bamboo] warning: dropped unsupported content block type %q (implement %T in messagesToProvider to support it)", b.BlockType(), b)
+				xLog.WithName("bamboo").SugarWarn(context.Background(),
+				fmt.Sprintf("warning: dropped unsupported content block type %q (implement %T in messagesToProvider to support it)", b.BlockType(), b))
 			}
 		}
 
 		if ccCount > 1 {
-			log.Printf("[bamboo] warning: message has %d cache_control breakpoints, only the last one is kept", ccCount)
+			xLog.WithName("bamboo").SugarWarn(context.Background(),
+			fmt.Sprintf("warning: message has %d cache_control breakpoints, only the last one is kept", ccCount))
 		}
 
 		content := textBuilder.String()
@@ -157,10 +160,12 @@ func providerRole(role MessageRole) provider.MessageRole {
 	case "system":
 		// system 角色应通过 Chat/Complete 的 system 参数传递，而非消息角色。
 		// 此处记录警告并降级为 user 角色，避免请求被拒绝。
-		log.Printf(`[bamboo] warning: message role "system" should use the system parameter instead, falling back to "user"`)
+		xLog.WithName("bamboo").SugarWarn(context.Background(),
+			`warning: message role "system" should use the system parameter instead, falling back to "user"`)
 		return provider.RoleUser
 	default:
-		log.Printf("[bamboo] warning: unknown message role %q, falling back to \"user\"", role)
+		xLog.WithName("bamboo").SugarWarn(context.Background(),
+			fmt.Sprintf("warning: unknown message role %q, falling back to \"user\"", role))
 		return provider.RoleUser
 	}
 }

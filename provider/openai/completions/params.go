@@ -1,9 +1,11 @@
 package completions
 
 import (
+	"context"
 	"encoding/json"
-	"log"
+	"fmt"
 
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -105,7 +107,8 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 		} else if key, ok := provider.GetExtraString(config.ProviderExtra, "prompt_cache_key"); ok && key != "" {
 			params["prompt_cache_key"] = key
 		} else if config.SystemCacheControl != nil && provider.DebugEnabled {
-			log.Printf("[provider/openai-completions] SystemCacheControl (type=%s) 由 OpenAI 自动缓存处理", config.SystemCacheControl.Type)
+			xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
+				fmt.Sprintf("SystemCacheControl (type=%s) 由 OpenAI 自动缓存处理", config.SystemCacheControl.Type))
 		}
 	}
 

@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
+	"github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -87,7 +87,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 请求参数序列化失败: %v", err), false, err),
+				Err:  xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("OpenAI Completions 请求参数序列化失败: %v", err)), false, err),
 			}:
 			case <-ctx.Done():
 			}
@@ -100,7 +100,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 流式对话请求失败: %v", err), false, err),
+				Err:  xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("OpenAI Completions 流式对话请求失败: %v", err)), false, err),
 			}:
 			case <-ctx.Done():
 			}
@@ -114,7 +114,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, formatUpstreamError(resp.StatusCode, body), false, nil),
+				Err:  xError.NewError(ctx, nil, xError.ErrMessage(formatUpstreamError(resp.StatusCode, body)), false, nil),
 			}:
 			case <-ctx.Done():
 			}
@@ -188,7 +188,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 					select {
 					case eventCh <- provider.StreamEvent{
 						Type: provider.StreamTypeError,
-						Err:  xError.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 流读取错误: %v", scanErr), false, scanErr),
+						Err:  xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("OpenAI Completions 流读取错误: %v", scanErr)), false, scanErr),
 					}:
 					case <-ctx.Done():
 						return
@@ -213,7 +213,8 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			if jsonErr := json.Unmarshal(data, &chunk); jsonErr != nil {
 				// 跳过无法解析的帧（SSEScanner 已做 json.Valid 校验，此处为业务层兜底）
 				if provider.DebugEnabled {
-					log.Printf("[provider/openai-completions] 跳过无法解析的 chunk: %v, raw=%s", jsonErr, truncateBody(data))
+					xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
+					fmt.Sprintf("跳过无法解析的 chunk: %v, raw=%s", jsonErr, truncateBody(data)))
 				}
 				continue
 			}

@@ -1,9 +1,11 @@
 package anthropic
 
 import (
+	"context"
 	"encoding/json"
-	"log"
+	"fmt"
 
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 )
 
@@ -132,7 +134,8 @@ func serializeContentBlock(block bamboo.ContentBlock) (json.RawMessage, error) {
 
 	case *bamboo.ToolResultBlock:
 		// ToolResultBlock 不应出现在 assistant 响应中，记录警告并跳过
-		log.Printf("[codec/anthropic] warning: ToolResultBlock should not appear in assistant response, skipped (tool_use_id=%s)", b.ToolUseID)
+		xLog.WithName("codec/anthropic").SugarWarn(context.Background(),
+			fmt.Sprintf("warning: ToolResultBlock should not appear in assistant response, skipped (tool_use_id=%s)", b.ToolUseID))
 		return nil, nil
 	}
 	return nil, nil

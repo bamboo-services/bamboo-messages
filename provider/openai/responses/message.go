@@ -1,8 +1,10 @@
 package responses
 
 import (
-	"log"
+	"context"
+	"fmt"
 
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -87,9 +89,11 @@ func (p *ResponsesProvider) buildUserItem(msg provider.Message) map[string]any {
 			// 文档内容块：Responses API 不支持文档输入，记录警告后忽略
 			if doc, ok := cb.(provider.DocumentContentBlock); ok {
 				if doc.Source.Type == "url" || doc.Source.Type == "base64" {
-					log.Printf("[provider/openai-responses] DocumentBlock(source=%q) 不支持，已忽略", doc.Source.Type)
-				} else {
-					log.Printf("[provider/openai-responses] DocumentBlock 未知来源类型=%q，已忽略", doc.Source.Type)
+				xLog.WithName("provider/openai-responses").SugarWarn(context.Background(),
+					fmt.Sprintf("DocumentBlock(source=%q) 不支持，已忽略", doc.Source.Type))
+			} else {
+				xLog.WithName("provider/openai-responses").SugarWarn(context.Background(),
+					fmt.Sprintf("DocumentBlock 未知来源类型=%q，已忽略", doc.Source.Type))
 				}
 			}
 		}

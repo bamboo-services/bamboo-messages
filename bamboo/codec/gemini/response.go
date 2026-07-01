@@ -1,9 +1,11 @@
 package gemini
 
 import (
+	"context"
 	"encoding/json"
-	"log"
+	"fmt"
 
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 )
 
@@ -142,7 +144,8 @@ func buildResponseParts(blocks []bamboo.ContentBlock) []geminiPartOut {
 			}
 		case *bamboo.ToolResultBlock:
 			// ToolResultBlock 不应出现在 assistant 响应中，记录警告并跳过
-			log.Printf("[codec/gemini] warning: ToolResultBlock should not appear in assistant response, skipped (tool_use_id=%s)", b.ToolUseID)
+			xLog.WithName("codec/gemini").SugarWarn(context.Background(),
+				fmt.Sprintf("warning: ToolResultBlock should not appear in assistant response, skipped (tool_use_id=%s)", b.ToolUseID))
 		}
 	}
 	return parts
@@ -171,7 +174,8 @@ func buildInlineDataPart(source *bamboo.ContentSource) *geminiPartOut {
 			},
 		}
 	default:
-		log.Printf("[codec/gemini] warning: unsupported ContentSource type %q for inline_data mapping, skipped", source.Type)
+		xLog.WithName("codec/gemini").SugarWarn(context.Background(),
+			fmt.Sprintf("warning: unsupported ContentSource type %q for inline_data mapping, skipped", source.Type))
 		return nil
 	}
 }

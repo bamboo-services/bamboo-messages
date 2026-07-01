@@ -1,11 +1,12 @@
 package openai
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 )
 
@@ -223,7 +224,8 @@ func (s *openaiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 
 	case bamboo.DeltaSignature:
 		// OpenAI Chat Completions 无 signature 字段，跨协议转换时记录 warning 后跳过
-		log.Printf("[codec/openai] warning: signature_delta has no equivalent in OpenAI Chat Completions protocol, dropped")
+		xLog.WithName("codec/openai").SugarWarn(context.Background(),
+			"warning: signature_delta has no equivalent in OpenAI Chat Completions protocol, dropped")
 		return nil, nil
 	}
 

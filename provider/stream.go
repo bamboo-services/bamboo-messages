@@ -1,6 +1,6 @@
 package provider
 
-import xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
+import "github.com/bamboo-services/bamboo-base-go/common/error"
 
 // StreamEvent 表示流处理管道中产生的单个离散事件或信号。
 // 它封装了事件的基本分类信息、负载内容以及处理过程中可能产生的错误状态。

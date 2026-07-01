@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
+	"github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -29,34 +29,34 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 
 	body, err := json.Marshal(params)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, "Anthropic 请求参数序列化失败", false, err)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage("Anthropic 请求参数序列化失败"), false, err)
 	}
 
 	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, "/v1/messages", body, "anthropic", "POST /v1/messages (non-stream, model="+config.Model+")")
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, "Anthropic 非流式对话请求失败", false, err)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage("Anthropic 非流式对话请求失败"), false, err)
 	}
 	defer resp.Body.Close()
 
 	// 读取响应体
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, "Anthropic 非流式响应读取失败", false, err)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage("Anthropic 非流式响应读取失败"), false, err)
 	}
 
 	// 检查 HTTP 状态码，解析错误响应
 	if resp.StatusCode >= 400 {
 		var errResp anthropicErrorResponse
 		if jsonErr := json.Unmarshal(respBody, &errResp); jsonErr == nil && errResp.Error != nil {
-			return nil, xError.NewError(ctx, nil, fmt.Sprintf("Anthropic API 错误 [%d]: %s", resp.StatusCode, errResp.Error.Message), false)
+			return nil, xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("Anthropic API 错误 [%d]: %s", resp.StatusCode, errResp.Error.Message)), false)
 		}
-		return nil, xError.NewError(ctx, nil, fmt.Sprintf("Anthropic API 返回错误状态码 %d", resp.StatusCode), false)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("Anthropic API 返回错误状态码 %d", resp.StatusCode)), false)
 	}
 
 	// 解析响应
 	var msgResp messageResponse
 	if err := json.Unmarshal(respBody, &msgResp); err != nil {
-		return nil, xError.NewError(ctx, nil, "Anthropic 非流式响应解析失败", false, err)
+		return nil, xError.NewError(ctx, nil, xError.ErrMessage("Anthropic 非流式响应解析失败"), false, err)
 	}
 
 	// 构建 CompletionResult

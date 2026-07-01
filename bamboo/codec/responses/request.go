@@ -1,10 +1,12 @@
 package responses
 
 import (
+	"context"
 	"encoding/json"
-	"log"
+	"fmt"
 	"strings"
 
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
 )
@@ -258,7 +260,8 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 				))
 			}
 		default:
-			log.Printf("[codec/responses] unknown input item type %q, skipped", item.Type)
+			xLog.WithName("codec/responses").SugarWarn(context.Background(),
+				fmt.Sprintf("unknown input item type %q, skipped", item.Type))
 		}
 	}
 

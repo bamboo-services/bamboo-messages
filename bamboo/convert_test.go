@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
+	"github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -741,7 +741,7 @@ func TestConvertStreamError(t *testing.T) {
 
 func TestConvertStreamErrorWithMessage(t *testing.T) {
 	sc := NewStreamConverter()
-	testErr := xError.NewError(nil, nil, "connection reset", false)
+	testErr := xError.NewError(nil, nil, xError.ErrMessage("connection reset"), false)
 	events := sc.Convert(provider.StreamEvent{
 		Type: provider.StreamTypeError,
 		Err:  testErr,

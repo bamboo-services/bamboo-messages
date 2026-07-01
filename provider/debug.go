@@ -1,11 +1,13 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strings"
+
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 )
 
 // DebugEnabled debug 日志全局开关。
@@ -52,10 +54,9 @@ func DebugRequest(providerType, endpoint string, headers map[string]string, para
 		return
 	}
 
-	log.Printf(
-		"[bamboo/debug] provider=%s endpoint=%s | headers: {%s} | body: %s",
-		providerType, endpoint, formatHeaders(headers), formatParams(params),
-	)
+	xLog.WithName("bamboo/debug").SugarInfo(context.Background(),
+		fmt.Sprintf("provider=%s endpoint=%s | headers: {%s} | body: %s",
+			providerType, endpoint, formatHeaders(headers), formatParams(params)))
 }
 
 // FormatDebugRequest 格式化请求的 debug 信息并返回字符串。

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	xError "github.com/bamboo-services/bamboo-messages/internal/xerr"
+	"github.com/bamboo-services/bamboo-base-go/common/error"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -44,7 +44,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, "OpenAI Responses 请求参数序列化失败", false, err),
+				Err:  xError.NewError(ctx, nil, xError.ErrMessage("OpenAI Responses 请求参数序列化失败"), false, err),
 			}:
 			case <-ctx.Done():
 			}
@@ -57,7 +57,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, "OpenAI Responses 流式对话请求失败", false, err),
+				Err:  xError.NewError(ctx, nil, xError.ErrMessage("OpenAI Responses 流式对话请求失败"), false, err),
 			}:
 			case <-ctx.Done():
 			}
@@ -79,7 +79,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, errMsg, false, fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody))),
+				Err:  xError.NewError(ctx, nil, xError.ErrMessage(errMsg), false, fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody))),
 			}:
 			case <-ctx.Done():
 				return
@@ -114,7 +114,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 				select {
 				case eventCh <- provider.StreamEvent{
 					Type: provider.StreamTypeError,
-					Err:  xError.NewError(ctx, nil, "OpenAI Responses SSE 流读取失败", false, scanErr),
+					Err:  xError.NewError(ctx, nil, xError.ErrMessage("OpenAI Responses SSE 流读取失败"), false, scanErr),
 				}:
 				case <-ctx.Done():
 					return

@@ -1,11 +1,12 @@
 package gemini
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 )
 
@@ -195,7 +196,8 @@ func (s *geminiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 		return nil, nil
 
 	case bamboo.DeltaSignature:
-		log.Printf("[codec/gemini] warning: signature_delta has no equivalent in Gemini protocol, dropped")
+		xLog.WithName("codec/gemini").SugarWarn(context.Background(),
+			"warning: signature_delta has no equivalent in Gemini protocol, dropped")
 		return nil, nil
 	}
 

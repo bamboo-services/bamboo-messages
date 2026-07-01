@@ -1,8 +1,10 @@
 package completions
 
 import (
-	"log"
+	"context"
+	"fmt"
 
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -63,9 +65,11 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 						// 文档内容块：OpenAI Completions 不支持，记录警告后忽略
 						if doc, ok := cb.(provider.DocumentContentBlock); ok {
 							if doc.Source.Type == "url" || doc.Source.Type == "base64" {
-								log.Printf("[provider/openai-completions] DocumentBlock(source=%q) 不支持，已忽略", doc.Source.Type)
-							} else {
-								log.Printf("[provider/openai-completions] DocumentBlock 未知来源类型=%q，已忽略", doc.Source.Type)
+							xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
+								fmt.Sprintf("DocumentBlock(source=%q) 不支持，已忽略", doc.Source.Type))
+						} else {
+							xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
+								fmt.Sprintf("DocumentBlock 未知来源类型=%q，已忽略", doc.Source.Type))
 							}
 						}
 					}
@@ -90,7 +94,8 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 			})
 		case provider.RoleSystem:
 			// system 角色降级为 user（OpenAI 要求 system 仅在 messages 数组顶部出现一次）
-			log.Printf("[provider/openai-completions] 检测到 system 角色消息，降级为 user 角色")
+			xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
+				"检测到 system 角色消息，降级为 user 角色")
 			result = append(result, map[string]any{
 				"role":    "user",
 				"content": msg.Content,

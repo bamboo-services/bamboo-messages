@@ -1,9 +1,11 @@
 package gemini
 
 import (
-	"log"
+	"context"
+	"fmt"
 	"math"
 
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -115,7 +117,8 @@ func (p *Provider) buildContentConfig(config *provider.ChatConfig) map[string]an
 	if config.UserID != "" {
 		labels["user_id"] = config.UserID
 		if provider.DebugEnabled {
-			log.Printf("[provider/gemini] UserID=%q 已映射到 Labels[user_id]（Gemini 无原生 UserID 支持）", config.UserID)
+			xLog.WithName("provider/gemini").SugarWarn(context.Background(),
+				fmt.Sprintf("UserID=%q 已映射到 Labels[user_id]（Gemini 无原生 UserID 支持）", config.UserID))
 		}
 	}
 	for k, v := range config.Metadata {
@@ -127,7 +130,8 @@ func (p *Provider) buildContentConfig(config *provider.ChatConfig) map[string]an
 
 	// ParallelToolCalls — Gemini 不支持此参数，仅记录 debug 日志
 	if config.ParallelToolCalls && provider.DebugEnabled {
-		log.Printf("[provider/gemini] ParallelToolCalls=true 不被 Gemini 协议支持，已忽略")
+		xLog.WithName("provider/gemini").SugarWarn(context.Background(),
+			"ParallelToolCalls=true 不被 Gemini 协议支持，已忽略")
 	}
 
 	// CachedContent — Gemini 外部缓存资源引用（从 ProviderExtra 提取）
