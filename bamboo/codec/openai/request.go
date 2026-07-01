@@ -34,10 +34,12 @@ type openaiRequest struct {
 }
 
 type openaiMessage struct {
-	Role       string           `json:"role"`
-	Content    json.RawMessage  `json:"content,omitempty"`
-	ToolCalls  []openaiToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Role             string           `json:"role"`
+	Content          json.RawMessage  `json:"content,omitempty"`
+	ReasoningContent json.RawMessage  `json:"reasoning_content,omitempty"`
+	Reasoning        json.RawMessage  `json:"reasoning,omitempty"`
+	ToolCalls        []openaiToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string           `json:"tool_call_id,omitempty"`
 }
 
 type openaiToolCall struct {
@@ -285,12 +287,14 @@ func parseDataURIMediaType(header string) string {
 func parseAssistantMessage(msg openaiMessage) bamboo.BambooMessage {
 	var blocks []bamboo.ContentBlock
 
-	// content → TextBlock
+	if reasoning := extractReasoningContent(msg.ReasoningContent, msg.Reasoning); reasoning != "" {
+		blocks = append(blocks, bamboo.NewThinkingBlock(reasoning, ""))
+	}
+
 	if text := extractPlainText(msg.Content); text != "" {
 		blocks = append(blocks, bamboo.NewTextBlock(text))
 	}
 
-	// tool_calls → ToolUseBlock
 	for _, tc := range msg.ToolCalls {
 		var input json.RawMessage
 		if tc.Function.Arguments != "" {
@@ -310,6 +314,33 @@ func parseAssistantMessage(msg openaiMessage) bamboo.BambooMessage {
 		return bamboo.BambooMessage{Role: bamboo.RoleAssistant}
 	}
 	return bamboo.NewAssistantMessageBlocks(blocks...)
+}
+
+func extractReasoningContent(sources ...json.RawMessage) string {
+	for _, raw := range sources {
+		if len(raw) == 0 {
+			continue
+		}
+		s := strings.TrimSpace(string(raw))
+		if s == "" || s == "null" {
+			continue
+		}
+		var str string
+		if err := json.Unmarshal(raw, &str); err == nil {
+			return str
+		}
+		var obj map[string]any
+		if err := json.Unmarshal(raw, &obj); err == nil {
+			if text, ok := obj["text"].(string); ok && text != "" {
+				return text
+			}
+			if content, ok := obj["content"].(string); ok && content != "" {
+				return content
+			}
+		}
+		return s
+	}
+	return ""
 }
 
 // parseToolMessage 解析 tool 角色消息 → user + ToolResultBlock。

@@ -121,7 +121,10 @@ func (p *CompletionsProvider) buildAssistantMessage(msg provider.Message) map[st
 		m["content"] = msg.Content
 	}
 
-	// 仅在存在实际工具调用时填充 tool_calls，避免序列化出空数组
+	if msg.ThinkingContent != "" {
+		m["reasoning_content"] = msg.ThinkingContent
+	}
+
 	if len(msg.ToolCalls) > 0 {
 		toolCalls := make([]map[string]any, 0, len(msg.ToolCalls))
 		for _, tc := range msg.ToolCalls {
