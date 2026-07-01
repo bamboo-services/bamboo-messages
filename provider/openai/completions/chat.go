@@ -128,7 +128,10 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			_ = resp.Body.Close()
 		}()
 
-		// 流式 drain 超时控制
+		// 流式 drain 超时控制 — 仅在收到 finish_reason 后启动，
+		// 用于限时排空尾部残余帧（如 usage chunk）。
+		// 绝不能在流开始时启动，否则会变成全局超时，
+		// 导致 thinking 阶段较长（如 GLM-5.2）的模型被误断流。
 		drainTimeout := p.streamDrainTimeout
 		if drainTimeout <= 0 {
 			drainTimeout = defaultStreamDrainTimeout
@@ -136,17 +139,15 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 
 		var drainMu sync.Mutex
 		drainTimedOut := false
-		drainStarted := false
+		var drainTimer *time.Timer
 
 		startDrainTimer := func() {
 			drainMu.Lock()
-			already := drainStarted
-			drainStarted = true
-			drainMu.Unlock()
-			if already {
-				return
+			defer drainMu.Unlock()
+			if drainTimer != nil {
+				return // 已启动，不重复
 			}
-			time.AfterFunc(drainTimeout, func() {
+			drainTimer = time.AfterFunc(drainTimeout, func() {
 				drainMu.Lock()
 				drainTimedOut = true
 				drainMu.Unlock()
@@ -200,7 +201,6 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			// 发送 Start 事件（首个有效帧时）
 			if !startSent {
 				startSent = true
-				startDrainTimer()
 				select {
 				case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
 				case <-ctx.Done():
