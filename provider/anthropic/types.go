@@ -70,9 +70,14 @@ type contentBlockDelta struct {
 }
 
 // messageDeltaData 表示 message_delta 事件中 stop 相关的增量数据。
+//
+// Anthropic message_delta 事件的 delta 对象携带 stop_reason 和最终 usage（output_tokens）。
+// usage 字段在非流式 message_start 事件中已返回 input_tokens，
+// message_delta 中补充 output_tokens 和可能的 cache 字段。
 type messageDeltaData struct {
-	StopReason   *string `json:"stop_reason,omitempty"`   // 停止原因
-	StopSequence *string `json:"stop_sequence,omitempty"` // 触发停止的序列
+	StopReason   *string         `json:"stop_reason,omitempty"`   // 停止原因
+	StopSequence *string         `json:"stop_sequence,omitempty"` // 触发停止的序列
+	Usage        *anthropicUsage `json:"usage,omitempty"`         // 最终 Token 用量（output_tokens 等）
 }
 
 // messageResponse 表示 Anthropic 非流式响应的完整消息结构。

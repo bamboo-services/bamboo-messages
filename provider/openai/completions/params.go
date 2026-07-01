@@ -199,10 +199,11 @@ func normalizeLegacyThinking(thinking any) any {
 
 // buildStreamOptions 构建流式请求的 StreamOptions。
 //
-// 智谱 GLM 等第三方 OpenAI 兼容端点不支持 stream_options 参数，
-// 发送该参数会导致 400 code:1210 参数错误，因此 Legacy 模式下返回 nil（序列化时省略）。
+// 默认模式始终发送 include_usage=true。
+// Legacy 模式下默认省略（部分第三方端点不支持 stream_options 参数），
+// 但当 includeUsage 标志为 true 时强制发送（用于 GLM/Kimi Coding 等支持 stream_options 的端点）。
 func (p *CompletionsProvider) buildStreamOptions() map[string]any {
-	if p.legacyCompat {
+	if p.legacyCompat && !p.includeUsage {
 		return nil
 	}
 	return map[string]any{

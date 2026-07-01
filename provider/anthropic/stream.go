@@ -43,11 +43,18 @@ func (p *Provider) handleStreamEvent(event messageStreamEvent, finishReason *pro
 
 // contentMessageStart 处理消息开始事件。
 //
-// Anthropic message_start 事件，无需特殊处理，
-// StreamTypeStart 已在 ChatWithSystem 中发送。
-func (p *Provider) contentMessageStart(_ messageStreamEvent) []provider.StreamEvent {
-	// 消息开始，无需特殊处理，已在 ChatWithSystem 中发送 StreamTypeStart
-	return nil
+// Anthropic message_start 事件携带 message.usage.input_tokens（此时 output_tokens=0），
+// 发送 NewUsageDelta 将 input_tokens 传递给上层。
+func (p *Provider) contentMessageStart(event messageStreamEvent) []provider.StreamEvent {
+	// message_start 事件已在 ChatWithSystem 中发送 StreamTypeStart，此处仅提取 usage
+	if event.Message != nil && event.Message.Usage != nil {
+		return []provider.StreamEvent{{
+			Type:  provider.StreamTypeDelta,
+			Delta: provider.NewUsageDelta(int64(event.Message.Usage.InputTokens), 0),
+		}}
+	}
+	return nil	// 消息开始，无需特殊处理，已在 ChatWithSystem 中发送 StreamTypeStart
+
 }
 
 // contentBlockStart 处理内容块开始事件。
@@ -144,8 +151,8 @@ func (p *Provider) contentBlockStop(event messageStreamEvent) []provider.StreamE
 
 // contentMessageDelta 处理消息增量事件（包含 usage 和 stop_reason）。
 //
-// Anthropic message_delta 事件携带 Token 用量统计和停止原因，
-// 发送 NewUsageDelta 并提取 stop_reason 供后续 contentMessageStop 使用。
+// Anthropic message_delta 事件携带最终的 Token 用量统计（output_tokens 及 cache 字段）
+// 和停止原因。发送 NewUsageDeltaWithCache 并提取 stop_reason 供后续 contentMessageStop 使用。
 func (p *Provider) contentMessageDelta(event messageStreamEvent, finishReason *provider.FinishReason) []provider.StreamEvent {
 	if len(event.Delta) == 0 {
 		return nil
@@ -160,8 +167,18 @@ func (p *Provider) contentMessageDelta(event messageStreamEvent, finishReason *p
 		*finishReason = mapFinishReason(*msgDelta.StopReason)
 	}
 
-	// message_delta 事件通常不携带 usage（usage 在 message_start 中），
-	// 但保留兼容处理：若 delta 中有 usage 字段则提取
+	// 提取 message_delta 中的最终 usage（output_tokens 及 cache 字段）
+	if msgDelta.Usage != nil {
+		return []provider.StreamEvent{{
+			Type: provider.StreamTypeDelta,
+			Delta: provider.NewUsageDeltaWithCache(
+				int64(msgDelta.Usage.InputTokens),
+				int64(msgDelta.Usage.OutputTokens),
+				int64(msgDelta.Usage.CacheCreationInputTokens),
+				int64(msgDelta.Usage.CacheReadInputTokens),
+			),
+		}}
+	}
 	return nil
 }
 

@@ -12,6 +12,7 @@ import (
 type CompletionsProvider struct {
 	httpClient   *provider.HTTPClient
 	legacyCompat bool
+	includeUsage bool // legacyCompat 模式下是否强制发送 stream_options.include_usage
 }
 
 // ============================================
@@ -31,6 +32,7 @@ type config struct {
 	baseURL      string
 	headers      map[string]string
 	legacyCompat bool
+	includeUsage bool
 	debug        bool
 	interceptors []provider.RequestInterceptor
 }
@@ -70,6 +72,17 @@ func WithHeader(key, value string) Option {
 // 用于兼容早期 API 响应格式或特定第三方端点的非标准行为。
 func WithLegacyCompat() Option {
 	return func(c *config) { c.legacyCompat = true }
+}
+
+// WithIncludeUsage 在 legacyCompat 模式下强制发送 stream_options.include_usage=true。
+//
+// 部分 Legacy 端点（如 GLM Coding Plan、Kimi Coding）在不发送 stream_options 时
+// 不在最终 chunk 返回 usage，导致计费数据缺失。
+// 开启此选项后，即使 legacyCompat=true 也会发送 stream_options 参数。
+//
+// 非 legacyCompat 模式下此选项无效果（默认已发送 stream_options）。
+func WithIncludeUsage(include bool) Option {
+	return func(c *config) { c.includeUsage = include }
 }
 
 // WithDebug 启用 debug 日志。
@@ -131,6 +144,7 @@ func NewCompletionsProviderWithOptions(opts ...Option) *CompletionsProvider {
 	return &CompletionsProvider{
 		httpClient:   httpClient,
 		legacyCompat: cfg.legacyCompat,
+		includeUsage: cfg.includeUsage,
 	}
 }
 
