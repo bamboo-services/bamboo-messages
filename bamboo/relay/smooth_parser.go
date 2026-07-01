@@ -222,11 +222,11 @@ func isPunctuation(r rune) bool {
 type frameKind int
 
 const (
-	frameControl frameKind = iota // 控制事件（block_start/message_start）— 直接透传
-	frameText                     // 文本 delta
-	frameThinking                 // 思考 delta
-	frameTool                     // 工具调用 delta — 仅分类标记，不切分
-	frameBarrier                  // 屏障事件（block_stop/message_stop/error）— 需排空前面积压
+	frameControl  frameKind = iota // 控制事件（block_start/message_start）— 直接透传
+	frameText                      // 文本 delta
+	frameThinking                  // 思考 delta
+	frameTool                      // 工具调用 delta — 仅分类标记，不切分
+	frameBarrier                   // 屏障事件（block_stop/message_stop/error）— 需排空前面积压
 )
 
 // microFrame 微帧 — 切分后的最小输出单元。
@@ -278,7 +278,7 @@ type deltaBuildContext struct {
 	responsesContentIndex int
 
 	// Gemini
-	geminiRole      string
+	geminiRole       string
 	geminiIsThinking bool
 }
 
@@ -493,8 +493,8 @@ func (p *FrameParser) splitAnthropicDelta(
 //	data: {"type":"content_block_delta","index":N,"delta":{"type":"text_delta","text":"TOKEN"}}
 func buildAnthropicDeltaFrame(index int, deltaType, deltaField, text string) []byte {
 	deltaObj := map[string]any{
-		"type":       deltaType,
-		deltaField:   text,
+		"type":     deltaType,
+		deltaField: text,
 	}
 	payload := map[string]any{
 		"type":  "content_block_delta",
@@ -518,16 +518,16 @@ type openaiSSEChunk struct {
 }
 
 type openaiSSEChoice struct {
-	Index        int                `json:"index"`
-	Delta        openaiSSEDeltaMsg  `json:"delta"`
-	FinishReason *string            `json:"finish_reason"`
+	Index        int               `json:"index"`
+	Delta        openaiSSEDeltaMsg `json:"delta"`
+	FinishReason *string           `json:"finish_reason"`
 }
 
 type openaiSSEDeltaMsg struct {
-	Role             string                 `json:"role,omitempty"`
-	Content          string                 `json:"content,omitempty"`
-	ReasoningContent string                 `json:"reasoning_content,omitempty"`
-	ToolCalls        []openaiSSEToolCall    `json:"tool_calls,omitempty"`
+	Role             string              `json:"role,omitempty"`
+	Content          string              `json:"content,omitempty"`
+	ReasoningContent string              `json:"reasoning_content,omitempty"`
+	ToolCalls        []openaiSSEToolCall `json:"tool_calls,omitempty"`
 }
 
 type openaiSSEToolCall struct {
@@ -798,14 +798,14 @@ type geminiSSECandidate struct {
 }
 
 type geminiSSEContent struct {
-	Role  string            `json:"role,omitempty"`
-	Parts []geminiSSEPart   `json:"parts,omitempty"`
+	Role  string          `json:"role,omitempty"`
+	Parts []geminiSSEPart `json:"parts,omitempty"`
 }
 
 type geminiSSEPart struct {
-	Text          string          `json:"text,omitempty"`
-	Thought       bool            `json:"thought,omitempty"`
-	FunctionCall  *geminiFuncCall `json:"functionCall,omitempty"`
+	Text         string          `json:"text,omitempty"`
+	Thought      bool            `json:"thought,omitempty"`
+	FunctionCall *geminiFuncCall `json:"functionCall,omitempty"`
 }
 
 type geminiFuncCall struct {

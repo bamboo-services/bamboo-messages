@@ -298,8 +298,8 @@ func TestChat_NormalStreamTermination(t *testing.T) {
 			hasDelta = true
 			// 验证 StopReason 被正确传递
 			if md, ok := e.Delta.(*MessageDelta); ok {
-			if md.StopReason != FinishReasonEndTurn {
-				t.Errorf("StopReason = %q, 期望 %q", md.StopReason, FinishReasonEndTurn)
+				if md.StopReason != FinishReasonEndTurn {
+					t.Errorf("StopReason = %q, 期望 %q", md.StopReason, FinishReasonEndTurn)
 				}
 			}
 			break

@@ -12,11 +12,11 @@ import (
 
 // openaiChunk OpenAI 流式 chunk JSON 结构。
 type openaiChunk struct {
-	ID      string           `json:"id"`
-	Object  string           `json:"object"`
-	Created int64            `json:"created"`
-	Model   string           `json:"model"`
-	Choices []openaiDelta    `json:"choices"`
+	ID      string             `json:"id"`
+	Object  string             `json:"object"`
+	Created int64              `json:"created"`
+	Model   string             `json:"model"`
+	Choices []openaiDelta      `json:"choices"`
 	Usage   *openaiStreamUsage `json:"usage,omitempty"`
 }
 
@@ -34,8 +34,8 @@ type openaiDelta struct {
 }
 
 type openaiDeltaMsg struct {
-	Role    string          `json:"role,omitempty"`
-	Content string          `json:"content,omitempty"`
+	Role    string `json:"role,omitempty"`
+	Content string `json:"content,omitempty"`
 	// ReasoningContent 思考/推理内容增量。
 	// 注意：此字段为 DeepSeek/vLLM 兼容性扩展，非官方 OpenAI Chat Completions 规范字段。
 	ReasoningContent string          `json:"reasoning_content,omitempty"`

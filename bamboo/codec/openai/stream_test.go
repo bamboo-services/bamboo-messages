@@ -444,9 +444,13 @@ func TestModelFieldInChunks(t *testing.T) {
 // finish_reason 与 usage 被拆分为两个独立的 SSE data 行。
 //
 // 背景：真实 OpenAI API 的 finish_reason chunk 是
-//   {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+//
+//	{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+//
 // usage chunk 是
-//   {"choices":[],"usage":{...}}
+//
+//	{"choices":[],"usage":{...}}
+//
 // 两者独立发送，不应合并到同一个 chunk。合并会导致部分客户端（如 Vercel AI SDK）
 // 解析 usage 时丢失 finish_reason，或反之。
 func TestFinishReasonUsageSeparated(t *testing.T) {

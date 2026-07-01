@@ -135,9 +135,9 @@ type BlockStopData struct {
 //
 // 上层可通过此 Delta 提取 ResponseID 和 ReasoningID 用于后续请求的上下文关联。
 type MetadataData struct {
-	ResponseID        string `json:"response_id,omitempty"`         // 响应 ID（OpenAI Responses response.id）
-	ReasoningID       string `json:"reasoning_id,omitempty"`        // reasoning item ID（如 "rs_xxx"）
-	EncryptedContent  string `json:"encrypted_content,omitempty"`   // reasoning 加密内容（不透明 token）
+	ResponseID       string `json:"response_id,omitempty"`       // 响应 ID（OpenAI Responses response.id）
+	ReasoningID      string `json:"reasoning_id,omitempty"`      // reasoning item ID（如 "rs_xxx"）
+	EncryptedContent string `json:"encrypted_content,omitempty"` // reasoning 加密内容（不透明 token）
 }
 
 // ============================================

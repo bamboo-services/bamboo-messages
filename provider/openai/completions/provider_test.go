@@ -441,10 +441,10 @@ func TestNewCompletionsProviderWithOptions_EmptyOptions(t *testing.T) {
 // TestBuildResponseFormat_MapInput 验证 map[string]any 输入的 ResponseFormat 转换。
 func TestBuildResponseFormat_MapInput(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     any
-		wantNil   bool
-		wantType  string
+		name     string
+		input    any
+		wantNil  bool
+		wantType string
 	}{
 		{
 			name:     "json_object map",

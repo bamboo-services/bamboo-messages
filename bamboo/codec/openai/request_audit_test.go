@@ -15,7 +15,9 @@ import (
 //
 // Severity: P2
 // Issue: parseToolChoice maps {type:"function", function:{name:"xxx"}} to "forced",
-//        losing the specific function name.
+//
+//	losing the specific function name.
+//
 // Affected: OpenAI→Any conversion with specific function tool_choice.
 func TestAudit_OpenAI_ToolChoiceFunctionLoss(t *testing.T) {
 	choice, err := parseToolChoice(json.RawMessage(`{"type":"function","function":{"name":"get_weather"}}`))

@@ -7,8 +7,8 @@ import (
 	"io"
 	"net/http"
 
-	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-base-go/common/error"
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 

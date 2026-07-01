@@ -11,9 +11,11 @@ import (
 // Severity: P1
 // File:Line: provider/openai/responses/params.go:101
 // Issue: Responses adapter buildParams 从 config.Metadata 读取 metadata，
-//        但 codec/responses 将 metadata 存储在 ProviderExtra["metadata"] 中。
-//        当通过 codec→relay→provider 路径时，config.Metadata 为空，
-//        metadata 被静默丢弃。
+//
+//	但 codec/responses 将 metadata 存储在 ProviderExtra["metadata"] 中。
+//	当通过 codec→relay→provider 路径时，config.Metadata 为空，
+//	metadata 被静默丢弃。
+//
 // Affected: Any codec→relay→Responses provider with metadata
 func TestAudit_Metadata_ProviderExtraVsConfigField(t *testing.T) {
 	p := NewResponsesProvider("test-key")

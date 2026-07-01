@@ -53,7 +53,9 @@ func TestAudit_Anthropic_DocumentBlockNotParsed(t *testing.T) {
 //
 // Severity: P2
 // Issue: parseToolChoice maps {type:"tool"} to "forced" but discards the name field.
-//        The Anthropic adapter maps "forced" → OfAny (force any tool), not OfTool (force specific tool).
+//
+//	The Anthropic adapter maps "forced" → OfAny (force any tool), not OfTool (force specific tool).
+//
 // Affected: Anthropic→Anthropic (and any Anthropic→Other) with specific tool forcing.
 func TestAudit_Anthropic_ToolChoiceForced_NameLoss(t *testing.T) {
 	body := []byte(`{

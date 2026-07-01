@@ -335,14 +335,14 @@ func TestBuildParams_StreamFlag(t *testing.T) {
 func TestBuildParams_Marshalable(t *testing.T) {
 	p := NewProvider("test-api-key")
 	config := &provider.ChatConfig{
-		Model:         "claude-sonnet-4-20250514",
-		MaxTokens:     1024,
-		Temperature:   float64Ptr(0.7),
-		TopP:          float64Ptr(0.95),
-		Stop:          []string{"END"},
+		Model:          "claude-sonnet-4-20250514",
+		MaxTokens:      1024,
+		Temperature:    float64Ptr(0.7),
+		TopP:           float64Ptr(0.95),
+		Stop:           []string{"END"},
 		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
-		ToolChoice:    "auto",
-		UserID:        "user-1",
+		ToolChoice:     "auto",
+		UserID:         "user-1",
 	}
 	messages := []provider.Message{
 		{Role: provider.RoleUser, Content: "Hello"},

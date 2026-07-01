@@ -38,7 +38,7 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 		}
 		if provider.DebugEnabled {
 			xLog.WithName("provider/anthropic").SugarWarn(context.Background(),
-			fmt.Sprintf("ResponseFormat=%q 不被原生支持，已注入系统提示指令作为替代", config.ResponseFormat))
+				fmt.Sprintf("ResponseFormat=%q 不被原生支持，已注入系统提示指令作为替代", config.ResponseFormat))
 		}
 	}
 

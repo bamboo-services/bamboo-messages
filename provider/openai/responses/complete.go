@@ -175,14 +175,14 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 					result.Thinking += sum.Text
 				}
 			}
-		// summary 为空时回退到 content 数组
-		if result.Thinking == "" {
-			for _, content := range item.Content {
-				if content.Text != "" {
-					result.Thinking += content.Text
+			// summary 为空时回退到 content 数组
+			if result.Thinking == "" {
+				for _, content := range item.Content {
+					if content.Text != "" {
+						result.Thinking += content.Text
+					}
 				}
 			}
-		}
 			// encrypted_content 是 OpenAI 服务端加密的不透明 token，
 			// Responses → Responses 直连时原样传回可保持推理上下文连续性。
 			if item.EncryptedContent != "" {

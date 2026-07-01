@@ -35,11 +35,11 @@ type geminiContentOut struct {
 
 // geminiPartOut 输出方向的 Part（支持 text / functionCall / thought / inlineData / fileData）。
 type geminiPartOut struct {
-	Text         string              `json:"text,omitempty"`
-	Thought      bool                `json:"thought,omitempty"`
-	FunctionCall *geminiFuncCallOut  `json:"functionCall,omitempty"`
-	InlineData   *geminiInlineData   `json:"inlineData,omitempty"`
-	FileData     *geminiFileData     `json:"fileData,omitempty"`
+	Text         string             `json:"text,omitempty"`
+	Thought      bool               `json:"thought,omitempty"`
+	FunctionCall *geminiFuncCallOut `json:"functionCall,omitempty"`
+	InlineData   *geminiInlineData  `json:"inlineData,omitempty"`
+	FileData     *geminiFileData    `json:"fileData,omitempty"`
 }
 
 // geminiFuncCallOut 输出方向的 functionCall。

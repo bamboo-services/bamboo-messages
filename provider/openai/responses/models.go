@@ -5,14 +5,14 @@ package responses
 // 去 SDK 化后不再依赖 openai-go SDK 的模型常量，
 // 此处直接使用字符串字面量，与 OpenAI 官方模型 ID 保持一致。
 const (
-	ModelGPT4o       = "gpt-4o"
-	ModelGPT4oMini   = "gpt-4o-mini"
-	ModelGPT4_1      = "gpt-4.1"
-	ModelGPT4_1Mini  = "gpt-4.1-mini"
-	ModelGPT4_1Nano  = "gpt-4.1-nano"
-	ModelO3          = "o3"
-	ModelO3Mini      = "o3-mini"
-	ModelO4Mini      = "o4-mini"
+	ModelGPT4o      = "gpt-4o"
+	ModelGPT4oMini  = "gpt-4o-mini"
+	ModelGPT4_1     = "gpt-4.1"
+	ModelGPT4_1Mini = "gpt-4.1-mini"
+	ModelGPT4_1Nano = "gpt-4.1-nano"
+	ModelO3         = "o3"
+	ModelO3Mini     = "o3-mini"
+	ModelO4Mini     = "o4-mini"
 )
 
 // GetAvailableModels 获取可用模型列表。

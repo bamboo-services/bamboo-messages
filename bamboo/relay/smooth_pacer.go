@@ -52,7 +52,7 @@ type SmoothPacer struct {
 	out    chan<- []byte
 	ctx    context.Context
 
-	input  chan []byte    // 数据输入（Push → run）
+	input  chan []byte     // 数据输入（Push → run）
 	signal chan signalType // 控制信号（SignalEnd → run）
 
 	// pacer goroutine 内部状态（只在 run 中读写，无竞争）

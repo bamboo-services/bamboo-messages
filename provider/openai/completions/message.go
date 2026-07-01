@@ -65,11 +65,11 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 						// 文档内容块：OpenAI Completions 不支持，记录警告后忽略
 						if doc, ok := cb.(provider.DocumentContentBlock); ok {
 							if doc.Source.Type == "url" || doc.Source.Type == "base64" {
-							xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
-								fmt.Sprintf("DocumentBlock(source=%q) 不支持，已忽略", doc.Source.Type))
-						} else {
-							xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
-								fmt.Sprintf("DocumentBlock 未知来源类型=%q，已忽略", doc.Source.Type))
+								xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
+									fmt.Sprintf("DocumentBlock(source=%q) 不支持，已忽略", doc.Source.Type))
+							} else {
+								xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
+									fmt.Sprintf("DocumentBlock 未知来源类型=%q，已忽略", doc.Source.Type))
 							}
 						}
 					}

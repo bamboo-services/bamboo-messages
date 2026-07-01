@@ -14,8 +14,10 @@ import (
 //
 // Severity: P1
 // Issue: Responses codec puts metadata into ProviderExtra["metadata"] (as map[string]any),
-//        but config.Metadata (map[string]string) is the standard field.
-//        This means metadata is invisible to code that reads config.Metadata.
+//
+//	but config.Metadata (map[string]string) is the standard field.
+//	This means metadata is invisible to code that reads config.Metadata.
+//
 // Affected: Responses→Any conversion where metadata matters.
 func TestAudit_Responses_MetadataToProviderExtra(t *testing.T) {
 	body := []byte(`{
@@ -141,7 +143,8 @@ func TestAudit_Responses_MetadataStringOnly(t *testing.T) {
 //
 // Severity: P1
 // Issue: Only input_text/output_text parts are parsed; other types cause empty content,
-//        which then causes the message to be filtered out entirely.
+//
+//	which then causes the message to be filtered out entirely.
 func TestAudit_Responses_ImageOnlyContentDropped(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4o",
@@ -177,8 +180,10 @@ func TestAudit_Responses_ImageOnlyContentDropped(t *testing.T) {
 // Severity: P1
 // File:Line: bamboo/codec/responses/request.go:159-164
 // Issue: codec 将 metadata 存储在 ProviderExtra["metadata"] 中，
-//        但 Responses provider adapter 从 config.Metadata 读取。
-//        当通过 codec→relay→provider 路径时，metadata 被静默丢弃。
+//
+//	但 Responses provider adapter 从 config.Metadata 读取。
+//	当通过 codec→relay→provider 路径时，metadata 被静默丢弃。
+//
 // Affected: Any→Responses conversion with metadata
 func TestAudit_Metadata_StoredInProviderExtra(t *testing.T) {
 	body := []byte(`{

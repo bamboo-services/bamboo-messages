@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-base-go/common/error"
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -21,7 +21,7 @@ var defaultStreamDrainTimeout = 5 * time.Second
 type streamErrKind int
 
 const (
-	errKindNone       streamErrKind = iota
+	errKindNone streamErrKind = iota
 	errKindJSONParse
 	errKindFatal
 )
@@ -214,7 +214,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 				// 跳过无法解析的帧（SSEScanner 已做 json.Valid 校验，此处为业务层兜底）
 				if provider.DebugEnabled {
 					xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
-					fmt.Sprintf("跳过无法解析的 chunk: %v, raw=%s", jsonErr, truncateBody(data)))
+						fmt.Sprintf("跳过无法解析的 chunk: %v, raw=%s", jsonErr, truncateBody(data)))
 				}
 				continue
 			}

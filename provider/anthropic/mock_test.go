@@ -103,7 +103,7 @@ func TestChat_MessageStart(t *testing.T) {
 	p := newMockProvider(t, server)
 	ctx := context.Background()
 	config := &provider.ChatConfig{
-		Model:    "claude-sonnet-4-20250514",
+		Model:     "claude-sonnet-4-20250514",
 		MaxTokens: 100,
 	}
 	messages := []provider.Message{{Role: provider.RoleUser, Content: "Hi"}}

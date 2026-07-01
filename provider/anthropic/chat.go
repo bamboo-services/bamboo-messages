@@ -137,9 +137,9 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			if len(data) > 0 {
 				// 使用临时结构解析外层字段，保留 Delta 为原始 JSON
 				var raw struct {
-					Type         string          `json:"type"`
-					Index        *int            `json:"index,omitempty"`
-					ContentBlock *contentBlock   `json:"content_block,omitempty"`
+					Type         string           `json:"type"`
+					Index        *int             `json:"index,omitempty"`
+					ContentBlock *contentBlock    `json:"content_block,omitempty"`
 					Message      *messageResponse `json:"message,omitempty"`
 					Error        *anthropicError  `json:"error,omitempty"`
 				}

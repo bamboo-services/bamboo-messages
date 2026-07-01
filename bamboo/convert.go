@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-base-go/common/error"
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -116,13 +116,13 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 			default:
 				// 未知的 ContentBlock 类型，记录详细信息以便排查
 				xLog.WithName("bamboo").SugarWarn(context.Background(),
-				fmt.Sprintf("warning: dropped unsupported content block type %q (implement %T in messagesToProvider to support it)", b.BlockType(), b))
+					fmt.Sprintf("warning: dropped unsupported content block type %q (implement %T in messagesToProvider to support it)", b.BlockType(), b))
 			}
 		}
 
 		if ccCount > 1 {
 			xLog.WithName("bamboo").SugarWarn(context.Background(),
-			fmt.Sprintf("warning: message has %d cache_control breakpoints, only the last one is kept", ccCount))
+				fmt.Sprintf("warning: message has %d cache_control breakpoints, only the last one is kept", ccCount))
 		}
 
 		content := textBuilder.String()
@@ -303,7 +303,7 @@ type StreamConverter struct {
 	toolBlockByID            map[string]int
 	finishReason             FinishReason
 	stopHandled              bool
-	stoppedBlockIndexes      map[int]bool // 已发送 content_block_stop 的 block index 集合（防重复）
+	stoppedBlockIndexes      map[int]bool  // 已发送 content_block_stop 的 block index 集合（防重复）
 	metadata                 *MessageDelta // 由 MetadataDelta 收集的元信息，在 handleStop 时输出
 }
 

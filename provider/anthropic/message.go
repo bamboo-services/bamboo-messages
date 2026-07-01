@@ -25,10 +25,10 @@ func (p *Provider) buildMessages(messages []provider.Message) []map[string]any {
 		switch msg.Role {
 		case provider.RoleTool:
 			block := map[string]any{
-				"type":         "tool_result",
-				"tool_use_id":  msg.ToolCallID,
-				"content":      msg.Content,
-				"is_error":     msg.IsError,
+				"type":        "tool_result",
+				"tool_use_id": msg.ToolCallID,
+				"content":     msg.Content,
+				"is_error":    msg.IsError,
 			}
 			if msg.CacheControl != nil {
 				block["cache_control"] = buildCacheControl(msg.CacheControl)
@@ -160,7 +160,7 @@ func buildImageBlock(src provider.ImageSource) map[string]any {
 	switch src.Type {
 	case "base64":
 		block["source"] = map[string]any{
-			"type":      "base64",
+			"type":       "base64",
 			"media_type": src.MediaType,
 			"data":       src.Data,
 		}
@@ -181,7 +181,7 @@ func buildDocumentBlock(src provider.DocumentSource) map[string]any {
 	switch src.Type {
 	case "base64":
 		source := map[string]any{
-			"type":      "base64",
+			"type":       "base64",
 			"media_type": src.MediaType,
 			"data":       src.Data,
 		}

@@ -27,8 +27,8 @@ type openaiChoice struct {
 }
 
 type openaiMsgOut struct {
-	Role    string          `json:"role"`
-	Content *string         `json:"content"`
+	Role    string  `json:"role"`
+	Content *string `json:"content"`
 	// ReasoningContent 思考/推理内容。
 	// 注意：此字段为 DeepSeek/vLLM 兼容性扩展，非官方 OpenAI Chat Completions 规范字段。
 	ReasoningContent string          `json:"reasoning_content,omitempty"`

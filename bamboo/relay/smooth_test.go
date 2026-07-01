@@ -712,10 +712,10 @@ func TestEffectiveTokensPerFrame(t *testing.T) {
 	baseTokens := 2
 
 	tests := []struct {
-		name           string
-		queueLen       int
+		name            string
+		queueLen        int
 		intervalAtFloor bool
-		want           int
+		want            int
 	}{
 		// queue ≤ 20 → baseTokens
 		{"queue_below_threshold", 15, true, baseTokens},

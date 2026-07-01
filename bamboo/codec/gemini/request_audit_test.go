@@ -35,7 +35,9 @@ func TestAudit_Gemini_IsStreamHardcodedFalse(t *testing.T) {
 //
 // Severity: P1
 // Issue: Gemini puts the model in the URL path (e.g., /v1beta/models/gemini-2.5-pro:generateContent),
-//        not in the request body. config.Model will be empty string.
+//
+//	not in the request body. config.Model will be empty string.
+//
 // Affected: Gemini→Any conversion; model information is lost.
 func TestAudit_Gemini_ModelNotParsed(t *testing.T) {
 	body := []byte(`{

@@ -20,9 +20,9 @@ const (
 // 一条消息可包含多个不同类型的内容块（文本、图片、工具调用等），
 // 以支持多模态和工具交互场景。
 type BambooMessage struct {
-	Role       MessageRole    `json:"role"`                  // 消息发送方角色
-	Content    []ContentBlock `json:"content"`               // 消息内容块列表
-	ReasoningID string        `json:"reasoning_id,omitempty"` // 推理项 ID（OpenAI Responses reasoning item ID，独立于 ThinkingSignature）
+	Role        MessageRole    `json:"role"`                   // 消息发送方角色
+	Content     []ContentBlock `json:"content"`                // 消息内容块列表
+	ReasoningID string         `json:"reasoning_id,omitempty"` // 推理项 ID（OpenAI Responses reasoning item ID，独立于 ThinkingSignature）
 }
 
 // UnmarshalJSON 自定义 JSON 反序列化，使用 ContentBlocks 包装类型

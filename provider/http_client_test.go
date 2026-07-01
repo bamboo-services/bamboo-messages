@@ -243,9 +243,9 @@ func TestHTTPClient_CustomHeaders(t *testing.T) {
 	defer srv.Close()
 
 	headers := map[string]string{
-		"X-Trace-Id":       "abc-123",
+		"X-Trace-Id":        "abc-123",
 		"anthropic-version": "2023-06-01",
-		"X-Custom":         "hello",
+		"X-Custom":          "hello",
 	}
 
 	hc := NewHTTPClient(srv.URL, "key", "Authorization", "Bearer ", headers, nil)

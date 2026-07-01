@@ -146,4 +146,3 @@ func mapFinishReason(reason string) provider.FinishReason {
 		return provider.FinishReasonStop
 	}
 }
-

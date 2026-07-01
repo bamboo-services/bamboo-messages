@@ -196,7 +196,7 @@ type TimingCollector struct {
 	// 字符计数（用于 token 估算）
 	thinkingChars charCounter
 	outputChars   charCounter
-	toolChars      charCounter
+	toolChars     charCounter
 
 	// Token 用量（来自 UsageDelta，可选）
 	usage *UsageData

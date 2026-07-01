@@ -105,15 +105,15 @@ func TestRelayStream_NoEstimationWhenDisabled(t *testing.T) {
 // CJK 1:1, Latin 4:1, Other 2:1（与 provider.charCounter 一致）。
 func TestEstimateTokenCount_CJKLatinMixed(t *testing.T) {
 	tests := []struct {
-		name  string
-		text  string
-		want  int64
+		name string
+		text string
+		want int64
 	}{
 		{"pure CJK", "你好世界", 4},
-		{"pure Latin", "hello", 1},           // 5 chars / 4 = 1
-		{"mixed CJK+Latin", "你好hello", 3},  // 2 CJK + 5 Latin = 2 + 5/4 = 2+1 = 3
+		{"pure Latin", "hello", 1},        // 5 chars / 4 = 1
+		{"mixed CJK+Latin", "你好hello", 3}, // 2 CJK + 5 Latin = 2 + 5/4 = 2+1 = 3
 		{"empty", "", 0},
-		{"punctuation", "!@#$", 2},           // 4 other / 2 = 2
+		{"punctuation", "!@#$", 2}, // 4 other / 2 = 2
 	}
 
 	for _, tt := range tests {
