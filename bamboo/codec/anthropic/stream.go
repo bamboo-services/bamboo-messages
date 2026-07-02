@@ -342,6 +342,11 @@ func serializeStreamContentBlock(block bamboo.ContentBlock) map[string]any {
 			"type":   "image",
 			"source": source,
 		}
+	case *bamboo.RedactedThinkingBlock:
+		return map[string]any{
+			"type": "redacted_thinking",
+			"data": b.Data,
+		}
 	}
 
 	return map[string]any{

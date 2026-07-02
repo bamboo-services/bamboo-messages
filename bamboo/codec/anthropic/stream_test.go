@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
+	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // helper: 解析 SSE event + data 行为 map
@@ -377,5 +378,104 @@ func TestMessageStartModelID(t *testing.T) {
 	}
 	if id == "" {
 		t.Errorf("message.id should not be empty")
+	}
+}
+
+func TestSerializeStreamContentBlock_RedactedThinking(t *testing.T) {
+	block := bamboo.NewRedactedThinkingBlock("encrypted_data")
+	got := serializeStreamContentBlock(block)
+	want := map[string]any{
+		"type": "redacted_thinking",
+		"data": "encrypted_data",
+	}
+	if got["type"] != want["type"] {
+		t.Errorf("type = %v, want %v", got["type"], want["type"])
+	}
+	if got["data"] != want["data"] {
+		t.Errorf("data = %v, want %v", got["data"], want["data"])
+	}
+}
+
+func TestHandleContentBlockStart_RedactedThinking(t *testing.T) {
+	s := newStreamSerializer("")
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        0,
+		ContentBlock: bamboo.NewRedactedThinkingBlock("encrypted_data"),
+	})
+	if err != nil {
+		t.Fatalf("Serialize(content_block_start) error = %v", err)
+	}
+
+	eventType, payload := parseSSEEvent(t, data)
+	if eventType != "content_block_start" {
+		t.Errorf("eventType = %q, want %q", eventType, "content_block_start")
+	}
+
+	cb, ok := payload["content_block"].(map[string]any)
+	if !ok {
+		t.Fatalf("content_block should be object")
+	}
+	if cb["type"] != "redacted_thinking" {
+		t.Errorf("content_block.type = %v, want %q", cb["type"], "redacted_thinking")
+	}
+	if cb["data"] != "encrypted_data" {
+		t.Errorf("content_block.data = %v, want %q", cb["data"], "encrypted_data")
+	}
+}
+
+// TestSerialize_SignatureOnly_ThinkingBlock_SSE 验证 omitted thinking 模式下，
+// StreamConverter + Anthropic codec 能输出完整的 content_block_start/thinking 与
+// content_block_delta/signature_delta SSE 帧。
+func TestSerialize_SignatureOnly_ThinkingBlock_SSE(t *testing.T) {
+	// 复现 omitted thinking 模式：Provider 只发送 signature_delta
+	sc := bamboo.NewStreamConverter()
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+
+	events := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewSignatureDelta("test_sig"),
+	})
+	if len(events) != 2 {
+		t.Fatalf("期望 2 个 bamboo 事件，实际 %d 个", len(events))
+	}
+
+	s := newStreamSerializer("claude-sonnet-4-20250514")
+
+	// 1. content_block_start: type=thinking
+	data, err := s.Serialize(events[0])
+	if err != nil {
+		t.Fatalf("Serialize(content_block_start) error = %v", err)
+	}
+	eventType, payload := parseSSEEvent(t, data)
+	if eventType != "content_block_start" {
+		t.Errorf("eventType = %q, want content_block_start", eventType)
+	}
+	cb, ok := payload["content_block"].(map[string]any)
+	if !ok {
+		t.Fatalf("content_block 应为对象")
+	}
+	if cb["type"] != "thinking" {
+		t.Errorf("content_block.type = %v, want thinking", cb["type"])
+	}
+
+	// 2. content_block_delta: type=signature_delta, signature=test_sig
+	data, err = s.Serialize(events[1])
+	if err != nil {
+		t.Fatalf("Serialize(content_block_delta) error = %v", err)
+	}
+	eventType, payload = parseSSEEvent(t, data)
+	if eventType != "content_block_delta" {
+		t.Errorf("eventType = %q, want content_block_delta", eventType)
+	}
+	delta, ok := payload["delta"].(map[string]any)
+	if !ok {
+		t.Fatalf("delta 应为对象")
+	}
+	if delta["type"] != "signature_delta" {
+		t.Errorf("delta.type = %v, want signature_delta", delta["type"])
+	}
+	if delta["signature"] != "test_sig" {
+		t.Errorf("delta.signature = %v, want test_sig", delta["signature"])
 	}
 }

@@ -567,6 +567,10 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 				events = append(events, sc.stopForNewBlock(ContentBlockThinking)...)
 				events = append(events, sc.startThinkingBlock())
 			}
+		case ContentBlockRedactedThinking:
+			// redacted_thinking 的完整生命周期由 StreamDeltaTypeRedactedThinking 独立处理，
+			// block_start 阶段不创建任何内容块，避免被错误映射为文本块。
+			return nil
 		case ContentBlockToolUse:
 			events = append(events, sc.startToolBlock(provider.ToolCallData{ID: data.ID, Name: data.Name})...)
 		default:
@@ -824,6 +828,8 @@ func mapBlockType(blockType string) ContentBlockType {
 		return ContentBlockText
 	case "thinking":
 		return ContentBlockThinking
+	case "redacted_thinking":
+		return ContentBlockRedactedThinking
 	case "tool_use":
 		return ContentBlockToolUse
 	default:

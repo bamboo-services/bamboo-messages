@@ -2061,3 +2061,168 @@ func TestConvertStreamSignatureDelta_AfterThinkingDelta(t *testing.T) {
 		t.Errorf("Delta.Signature = %q, want sig_xyz", delta.Signature)
 	}
 }
+
+// TestMapBlockType_RedactedThinking 验证 redacted_thinking 块类型被正确映射，
+// 避免 BlockStart 事件被错误地当作普通文本块处理。
+func TestMapBlockType_RedactedThinking(t *testing.T) {
+	if got := mapBlockType("redacted_thinking"); got != ContentBlockRedactedThinking {
+		t.Errorf("mapBlockType(\"redacted_thinking\") = %q, want %q", got, ContentBlockRedactedThinking)
+	}
+}
+
+// TestConvertStreamRedactedThinkingBlockStart 验证当 Provider 发送 redacted_thinking
+// 的 block_start 时，StreamConverter 不创建任何 block，因为 redacted_thinking 的
+// 完整生命周期由 StreamDeltaTypeRedactedThinking 独立处理。
+func TestConvertStreamRedactedThinkingBlockStart(t *testing.T) {
+	sc := NewStreamConverter()
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+
+	events := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStartDelta("redacted_thinking"),
+	})
+
+	if len(events) != 0 {
+		t.Fatalf("redacted_thinking block_start 不应产生事件，实际产生 %d 个", len(events))
+	}
+}
+
+// TestStreamConverter_SignatureOnly_ThinkingBlock 验证 Anthropic omitted thinking 模式下，
+// Provider 只发送 signature_delta 不发送 thinking_delta 时，StreamConverter 的防御性逻辑
+// 会自动开启 thinking block 并输出完整的 content_block_start + content_block_delta 序列。
+func TestStreamConverter_SignatureOnly_ThinkingBlock(t *testing.T) {
+	sc := NewStreamConverter()
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+
+	// omitted thinking 模式：直接发送 signature_delta，没有前置 thinking_delta/BlockStart
+	events := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewSignatureDelta("test_sig"),
+	})
+
+	if len(events) != 2 {
+		t.Fatalf("期望 2 个事件（自动 block_start + signature_delta），实际 %d 个", len(events))
+	}
+
+	// events[0] 应为自动开启的 thinking block
+	if events[0].Type != EventContentBlockStart {
+		t.Errorf("events[0].Type = %q, want content_block_start", events[0].Type)
+	}
+	thinkingBlock, ok := events[0].ContentBlock.(*ThinkingBlock)
+	if !ok {
+		t.Fatalf("events[0].ContentBlock 类型不是 *ThinkingBlock，实际 %T", events[0].ContentBlock)
+	}
+	if thinkingBlock.BlockType() != ContentBlockThinking {
+		t.Errorf("thinkingBlock.BlockType() = %q, want %q", thinkingBlock.BlockType(), ContentBlockThinking)
+	}
+
+	// events[1] 应为 signature_delta
+	if events[1].Type != EventContentBlockDelta {
+		t.Errorf("events[1].Type = %q, want content_block_delta", events[1].Type)
+	}
+	if events[1].Index != events[0].Index {
+		t.Errorf("events[1].Index = %d, 期望与 events[0].Index %d 一致", events[1].Index, events[0].Index)
+	}
+	delta, ok := events[1].Delta.(*StreamDelta)
+	if !ok {
+		t.Fatalf("events[1].Delta 不是 *StreamDelta")
+	}
+	if delta.Type != DeltaSignature {
+		t.Errorf("delta.Type = %q, want signature_delta", delta.Type)
+	}
+	if delta.Signature != "test_sig" {
+		t.Errorf("delta.Signature = %q, want test_sig", delta.Signature)
+	}
+}
+
+// TestStreamConverter_ThinkingBlock_FullLifecycle 验证完整 thinking block 生命周期：
+// 从 BlockStart、thinking_delta、signature_delta 到 BlockStop 的完整事件序列。
+func TestStreamConverter_ThinkingBlock_FullLifecycle(t *testing.T) {
+	sc := NewStreamConverter()
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+
+	// 1. 显式开启 thinking block
+	startEvents := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStartDelta("thinking"),
+	})
+	if len(startEvents) != 1 {
+		t.Fatalf("期望 1 个 block_start 事件，实际 %d 个", len(startEvents))
+	}
+	if startEvents[0].Type != EventContentBlockStart {
+		t.Errorf("startEvents[0].Type = %q, want content_block_start", startEvents[0].Type)
+	}
+	thinkingBlock, ok := startEvents[0].ContentBlock.(*ThinkingBlock)
+	if !ok {
+		t.Fatalf("startEvents[0].ContentBlock 不是 *ThinkingBlock")
+	}
+	if thinkingBlock.BlockType() != ContentBlockThinking {
+		t.Errorf("thinkingBlock.BlockType() = %q, want thinking", thinkingBlock.BlockType())
+	}
+	idx := startEvents[0].Index
+
+	// 2. thinking_delta
+	events := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewThinkingDelta("思考内容"),
+	})
+	if len(events) != 1 {
+		t.Fatalf("期望 1 个 thinking_delta 事件，实际 %d 个", len(events))
+	}
+	if events[0].Type != EventContentBlockDelta {
+		t.Errorf("events[0].Type = %q, want content_block_delta", events[0].Type)
+	}
+	if events[0].Index != idx {
+		t.Errorf("events[0].Index = %d, want %d", events[0].Index, idx)
+	}
+	delta1, ok := events[0].Delta.(*StreamDelta)
+	if !ok {
+		t.Fatalf("events[0].Delta 不是 *StreamDelta")
+	}
+	if delta1.Type != DeltaThinkingDelta {
+		t.Errorf("delta1.Type = %q, want thinking_delta", delta1.Type)
+	}
+	if delta1.Thinking != "思考内容" {
+		t.Errorf("delta1.Thinking = %q, want 思考内容", delta1.Thinking)
+	}
+
+	// 3. signature_delta
+	events = sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewSignatureDelta("sig"),
+	})
+	if len(events) != 1 {
+		t.Fatalf("期望 1 个 signature_delta 事件，实际 %d 个", len(events))
+	}
+	if events[0].Type != EventContentBlockDelta {
+		t.Errorf("events[0].Type = %q, want content_block_delta", events[0].Type)
+	}
+	if events[0].Index != idx {
+		t.Errorf("events[0].Index = %d, want %d", events[0].Index, idx)
+	}
+	delta2, ok := events[0].Delta.(*StreamDelta)
+	if !ok {
+		t.Fatalf("events[0].Delta 不是 *StreamDelta")
+	}
+	if delta2.Type != DeltaSignature {
+		t.Errorf("delta2.Type = %q, want signature_delta", delta2.Type)
+	}
+	if delta2.Signature != "sig" {
+		t.Errorf("delta2.Signature = %q, want sig", delta2.Signature)
+	}
+
+	// 4. BlockStop 关闭 thinking block
+	events = sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewBlockStopDelta(idx),
+	})
+	if len(events) != 1 {
+		t.Fatalf("期望 1 个 content_block_stop 事件，实际 %d 个", len(events))
+	}
+	if events[0].Type != EventContentBlockStop {
+		t.Errorf("events[0].Type = %q, want content_block_stop", events[0].Type)
+	}
+	if events[0].Index != idx {
+		t.Errorf("events[0].Index = %d, want %d", events[0].Index, idx)
+	}
+}
