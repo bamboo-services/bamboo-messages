@@ -9,6 +9,7 @@ import (
 
 	"github.com/bamboo-services/bamboo-base-go/common/error"
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -46,7 +47,7 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 
 	// HTTP 状态码检查
 	if resp.StatusCode >= 400 {
-		return nil, xError.NewError(ctx, nil, xError.ErrMessage(formatUpstreamError(resp.StatusCode, body)), false, nil)
+		return nil, pkgErrors.NewHTTPError(resp.StatusCode, formatUpstreamError(resp.StatusCode, body))
 	}
 
 	// 解析响应

@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/bamboo-services/bamboo-base-go/common/error"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -48,9 +49,11 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	if resp.StatusCode >= 400 {
 		var errResp anthropicErrorResponse
 		if jsonErr := json.Unmarshal(respBody, &errResp); jsonErr == nil && errResp.Error != nil {
-			return nil, xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("Anthropic API 错误 [%d]: %s", resp.StatusCode, errResp.Error.Message)), false)
+			return nil, pkgErrors.NewHTTPError(resp.StatusCode,
+				fmt.Sprintf("Anthropic API 错误 [%d]: %s", resp.StatusCode, errResp.Error.Message))
 		}
-		return nil, xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("Anthropic API 返回错误状态码 %d", resp.StatusCode)), false)
+		return nil, pkgErrors.NewHTTPError(resp.StatusCode,
+			fmt.Sprintf("Anthropic API 返回错误状态码 %d", resp.StatusCode))
 	}
 
 	// 解析响应

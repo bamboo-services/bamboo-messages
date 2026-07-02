@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/bamboo-services/bamboo-base-go/common/error"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -138,7 +139,8 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 		if apiErr.Error.Message != "" {
 			errMsg += ": " + apiErr.Error.Message
 		}
-		return nil, xError.NewError(ctx, nil, xError.ErrMessage(errMsg), false, fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody)))
+		return nil, pkgErrors.NewHTTPError(resp.StatusCode, errMsg,
+			fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody)))
 	}
 
 	// 解析响应体

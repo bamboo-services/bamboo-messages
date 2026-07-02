@@ -78,8 +78,9 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 
 			select {
 			case eventCh <- provider.StreamEvent{
-				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, xError.ErrMessage(errMsg), false, fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody))),
+				Type:       provider.StreamTypeError,
+				Err:        xError.NewError(ctx, nil, xError.ErrMessage(errMsg), false, fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody))),
+				StatusCode: resp.StatusCode,
 			}:
 			case <-ctx.Done():
 				return

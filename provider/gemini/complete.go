@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/bamboo-services/bamboo-base-go/common/error"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -60,7 +61,8 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 		if errResp.Error != nil && errResp.Error.Message != "" {
 			errMsg = errResp.Error.Message
 		}
-		return nil, xError.NewError(ctx, nil, xError.ErrMessage(errMsg), false, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBytes)))
+		return nil, pkgErrors.NewHTTPError(resp.StatusCode, errMsg,
+			fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBytes)))
 	}
 
 	// 反序列化响应

@@ -70,8 +70,9 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			_ = resp.Body.Close()
 			select {
 			case eventCh <- provider.StreamEvent{
-				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, xError.ErrMessage(formatUpstreamError(resp.StatusCode, body)), false, nil),
+				Type:       provider.StreamTypeError,
+				Err:        xError.NewError(ctx, nil, xError.ErrMessage(formatUpstreamError(resp.StatusCode, body)), false, nil),
+				StatusCode: resp.StatusCode,
 			}:
 			case <-ctx.Done():
 			}

@@ -333,7 +333,7 @@ func (sc *StreamConverter) Convert(event provider.StreamEvent) []StreamEvent {
 		}
 		return sc.handleStop()
 	case provider.StreamTypeError:
-		return sc.handleError(event.Err)
+		return sc.handleError(event.Err, event.StatusCode)
 	default:
 		return nil
 	}
@@ -798,14 +798,22 @@ func mapBlockType(blockType string) ContentBlockType {
 	}
 }
 
-func (sc *StreamConverter) handleError(err *xError.Error) []StreamEvent {
+func (sc *StreamConverter) handleError(err *xError.Error, statusCode int) []StreamEvent {
 	msg := "unknown error"
 	if err != nil {
 		msg = err.Error()
 	}
+
+	var bambooErr *BambooError
+	if statusCode > 0 {
+		bambooErr = NewBambooErrorWithStatusCode(statusCode, msg)
+	} else {
+		bambooErr = NewBambooError(ErrorTypeProvider, msg)
+	}
+
 	events := []StreamEvent{{
 		Type:  EventError,
-		Error: NewBambooError(ErrorTypeProvider, msg),
+		Error: bambooErr,
 	}}
 
 	// 流中断兜底：若尚未发出终止序列，自动补发。

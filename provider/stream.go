@@ -12,6 +12,7 @@ type StreamEvent struct {
 	Delta        StreamDelta[any] `json:"delta" xml:"delta"`                                     // 包含事件的实际负载数据，通常是一个字符串，可以是 AI 模型生成的文本、工具调用结果或其他相关信息。
 	Err          *xError.Error    `json:"err" xml:"err"`                                         // 字段用于在事件处理过程中捕获和传递可能发生的错误状态，允许下游组件根据该错误信息进行适当的错误处理或日志记录。
 	FinishReason FinishReason     `json:"finish_reason,omitempty" xml:"finish_reason,omitempty"` // 完成原因，仅在 StreamTypeStop 事件中由适配器填充，标识流结束的具体原因。
+	StatusCode   int              `json:"status_code,omitempty" xml:"status_code,omitempty"`     // 上游 HTTP 状态码（仅在 StreamTypeError 事件中填充，如 429/401/500），0 表示不适用。
 }
 
 // StreamDelta 流增量数据，支持泛型以确保类型安全

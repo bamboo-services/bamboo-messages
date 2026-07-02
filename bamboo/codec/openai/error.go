@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
 )
 
@@ -24,11 +25,17 @@ func serializeError(err error) []byte {
 	errType := "api_error"
 	message := "internal error"
 
-	// 尝试提取 CodecError
 	var codecErr *codec.CodecError
+	var bambooErr *bamboo.BambooError
 	if errors.As(err, &codecErr) {
 		message = codecErr.Message
 		errType = mapCodecErrorType(codecErr.Type)
+	} else if errors.As(err, &bambooErr) {
+		message = bambooErr.Message
+		errType = bambooErr.Type
+		if errType == "" {
+			errType = "api_error"
+		}
 	} else if err != nil {
 		message = err.Error()
 	}

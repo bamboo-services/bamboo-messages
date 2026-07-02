@@ -294,13 +294,17 @@ func (s *openaiStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([
 // handleError 处理 error 事件。
 func (s *openaiStreamSerializer) handleError(event bamboo.StreamEvent) ([]byte, error) {
 	errMsg := "unknown error"
+	errType := "api_error"
 	if event.Error != nil {
 		errMsg = event.Error.Message
+		if event.Error.Type != "" {
+			errType = event.Error.Type
+		}
 	}
 	errPayload := map[string]any{
 		"error": map[string]any{
 			"message": errMsg,
-			"type":    "api_error",
+			"type":    errType,
 		},
 	}
 	data, _ := json.Marshal(errPayload)

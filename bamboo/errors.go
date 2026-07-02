@@ -6,6 +6,8 @@ import "fmt"
 //
 // 封装底层 AI 服务商返回的错误信息，保留原始错误类型和消息，
 // 同时附加协议类型标识以便上层区分错误来源。
+// StatusCode 字段保留上游 HTTP 状态码，使 429/401/400 等状态码
+// 作为结构化字段贯穿错误链路，而非仅存在于消息字符串中。
 type BambooError struct {
 	// Type 错误类型标识
 	Type string `json:"type"`
@@ -18,6 +20,10 @@ type BambooError struct {
 
 	// ProviderType 底层协议类型（可选，标识错误来源的协议适配器）
 	ProviderType string `json:"provider_type,omitempty"`
+
+	// StatusCode 上游 HTTP 状态码（如 429/401/500），0 表示不适用。
+	// 由 Provider 适配器在 HTTP >= 400 时填充，贯穿 convert → codec 链路。
+	StatusCode int `json:"status_code,omitempty"`
 }
 
 // 错误类型常量，对应 AI 服务商的标准错误分类。
@@ -73,5 +79,44 @@ func NewBambooErrorWithCode(errorType, message, code string) *BambooError {
 		Type:    errorType,
 		Message: message,
 		Code:    code,
+	}
+}
+
+// NewBambooErrorWithStatusCode 创建带 HTTP 状态码的 BambooError 实例。
+//
+// 在 Provider 适配器或 bamboo.go 的错误转换路径中使用，
+// 确保状态码作为结构化字段贯穿整个错误链路。
+//
+// 参数:
+//   - statusCode - 上游 HTTP 状态码（如 429/401/500）
+//   - message - 错误描述信息
+func NewBambooErrorWithStatusCode(statusCode int, message string) *BambooError {
+	return &BambooError{
+		Type:       MapStatusCodeToErrorType(statusCode),
+		Message:    message,
+		StatusCode: statusCode,
+	}
+}
+
+// MapStatusCodeToErrorType 将 HTTP 状态码映射为 BambooError 错误类型。
+//
+// 映射规则:
+//   - 429 → ErrorTypeRateLimit（请求频率超限）
+//   - 401/403 → ErrorTypeAuthentication（认证错误）
+//   - 400 → ErrorTypeInvalidRequest（请求参数错误）
+//   - 5xx → ErrorTypeAPI（服务端 API 错误）
+//   - 其他 → ErrorTypeProvider（底层协议适配器错误）
+func MapStatusCodeToErrorType(statusCode int) string {
+	switch {
+	case statusCode == 429:
+		return ErrorTypeRateLimit
+	case statusCode == 401 || statusCode == 403:
+		return ErrorTypeAuthentication
+	case statusCode == 400:
+		return ErrorTypeInvalidRequest
+	case statusCode >= 500:
+		return ErrorTypeAPI
+	default:
+		return ErrorTypeProvider
 	}
 }

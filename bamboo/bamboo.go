@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bamboo-services/bamboo-base-go/common/error"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -95,7 +96,8 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 		return nil, fmt.Errorf("bamboo: provider stream closed before any event")
 	}
 	if firstEvent.Type == provider.StreamTypeError && firstEvent.Err != nil {
-		return nil, fmt.Errorf("bamboo: provider chat failed: %w", firstEvent.Err)
+		return nil, NewBambooErrorWithStatusCode(firstEvent.StatusCode,
+			fmt.Sprintf("bamboo: provider chat failed: %v", firstEvent.Err))
 	}
 	if firstEvent.Type == provider.StreamTypeDone {
 		return nil, fmt.Errorf("bamboo: provider stream closed with no content")
@@ -207,17 +209,28 @@ func (c *client) Complete(ctx context.Context, messages []BambooMessage, system 
 		result, err = c.provider.Complete(ctx, providerMsgs, providerConfig)
 	}
 	if err != nil {
-		// 兜底：即使出错，如果 result 非 nil（Provider 返回了部分结果），仍转换为 Response 返回，
-		// 上层可通过 resp != nil && err != nil 判断是"部分成功"还是完全失败。
 		if result != nil {
 			providerType := string(c.provider.GetProviderType())
 			resp := resultToResponse(result, providerType)
-			return resp, fmt.Errorf("bamboo: complete failed: %w", err)
+			return resp, wrapProviderError(err)
 		}
-		return nil, fmt.Errorf("bamboo: complete failed: %w", err)
+		return nil, wrapProviderError(err)
 	}
 
 	// 转换结果
 	providerType := string(c.provider.GetProviderType())
 	return resultToResponse(result, providerType), nil
+}
+
+// wrapProviderError 将 Provider 返回的错误包装为携带状态码的 BambooError。
+//
+// 若错误链中包含 *pkgErrors.HTTPError，提取 StatusCode 并映射为正确的 ErrorType；
+// 否则降级为 ErrorTypeProvider。
+func wrapProviderError(err error) *BambooError {
+	if httpErr := pkgErrors.AsHTTPError(err); httpErr != nil {
+		return NewBambooErrorWithStatusCode(httpErr.StatusCode,
+			fmt.Sprintf("bamboo: complete failed: %s", httpErr.Message))
+	}
+	return NewBambooError(ErrorTypeProvider,
+		fmt.Sprintf("bamboo: complete failed: %v", err))
 }
