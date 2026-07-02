@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/bamboo-services/bamboo-base-go/common/error"
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
@@ -115,20 +114,20 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 
 	body, err := json.Marshal(params)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, xError.ErrMessage("OpenAI Responses 请求参数序列化失败"), false, err)
+		return nil, pkgErrors.NewError(ctx, nil, "OpenAI Responses 请求参数序列化失败", false, err)
 	}
 
 	// 发送 HTTP 请求（含 debug 日志）
 	resp, err := p.httpClient.DoWithDebug(ctx, "POST", "/responses", body, "openai-responses", "POST /responses (non-stream, model="+config.Model+")")
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, xError.ErrMessage("OpenAI Responses 非流式对话请求失败"), false, err)
+		return nil, pkgErrors.NewError(ctx, nil, "OpenAI Responses 非流式对话请求失败", false, err)
 	}
 	defer resp.Body.Close()
 
 	// 读取响应体
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, xError.ErrMessage("OpenAI Responses 响应体读取失败"), false, err)
+		return nil, pkgErrors.NewError(ctx, nil, "OpenAI Responses 响应体读取失败", false, err)
 	}
 
 	// 检查 HTTP 状态码，解析错误响应
@@ -146,7 +145,7 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 	// 解析响应体
 	var response completeResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, xError.NewError(ctx, nil, xError.ErrMessage("OpenAI Responses 响应体解析失败"), false, err)
+		return nil, pkgErrors.NewError(ctx, nil, "OpenAI Responses 响应体解析失败", false, err)
 	}
 
 	// 构建结果

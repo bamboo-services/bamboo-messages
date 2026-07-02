@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/bamboo-services/bamboo-base-go/common/error"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -42,7 +42,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("Anthropic 请求参数序列化失败: %v", err)), false, err),
+				Err:  pkgErrors.NewError(ctx, nil, fmt.Sprintf("Anthropic 请求参数序列化失败: %v", err), false, err),
 			}:
 			case <-ctx.Done():
 			}
@@ -55,7 +55,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("Anthropic 流式对话请求失败: %v", err)), false, err),
+				Err:  pkgErrors.NewError(ctx, nil, fmt.Sprintf("Anthropic 流式对话请求失败: %v", err), false, err),
 			}:
 			case <-ctx.Done():
 			}
@@ -69,7 +69,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type:       provider.StreamTypeError,
-				Err:        xError.NewError(ctx, nil, xError.ErrMessage(formatAnthropicError(resp.StatusCode, errBody)), false, nil),
+				Err:        pkgErrors.NewError(ctx, nil, formatAnthropicError(resp.StatusCode, errBody), false, nil),
 				StatusCode: resp.StatusCode,
 			}:
 			case <-ctx.Done():
@@ -103,7 +103,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 				select {
 				case eventCh <- provider.StreamEvent{
 					Type: provider.StreamTypeError,
-					Err:  xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("Anthropic 流读取错误: %v", scanErr)), false, scanErr),
+					Err:  pkgErrors.NewError(ctx, nil, fmt.Sprintf("Anthropic 流读取错误: %v", scanErr), false, scanErr),
 				}:
 				case <-ctx.Done():
 					return

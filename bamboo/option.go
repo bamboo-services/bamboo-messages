@@ -41,7 +41,7 @@ func NewClientWithOptions(opts ...ClientOption) BambooClient {
 		opt(cfg)
 	}
 	if cfg.provider == nil {
-		panic("bamboo: provider must not be nil")
+		panic("bamboo: provider 不能为空")
 	}
 	return &client{
 		provider:     cfg.provider,

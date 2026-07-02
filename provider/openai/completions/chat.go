@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/bamboo-services/bamboo-base-go/common/error"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
@@ -44,7 +44,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("OpenAI Completions 请求参数序列化失败: %v", err)), false, err),
+				Err:  pkgErrors.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 请求参数序列化失败: %v", err), false, err),
 			}:
 			case <-ctx.Done():
 			}
@@ -57,7 +57,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("OpenAI Completions 流式对话请求失败: %v", err)), false, err),
+				Err:  pkgErrors.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 流式对话请求失败: %v", err), false, err),
 			}:
 			case <-ctx.Done():
 			}
@@ -71,7 +71,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type:       provider.StreamTypeError,
-				Err:        xError.NewError(ctx, nil, xError.ErrMessage(formatUpstreamError(resp.StatusCode, body)), false, nil),
+				Err:        pkgErrors.NewError(ctx, nil, formatUpstreamError(resp.StatusCode, body), false, nil),
 				StatusCode: resp.StatusCode,
 			}:
 			case <-ctx.Done():
@@ -108,7 +108,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 				select {
 				case eventCh <- provider.StreamEvent{
 					Type: provider.StreamTypeError,
-					Err:  xError.NewError(ctx, nil, xError.ErrMessage(fmt.Sprintf("OpenAI Completions 流读取错误: %v", scanErr)), false, scanErr),
+					Err:  pkgErrors.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 流读取错误: %v", scanErr), false, scanErr),
 				}:
 				case <-ctx.Done():
 					return

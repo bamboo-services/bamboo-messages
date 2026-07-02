@@ -1,7 +1,7 @@
 // Package errors 提供通用的错误类型。
 //
 // 该包包含以下错误类型：
-//   - Error: 内部最小错误类型，替代原 bamboo-base-go/common/error.Error
+//   - Error: 内部最小错误类型（原 bamboo-base-go/common/error.Error 的内部替代）
 //   - BambooError: Bamboo SDK 统一错误类型
 //
 // 这些错误类型可以被所有适配器和上层业务使用，确保错误处理的一致性。
@@ -13,7 +13,7 @@ import (
 	"fmt"
 )
 
-// Error 是 bamboo-messages 内部使用的最小错误类型，替代原 bamboo-base-go/common/error.Error。
+// Error 是 bamboo-messages 内部使用的最小错误类型。
 //
 // 设计原则：bamboo 转换链仅读取错误的消息文本（见 bamboo/convert.go 的 handleError），
 // 从不访问 ErrorCode/Output/Data 等字段，因此这里只需保留 err + Message。
@@ -40,11 +40,10 @@ func (e *Error) Unwrap() error {
 	return e.err
 }
 
-// NewError 兼容原 xError.NewError 签名，用于平滑替换。
+// NewError 创建错误实例，保留消息文本和可选的原因链。
 //
-// 参数对齐原签名 NewError(ctx, err *ErrorCode, msg ErrMessage, throw bool, getErr ...error)，
-// 但 ctx / ErrorCode / throw 在 bamboo 的全部调用点都不被实际使用（throw 恒为 false），
-// 故这里以 _ 占位，仅保留 msg 与 cause 的语义。
+// ctx 和第一个 any 参数占位以兼容既有调用签名，实际不使用。
+// msg 为错误描述文本，cause 为可选的底层错误原因。
 func NewError(_ context.Context, _ any, msg string, _ bool, cause ...error) *Error {
 	e := stderrors.New(msg)
 	if len(cause) > 0 && cause[0] != nil {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bamboo-services/bamboo-base-go/common/error"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
@@ -798,8 +798,8 @@ func mapBlockType(blockType string) ContentBlockType {
 	}
 }
 
-func (sc *StreamConverter) handleError(err *xError.Error, statusCode int) []StreamEvent {
-	msg := "unknown error"
+func (sc *StreamConverter) handleError(err *pkgErrors.Error, statusCode int) []StreamEvent {
+	msg := "未知错误"
 	if err != nil {
 		msg = err.Error()
 	}

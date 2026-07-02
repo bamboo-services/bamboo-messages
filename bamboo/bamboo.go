@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bamboo-services/bamboo-base-go/common/error"
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
@@ -52,7 +51,7 @@ var _ BambooClient = (*client)(nil)
 // p 为底层协议适配器，不可为 nil，否则 panic。
 func NewClient(p provider.Provider) BambooClient {
 	if p == nil {
-		panic("bamboo: provider must not be nil")
+		panic("bamboo: provider 不能为空")
 	}
 	return &client{provider: p}
 }
@@ -90,17 +89,17 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 	select {
 	case firstEvent, hasFirst = <-providerCh:
 	case <-ctx.Done():
-		return nil, fmt.Errorf("bamboo: chat cancelled: %w", ctx.Err())
+		return nil, fmt.Errorf("bamboo: 对话已取消: %w", ctx.Err())
 	}
 	if !hasFirst {
-		return nil, fmt.Errorf("bamboo: provider stream closed before any event")
+		return nil, fmt.Errorf("bamboo: provider 流在发出任何事件前已关闭")
 	}
 	if firstEvent.Type == provider.StreamTypeError && firstEvent.Err != nil {
 		return nil, NewBambooErrorWithStatusCode(firstEvent.StatusCode,
-			fmt.Sprintf("bamboo: provider chat failed: %v", firstEvent.Err))
+			fmt.Sprintf("bamboo: provider 对话失败: %v", firstEvent.Err))
 	}
 	if firstEvent.Type == provider.StreamTypeDone {
-		return nil, fmt.Errorf("bamboo: provider stream closed with no content")
+		return nil, fmt.Errorf("bamboo: provider 流已关闭但未产生任何内容")
 	}
 
 	// 创建 bamboo 输出 channel 并启动转换 goroutine
@@ -119,7 +118,7 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 				select {
 				case out <- StreamEvent{
 					Type:  EventError,
-					Error: NewBambooError(ErrorTypeProvider, fmt.Sprintf("bamboo: internal panic: %v", r)),
+					Error: NewBambooError(ErrorTypeProvider, fmt.Sprintf("bamboo: 内部 panic: %v", r)),
 				}:
 				default:
 				}
@@ -167,8 +166,8 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 
 				select {
 				case <-ctx.Done():
-					cancelErr := xError.NewError(context.Background(), nil,
-						xError.ErrMessage(fmt.Sprintf("bamboo: chat cancelled: %s", ctx.Err())), false)
+				cancelErr := pkgErrors.NewError(context.Background(), nil,
+					fmt.Sprintf("bamboo: 对话已取消: %s", ctx.Err()), false)
 					writeAll(converter.Convert(provider.StreamEvent{
 						Type: provider.StreamTypeError,
 						Err:  cancelErr,
@@ -229,8 +228,8 @@ func (c *client) Complete(ctx context.Context, messages []BambooMessage, system 
 func wrapProviderError(err error) *BambooError {
 	if httpErr := pkgErrors.AsHTTPError(err); httpErr != nil {
 		return NewBambooErrorWithStatusCode(httpErr.StatusCode,
-			fmt.Sprintf("bamboo: complete failed: %s", httpErr.Message))
+			fmt.Sprintf("bamboo: 非流式对话失败: %s", httpErr.Message))
 	}
 	return NewBambooError(ErrorTypeProvider,
-		fmt.Sprintf("bamboo: complete failed: %v", err))
+		fmt.Sprintf("bamboo: 非流式对话失败: %v", err))
 }

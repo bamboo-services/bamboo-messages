@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/bamboo-services/bamboo-base-go/common/error"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -201,7 +201,7 @@ func (p *Provider) contentError(event messageStreamEvent) []provider.StreamEvent
 	}
 	return []provider.StreamEvent{{
 		Type: provider.StreamTypeError,
-		Err:  xError.NewError(context.Background(), nil, xError.ErrMessage("Anthropic 流式事件错误: "+event.Error.Message), false),
+		Err:  pkgErrors.NewError(context.Background(), nil, "Anthropic 流式事件错误: "+event.Error.Message, false),
 	}}
 }
 

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/bamboo-services/bamboo-base-go/common/error"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -201,7 +201,7 @@ func TestChat_CtxCancelTriggersTermination(t *testing.T) {
 // 预期：handleError 检测到 started && !stopHandled，自动补发 handleStop →
 // EventError + EventMessageStop。
 func TestChat_ProviderErrorTriggersTermination(t *testing.T) {
-	providerErr := xError.NewError(context.Background(), nil, xError.ErrMessage("upstream 500 error"), false)
+	providerErr := pkgErrors.NewError(context.Background(), nil, "upstream 500 error", false)
 	p := &mockProviderWithEvents{
 		events: []provider.StreamEvent{
 			{Type: provider.StreamTypeStart},
@@ -316,8 +316,8 @@ func TestChat_NormalStreamTermination(t *testing.T) {
 // 预期：handleError 第一次调用时补发 handleStop（stopHandled=true），
 // 第二次 handleError 不再补发。最终只收到一次 EventMessageStop。
 func TestChat_MultipleErrorsOnlyOneStop(t *testing.T) {
-	err1 := xError.NewError(context.Background(), nil, xError.ErrMessage("error 1"), false)
-	err2 := xError.NewError(context.Background(), nil, xError.ErrMessage("error 2"), false)
+	err1 := pkgErrors.NewError(context.Background(), nil, "error 1", false)
+	err2 := pkgErrors.NewError(context.Background(), nil, "error 2", false)
 	p := &mockProviderWithEvents{
 		events: []provider.StreamEvent{
 			{Type: provider.StreamTypeStart},

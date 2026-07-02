@@ -9,7 +9,7 @@ import (
 // HTTPError 携带 HTTP 状态码的结构化错误类型。
 //
 // 在 Provider 适配器中，当上游返回 HTTP >= 400 时，使用此类型包装错误，
-// 使状态码作为结构化字段贯穿错误链路（xError.Error → BambooError → Codec SerializeError），
+// 使状态码作为结构化字段贯穿错误链路（pkgErrors.Error → BambooError → Codec SerializeError），
 // 而非仅存在于消息字符串中。
 //
 // 设计要点：
@@ -59,7 +59,7 @@ func NewHTTPError(statusCode int, message string, cause ...error) *HTTPError {
 //
 // 用于将已有的非结构化错误包装为 HTTPError，状态码默认 500 INTERNAL。
 func NewHTTPErrorFromStdError(err error) *HTTPError {
-	msg := "internal error"
+	msg := "内部错误"
 	if err != nil {
 		msg = err.Error()
 	}

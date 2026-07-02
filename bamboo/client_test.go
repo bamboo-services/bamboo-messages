@@ -63,7 +63,7 @@ func TestNewClientNilPanic(t *testing.T) {
 		if !ok {
 			t.Fatalf("panic 值类型应为 string，实际为 %T", r)
 		}
-		if msg != "bamboo: provider must not be nil" {
+		if msg != "bamboo: provider 不能为空" {
 			t.Fatalf("panic 消息不匹配: %s", msg)
 		}
 	}()
@@ -180,7 +180,7 @@ func TestNewClientWithOptionsNoProvider(t *testing.T) {
 		if !ok {
 			t.Fatalf("panic 值类型应为 string，实际为 %T", r)
 		}
-		if msg != "bamboo: provider must not be nil" {
+		if msg != "bamboo: provider 不能为空" {
 			t.Fatalf("panic 消息不匹配: %s", msg)
 		}
 	}()
@@ -308,7 +308,7 @@ func TestCompleteProviderError(t *testing.T) {
 	if err == nil {
 		t.Fatal("期望 provider 错误被传播")
 	}
-	if err.Error() != "provider_error: bamboo: complete failed: provider error" {
+	if err.Error() != "provider_error: bamboo: 非流式对话失败: provider error" {
 		t.Errorf("错误信息 = %q, 不匹配", err.Error())
 	}
 }
@@ -323,7 +323,7 @@ func TestCompleteProviderErrorWithSystem(t *testing.T) {
 	if err == nil {
 		t.Fatal("期望 provider 错误被传播")
 	}
-	if err.Error() != "provider_error: bamboo: complete failed: provider error with system" {
+	if err.Error() != "provider_error: bamboo: 非流式对话失败: provider error with system" {
 		t.Errorf("错误信息 = %q, 不匹配", err.Error())
 	}
 }

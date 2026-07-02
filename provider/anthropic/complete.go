@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/bamboo-services/bamboo-base-go/common/error"
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
@@ -30,19 +29,19 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 
 	body, err := json.Marshal(params)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, xError.ErrMessage("Anthropic 请求参数序列化失败"), false, err)
+		return nil, pkgErrors.NewError(ctx, nil, "Anthropic 请求参数序列化失败", false, err)
 	}
 
 	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, "/v1/messages", body, "anthropic", "POST /v1/messages (non-stream, model="+config.Model+")")
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, xError.ErrMessage("Anthropic 非流式对话请求失败"), false, err)
+		return nil, pkgErrors.NewError(ctx, nil, "Anthropic 非流式对话请求失败", false, err)
 	}
 	defer resp.Body.Close()
 
 	// 读取响应体
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, xError.NewError(ctx, nil, xError.ErrMessage("Anthropic 非流式响应读取失败"), false, err)
+		return nil, pkgErrors.NewError(ctx, nil, "Anthropic 非流式响应读取失败", false, err)
 	}
 
 	// 检查 HTTP 状态码，解析错误响应
@@ -59,7 +58,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	// 解析响应
 	var msgResp messageResponse
 	if err := json.Unmarshal(respBody, &msgResp); err != nil {
-		return nil, xError.NewError(ctx, nil, xError.ErrMessage("Anthropic 非流式响应解析失败"), false, err)
+		return nil, pkgErrors.NewError(ctx, nil, "Anthropic 非流式响应解析失败", false, err)
 	}
 
 	// 构建 CompletionResult

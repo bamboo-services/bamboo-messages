@@ -1,6 +1,6 @@
 package provider
 
-import "github.com/bamboo-services/bamboo-base-go/common/error"
+import pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 
 // StreamEvent 表示流处理管道中产生的单个离散事件或信号。
 // 它封装了事件的基本分类信息、负载内容以及处理过程中可能产生的错误状态。
@@ -10,7 +10,7 @@ import "github.com/bamboo-services/bamboo-base-go/common/error"
 type StreamEvent struct {
 	Type         StreamType       `json:"type" xml:"type"`                                       // 表示事件的具体分类或信号类型，用于在流处理管道中指导下游的分支路由逻辑。
 	Delta        StreamDelta[any] `json:"delta" xml:"delta"`                                     // 包含事件的实际负载数据，通常是一个字符串，可以是 AI 模型生成的文本、工具调用结果或其他相关信息。
-	Err          *xError.Error    `json:"err" xml:"err"`                                         // 字段用于在事件处理过程中捕获和传递可能发生的错误状态，允许下游组件根据该错误信息进行适当的错误处理或日志记录。
+	Err          *pkgErrors.Error `json:"err" xml:"err"`                                         // 字段用于在事件处理过程中捕获和传递可能发生的错误状态，允许下游组件根据该错误信息进行适当的错误处理或日志记录。
 	FinishReason FinishReason     `json:"finish_reason,omitempty" xml:"finish_reason,omitempty"` // 完成原因，仅在 StreamTypeStop 事件中由适配器填充，标识流结束的具体原因。
 	StatusCode   int              `json:"status_code,omitempty" xml:"status_code,omitempty"`     // 上游 HTTP 状态码（仅在 StreamTypeError 事件中填充，如 429/401/500），0 表示不适用。
 }

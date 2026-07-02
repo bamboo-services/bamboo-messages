@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bamboo-services/bamboo-base-go/common/error"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -734,14 +734,14 @@ func TestConvertStreamError(t *testing.T) {
 	if events[0].Error == nil {
 		t.Fatal("Error is nil")
 	}
-	if events[0].Error.Message != "unknown error" {
-		t.Errorf("Error.Message = %q, want unknown error", events[0].Error.Message)
+	if events[0].Error.Message != "未知错误" {
+		t.Errorf("Error.Message = %q, want 未知错误", events[0].Error.Message)
 	}
 }
 
 func TestConvertStreamErrorWithMessage(t *testing.T) {
 	sc := NewStreamConverter()
-	testErr := xError.NewError(nil, nil, xError.ErrMessage("connection reset"), false)
+	testErr := pkgErrors.NewError(nil, nil, "connection reset", false)
 	events := sc.Convert(provider.StreamEvent{
 		Type: provider.StreamTypeError,
 		Err:  testErr,
