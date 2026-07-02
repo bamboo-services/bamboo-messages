@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -37,6 +37,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		var ccCount int
 		var thinkingContent string
 		var thinkingSignature string
+		var redactedThinkingData string
 
 		// Content 为空数组时允许透传，生成 Content="" 的空消息，
 		// 由下游适配器内部处理（补空字符串或跳过），外部允许传递空 content。
@@ -60,6 +61,8 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 					ccCount++
 					msgCacheControl = b.CacheControl
 				}
+			case *RedactedThinkingBlock:
+				redactedThinkingData = b.Data
 			case *ToolUseBlock:
 				toolCalls = append(toolCalls, provider.ToolCall{
 					ID:   b.ID,
@@ -126,20 +129,21 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		}
 
 		content := textBuilder.String()
-		hasContent := content != "" || len(toolCalls) > 0 || len(contentBlocks) > 0 || thinkingContent != ""
+		hasContent := content != "" || len(toolCalls) > 0 || len(contentBlocks) > 0 || thinkingContent != "" || redactedThinkingData != ""
 		if hasContent || len(msg.Content) == 0 {
-			if msg.Role == RoleAssistant && content == "" && len(toolCalls) == 0 && len(contentBlocks) == 0 && thinkingContent == "" {
+			if msg.Role == RoleAssistant && content == "" && len(toolCalls) == 0 && len(contentBlocks) == 0 && thinkingContent == "" && redactedThinkingData == "" {
 				content = "-"
 			}
 			result = append(result, provider.Message{
-				Role:              providerRole(msg.Role),
-				Content:           content,
-				ContentBlocks:     contentBlocks,
-				ThinkingContent:   thinkingContent,
-				ThinkingSignature: thinkingSignature,
-				ReasoningID:       msg.ReasoningID,
-				ToolCalls:         toolCalls,
-				CacheControl:      msgCacheControl,
+				Role:                 providerRole(msg.Role),
+				Content:              content,
+				ContentBlocks:        contentBlocks,
+				ThinkingContent:      thinkingContent,
+				ThinkingSignature:    thinkingSignature,
+				RedactedThinkingData: redactedThinkingData,
+				ReasoningID:          msg.ReasoningID,
+				ToolCalls:            toolCalls,
+				CacheControl:         msgCacheControl,
 			})
 		}
 		result = append(result, toolResults...)
@@ -250,6 +254,9 @@ func resultToResponse(result *provider.CompletionResult, providerType string) *R
 	var content []ContentBlock
 	if result.Thinking != "" {
 		content = append(content, NewThinkingBlock(result.Thinking, result.ThinkingSignature))
+	}
+	for _, rt := range result.RedactedThinking {
+		content = append(content, NewRedactedThinkingBlock(rt))
 	}
 	if result.Content != "" {
 		content = append(content, NewTextBlock(result.Content))
@@ -602,18 +609,23 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		})
 		return events
 	case provider.StreamDeltaTypeSignature:
+		// 防御性处理: omitted 模式下 Provider 只发 signature_delta 不发 thinking_delta，
+		// 此时 thinkingBlockStarted 为 false。自动开启 thinking block 以保留 signature。
+		var events []StreamEvent
 		if !sc.thinkingBlockStarted {
-			return nil
+			events = append(events, sc.stopForNewBlock(ContentBlockThinking)...)
+			events = append(events, sc.startThinkingBlock())
 		}
 		sigData, ok := delta.Data.(provider.SignatureData)
 		if !ok {
-			return nil
+			return events
 		}
-		return []StreamEvent{{
+		events = append(events, StreamEvent{
 			Type:  EventContentBlockDelta,
 			Index: sc.thinkingBlockIndex,
 			Delta: &StreamDelta{Type: DeltaSignature, Signature: string(sigData)},
-		}}
+		})
+		return events
 	case provider.StreamDeltaTypeToolCall:
 		data, ok := delta.Data.(provider.ToolCallData)
 		if !ok {
@@ -684,6 +696,27 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 			sc.metadata.EncryptedContent = data.EncryptedContent
 		}
 		return nil
+	case provider.StreamDeltaTypeRedactedThinking:
+		// redacted_thinking 作为独立内容块输出: 先关闭异类活跃块，再发出 block_start + block_stop。
+		// redacted_thinking 是原子块（无增量），直接 start + stop 完成生命周期。
+		rtData, ok := delta.Data.(provider.RedactedThinkingData)
+		if !ok {
+			return nil
+		}
+		var events []StreamEvent
+		events = append(events, sc.stopAllTextOrThinking()...)
+		idx := sc.nextIndex()
+		events = append(events, StreamEvent{
+			Type:         EventContentBlockStart,
+			Index:        idx,
+			ContentBlock: NewRedactedThinkingBlock(string(rtData)),
+		})
+		events = append(events, StreamEvent{
+			Type:  EventContentBlockStop,
+			Index: idx,
+		})
+		sc.stoppedBlockIndexes[idx] = true
+		return events
 	default:
 		return nil
 	}

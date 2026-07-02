@@ -44,16 +44,21 @@ func (p *Provider) handleStreamEvent(event messageStreamEvent, finishReason *pro
 // contentMessageStart 处理消息开始事件。
 //
 // Anthropic message_start 事件携带 message.usage.input_tokens（此时 output_tokens=0），
-// 发送 NewUsageDelta 将 input_tokens 传递给上层。
+// 发送 NewUsageDeltaWithCache 将 input_tokens 和 cache 字段传递给上层。
 func (p *Provider) contentMessageStart(event messageStreamEvent) []provider.StreamEvent {
 	// message_start 事件已在 ChatWithSystem 中发送 StreamTypeStart，此处仅提取 usage
 	if event.Message != nil && event.Message.Usage != nil {
 		return []provider.StreamEvent{{
-			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewUsageDelta(int64(event.Message.Usage.InputTokens), 0),
+			Type: provider.StreamTypeDelta,
+			Delta: provider.NewUsageDeltaWithCache(
+				int64(event.Message.Usage.InputTokens),
+				0,
+				int64(event.Message.Usage.CacheCreationInputTokens),
+				int64(event.Message.Usage.CacheReadInputTokens),
+			),
 		}}
 	}
-	return nil	// 消息开始，无需特殊处理，已在 ChatWithSystem 中发送 StreamTypeStart
+	return nil // 消息开始，无需特殊处理，已在 ChatWithSystem 中发送 StreamTypeStart
 
 }
 
@@ -89,6 +94,19 @@ func (p *Provider) contentBlockStart(event messageStreamEvent) []provider.Stream
 			Type:  provider.StreamTypeDelta,
 			Delta: provider.NewBlockStartDeltaWithID("tool_use", block.ID, block.Name),
 		}}
+	case "redacted_thinking":
+		// redacted_thinking block：先发出 BlockStart，再附带加密 data（如有）
+		events := []provider.StreamEvent{{
+			Type:  provider.StreamTypeDelta,
+			Delta: provider.NewBlockStartDelta("redacted_thinking"),
+		}}
+		if block.Data != "" {
+			events = append(events, provider.StreamEvent{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewRedactedThinkingDelta(block.Data),
+			})
+		}
+		return events
 	default:
 		return nil
 	}
@@ -218,6 +236,12 @@ func mapFinishReason(reason string) provider.FinishReason {
 		return provider.FinishReasonToolCalls
 	case "stop_sequence":
 		return provider.FinishReasonStop
+	case "pause_turn":
+		return provider.FinishReasonPauseTurn
+	case "refusal":
+		return provider.FinishReasonRefusal
+	case "server_tool_use":
+		return provider.FinishReasonServerToolUse
 	default:
 		return provider.FinishReasonStop
 	}

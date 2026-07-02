@@ -149,6 +149,7 @@ func TestStreamDeltaTypeConstants(t *testing.T) {
 		{"ToolCallDelta", StreamDeltaTypeToolCallDelta, "tool_call_delta"},
 		{"Usage", StreamDeltaTypeUsage, "usage"},
 		{"BlockStart", StreamDeltaTypeBlockStart, "block_start"},
+		{"RedactedThinking", StreamDeltaTypeRedactedThinking, "redacted_thinking"},
 	}
 
 	for _, tt := range tests {
@@ -219,5 +220,23 @@ func TestStreamTypeConstants(t *testing.T) {
 				t.Errorf("%s = %v, want %v", tt.testName, tt.constant, tt.wantValue)
 			}
 		})
+	}
+}
+
+// TestNewRedactedThinkingDelta 测试创建 redacted_thinking 增量事件
+func TestNewRedactedThinkingDelta(t *testing.T) {
+	delta := NewRedactedThinkingDelta("encrypted-data-123")
+
+	if delta.Type != StreamDeltaTypeRedactedThinking {
+		t.Errorf("NewRedactedThinkingDelta() Type = %v, want %v", delta.Type, StreamDeltaTypeRedactedThinking)
+	}
+
+	data, ok := delta.Data.(RedactedThinkingData)
+	if !ok {
+		t.Errorf("NewRedactedThinkingDelta() Data type assertion failed, want RedactedThinkingData")
+	}
+
+	if string(data) != "encrypted-data-123" {
+		t.Errorf("NewRedactedThinkingDelta() Data = %v, want %v", string(data), "encrypted-data-123")
 	}
 }

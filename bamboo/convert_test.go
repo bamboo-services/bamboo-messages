@@ -1654,10 +1654,10 @@ func TestStreamConverter_FinishReasonPriority(t *testing.T) {
 	}
 }
 
-// TestStreamConverter_SignatureDeltaWithoutThinkingBlock 验证无 thinking block 时的 SignatureDelta 被忽略。
+// TestStreamConverter_SignatureDeltaWithoutThinkingBlock 验证无 thinking block 时的 SignatureDelta 自动开启 thinking block。
 //
-// 防御性：若 Provider 在未开启 thinking block 的情况下发出 SignatureDelta，
-// 不应将签名附加到错误的 block index（0 通常是 text block）。
+// 防御性：omitted 模式下 Provider 只发 signature_delta 不发 thinking_delta，
+// 此时自动开启 thinking block 以保留 signature，避免签名丢失。
 func TestStreamConverter_SignatureDeltaWithoutThinkingBlock(t *testing.T) {
 	sc := NewStreamConverter()
 
@@ -1668,8 +1668,27 @@ func TestStreamConverter_SignatureDeltaWithoutThinkingBlock(t *testing.T) {
 		Delta: provider.NewSignatureDelta("some_signature"),
 	})
 
-	if len(events) != 0 {
-		t.Errorf("expected 0 events for signature_delta without thinking block, got %d — should be silently ignored", len(events))
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events (defensive block_start + signature_delta), got %d", len(events))
+	}
+	if events[0].Type != EventContentBlockStart {
+		t.Errorf("events[0].Type = %q, want content_block_start", events[0].Type)
+	}
+	if events[0].ContentBlock == nil || events[0].ContentBlock.BlockType() != ContentBlockThinking {
+		t.Errorf("events[0].ContentBlock.BlockType() mismatch, want thinking")
+	}
+	if events[1].Type != EventContentBlockDelta {
+		t.Errorf("events[1].Type = %q, want content_block_delta", events[1].Type)
+	}
+	delta, ok := events[1].Delta.(*StreamDelta)
+	if !ok {
+		t.Fatal("events[1].Delta is not *StreamDelta")
+	}
+	if delta.Type != DeltaSignature {
+		t.Errorf("Delta.Type = %q, want signature_delta", delta.Type)
+	}
+	if delta.Signature != "some_signature" {
+		t.Errorf("Delta.Signature = %q, want some_signature", delta.Signature)
 	}
 }
 
@@ -1860,5 +1879,185 @@ func TestConvertMessage_EmptyReasoningID(t *testing.T) {
 	}
 	if result[0].ReasoningID != "" {
 		t.Errorf("ReasoningID = %q, want empty", result[0].ReasoningID)
+	}
+}
+
+// ---- RedactedThinking 测试 ----
+
+func TestConvertRedactedThinkingBlock_RoundTrip(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewRedactedThinkingBlock("encrypted_data_123"),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].RedactedThinkingData != "encrypted_data_123" {
+		t.Errorf("RedactedThinkingData = %q, want encrypted_data_123", result[0].RedactedThinkingData)
+	}
+}
+
+func TestConvertRedactedThinkingBlock_WithText(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewTextBlock("response text"),
+			NewRedactedThinkingBlock("rt_data"),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].Content != "response text" {
+		t.Errorf("Content = %q, want 'response text'", result[0].Content)
+	}
+	if result[0].RedactedThinkingData != "rt_data" {
+		t.Errorf("RedactedThinkingData = %q, want rt_data", result[0].RedactedThinkingData)
+	}
+}
+
+func TestConvertResult_WithRedactedThinking(t *testing.T) {
+	result := &provider.CompletionResult{
+		Content:          "Hello!",
+		RedactedThinking: []string{"rt_block_1", "rt_block_2"},
+		FinishReason:     provider.FinishReasonStop,
+		Usage:            provider.UsageData{InputTokens: 10, OutputTokens: 20},
+	}
+
+	resp := resultToResponse(result, "anthropic")
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	// Content order: redacted_thinking blocks first, then text
+	if len(resp.Content) != 3 {
+		t.Fatalf("Content len = %d, want 3", len(resp.Content))
+	}
+	if resp.Content[0].BlockType() != ContentBlockRedactedThinking {
+		t.Errorf("Content[0].BlockType() = %q, want redacted_thinking", resp.Content[0].BlockType())
+	}
+	rt1, ok := resp.Content[0].(*RedactedThinkingBlock)
+	if !ok {
+		t.Fatal("Content[0] type assertion to *RedactedThinkingBlock failed")
+	}
+	if rt1.Data != "rt_block_1" {
+		t.Errorf("Content[0].Data = %q, want rt_block_1", rt1.Data)
+	}
+	rt2, ok := resp.Content[1].(*RedactedThinkingBlock)
+	if !ok {
+		t.Fatal("Content[1] type assertion to *RedactedThinkingBlock failed")
+	}
+	if rt2.Data != "rt_block_2" {
+		t.Errorf("Content[1].Data = %q, want rt_block_2", rt2.Data)
+	}
+	if resp.Content[2].BlockType() != ContentBlockText {
+		t.Errorf("Content[2].BlockType() = %q, want text", resp.Content[2].BlockType())
+	}
+}
+
+func TestConvertStreamRedactedThinkingDelta(t *testing.T) {
+	sc := NewStreamConverter()
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+
+	events := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewRedactedThinkingDelta("redacted_payload"),
+	})
+
+	// redacted_thinking is atomic: block_start + block_stop = 2 events
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events (block_start + block_stop), got %d", len(events))
+	}
+	if events[0].Type != EventContentBlockStart {
+		t.Errorf("events[0].Type = %q, want content_block_start", events[0].Type)
+	}
+	if events[0].ContentBlock == nil || events[0].ContentBlock.BlockType() != ContentBlockRedactedThinking {
+		t.Errorf("events[0].ContentBlock.BlockType() mismatch, want redacted_thinking")
+	}
+	rt, ok := events[0].ContentBlock.(*RedactedThinkingBlock)
+	if !ok {
+		t.Fatal("events[0].ContentBlock type assertion to *RedactedThinkingBlock failed")
+	}
+	if rt.Data != "redacted_payload" {
+		t.Errorf("events[0].ContentBlock.Data = %q, want redacted_payload", rt.Data)
+	}
+	if events[1].Type != EventContentBlockStop {
+		t.Errorf("events[1].Type = %q, want content_block_stop", events[1].Type)
+	}
+}
+
+func TestConvertStreamSignatureDelta_OmittedMode(t *testing.T) {
+	sc := NewStreamConverter()
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+
+	// omitted mode: signature_delta without preceding thinking_delta
+	events := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewSignatureDelta("sig_abc"),
+	})
+
+	// Defensive: auto-start thinking block + signature delta = 2 events
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events (defensive block_start + signature_delta), got %d", len(events))
+	}
+	if events[0].Type != EventContentBlockStart {
+		t.Errorf("events[0].Type = %q, want content_block_start", events[0].Type)
+	}
+	if events[0].ContentBlock == nil || events[0].ContentBlock.BlockType() != ContentBlockThinking {
+		t.Errorf("events[0].ContentBlock.BlockType() mismatch, want thinking")
+	}
+	if events[1].Type != EventContentBlockDelta {
+		t.Errorf("events[1].Type = %q, want content_block_delta", events[1].Type)
+	}
+	delta, ok := events[1].Delta.(*StreamDelta)
+	if !ok {
+		t.Fatal("events[1].Delta is not *StreamDelta")
+	}
+	if delta.Type != DeltaSignature {
+		t.Errorf("Delta.Type = %q, want signature_delta", delta.Type)
+	}
+	if delta.Signature != "sig_abc" {
+		t.Errorf("Delta.Signature = %q, want sig_abc", delta.Signature)
+	}
+}
+
+func TestConvertStreamSignatureDelta_AfterThinkingDelta(t *testing.T) {
+	sc := NewStreamConverter()
+	sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})
+
+	// Normal mode: thinking_delta first, then signature_delta
+	sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewThinkingDelta("thinking content"),
+	})
+
+	events := sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewSignatureDelta("sig_xyz"),
+	})
+
+	// thinking block already started, only signature delta = 1 event
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event (signature_delta only), got %d", len(events))
+	}
+	if events[0].Type != EventContentBlockDelta {
+		t.Errorf("events[0].Type = %q, want content_block_delta", events[0].Type)
+	}
+	delta, ok := events[0].Delta.(*StreamDelta)
+	if !ok {
+		t.Fatal("events[0].Delta is not *StreamDelta")
+	}
+	if delta.Type != DeltaSignature {
+		t.Errorf("Delta.Type = %q, want signature_delta", delta.Type)
+	}
+	if delta.Signature != "sig_xyz" {
+		t.Errorf("Delta.Signature = %q, want sig_xyz", delta.Signature)
 	}
 }

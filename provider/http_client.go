@@ -69,8 +69,8 @@ func NewHTTPClient(
 		hc.client = &http.Client{
 			Transport: &http.Transport{
 				TLSHandshakeTimeout: 10 * time.Second,
-				IdleConnTimeout:    90 * time.Second,
-				ForceAttemptHTTP2:  true,
+				IdleConnTimeout:     90 * time.Second,
+				ForceAttemptHTTP2:   true,
 			},
 		}
 	}

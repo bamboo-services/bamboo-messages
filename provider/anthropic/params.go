@@ -94,19 +94,49 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 	//     - 回退合成 {type:"adaptive"}
 	//   Legacy 模式（GLM/Kimi 等第三方兼容端点）:
 	//     - 优先使用 ProviderExtra["thinking"] 并归一化（adaptive→enabled，保留 budget_tokens）
-	//     - 回退合成 {type:"enabled"}
+	//     - 回退合成 {type:"enabled", budget_tokens: <根据 effort 计算>}
 	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
-		if config.ThinkingConfig.Effort != "none" {
+		if config.ThinkingConfig.Effort == "none" {
+			params.Thinking = &thinkingConfig{Type: "disabled"}
+			if config.ThinkingConfig.Display != "" {
+				params.Thinking.Display = config.ThinkingConfig.Display
+			}
+		} else {
 			if tc := parseThinkingFromExtra(config.ProviderExtra); tc != nil {
 				if p.legacyCompat && tc.Type == "adaptive" {
 					tc.Type = "enabled"
 				}
-				params.Thinking = tc
+				if tc.Type == "enabled" && tc.BudgetTokens == 0 {
+					tc.BudgetTokens = defaultBudgetTokens(config.ThinkingConfig.Effort)
+				}
+				if config.ThinkingConfig.Display != "" {
+					tc.Display = config.ThinkingConfig.Display
+				}
+				if tc.Type == "enabled" {
+					tc.BudgetTokens = clampBudgetTokens(tc.BudgetTokens, params.MaxTokens)
+					if tc.BudgetTokens > 0 {
+						params.Thinking = tc
+					}
+				} else {
+					params.Thinking = tc
+				}
 			} else {
 				if p.legacyCompat {
-					params.Thinking = &thinkingConfig{Type: "enabled"}
+					budget := clampBudgetTokens(defaultBudgetTokens(config.ThinkingConfig.Effort), params.MaxTokens)
+					if budget > 0 {
+						params.Thinking = &thinkingConfig{
+							Type:         "enabled",
+							BudgetTokens: budget,
+						}
+						if config.ThinkingConfig.Display != "" {
+							params.Thinking.Display = config.ThinkingConfig.Display
+						}
+					}
 				} else {
 					params.Thinking = &thinkingConfig{Type: "adaptive"}
+					if config.ThinkingConfig.Display != "" {
+						params.Thinking.Display = config.ThinkingConfig.Display
+					}
 				}
 			}
 		}
@@ -189,6 +219,9 @@ func parseThinkingFromExtra(extra map[string]any) *thinkingConfig {
 		if bt, ok := v["budget_tokens"].(float64); ok {
 			tc.BudgetTokens = int(bt)
 		}
+		if d, ok := v["display"].(string); ok {
+			tc.Display = d
+		}
 	default:
 		return nil
 	}
@@ -197,4 +230,37 @@ func parseThinkingFromExtra(extra map[string]any) *thinkingConfig {
 		return nil
 	}
 	return &tc
+}
+
+// defaultBudgetTokens 根据 effort 返回默认 budget_tokens。
+func defaultBudgetTokens(effort string) int {
+	switch effort {
+	case "low":
+		return 5000
+	case "medium":
+		return 16000
+	case "high":
+		return 32000
+	case "xhigh":
+		return 48000
+	case "max":
+		return 64000
+	default:
+		return 10000
+	}
+}
+
+// clampBudgetTokens 将 budget_tokens 限制在 [1024, maxTokens-1] 范围内。
+// 如果 maxTokens < 1025，则返回 0 表示不应设置 thinking。
+func clampBudgetTokens(budget, maxTokens int) int {
+	if maxTokens > 0 && maxTokens < 1025 {
+		return 0
+	}
+	if budget < 1024 {
+		return 1024
+	}
+	if maxTokens > 0 && budget >= maxTokens {
+		return maxTokens - 1
+	}
+	return budget
 }

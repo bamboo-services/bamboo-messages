@@ -30,6 +30,9 @@ func (p *Provider) buildMessages(messages []provider.Message) []map[string]any {
 				"content":     msg.Content,
 				"is_error":    msg.IsError,
 			}
+			if msg.ToolName != "" {
+				block["name"] = msg.ToolName
+			}
 			if msg.CacheControl != nil {
 				block["cache_control"] = buildCacheControl(msg.CacheControl)
 			}
@@ -68,6 +71,10 @@ func (p *Provider) appendMessage(result []map[string]any, msg provider.Message) 
 			}
 			for _, cb := range msg.ContentBlocks {
 				switch cb.BlockType() {
+				case "text":
+					if txt, ok := cb.(provider.TextContentBlock); ok {
+						blocks = append(blocks, map[string]any{"type": "text", "text": txt.Text})
+					}
 				case "image":
 					if img, ok := cb.(provider.ImageContentBlock); ok {
 						blocks = append(blocks, buildImageBlock(img.Source))
@@ -103,6 +110,14 @@ func (p *Provider) appendMessage(result []map[string]any, msg provider.Message) 
 				"type":      "thinking",
 				"thinking":  msg.ThinkingContent,
 				"signature": msg.ThinkingSignature,
+			})
+		}
+
+		// Redacted thinking block（多轮对话中原样传回加密 data）
+		if msg.RedactedThinkingData != "" {
+			blocks = append(blocks, map[string]any{
+				"type": "redacted_thinking",
+				"data": msg.RedactedThinkingData,
 			})
 		}
 

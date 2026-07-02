@@ -166,8 +166,8 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 
 				select {
 				case <-ctx.Done():
-				cancelErr := pkgErrors.NewError(context.Background(), nil,
-					fmt.Sprintf("bamboo: 对话已取消: %s", ctx.Err()), false)
+					cancelErr := pkgErrors.NewError(context.Background(), nil,
+						fmt.Sprintf("bamboo: 对话已取消: %s", ctx.Err()), false)
 					writeAll(converter.Convert(provider.StreamEvent{
 						Type: provider.StreamTypeError,
 						Err:  cancelErr,

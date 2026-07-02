@@ -31,6 +31,9 @@ const (
 
 	// ContentBlockDocument 文档内容块
 	ContentBlockDocument ContentBlockType = "document"
+
+	// ContentBlockRedactedThinking 加密思考内容块（Anthropic redacted_thinking）
+	ContentBlockRedactedThinking ContentBlockType = "redacted_thinking"
 )
 
 // ContentSource 统一来源类型，合并图片和文档的来源字段。
@@ -60,6 +63,7 @@ var _ ContentBlock = (*ToolUseBlock)(nil)
 var _ ContentBlock = (*ToolResultBlock)(nil)
 var _ ContentBlock = (*ImageBlock)(nil)
 var _ ContentBlock = (*DocumentBlock)(nil)
+var _ ContentBlock = (*RedactedThinkingBlock)(nil)
 
 // TextBlock 纯文本内容块。
 type TextBlock struct {
@@ -121,6 +125,16 @@ type DocumentBlock struct {
 
 func (b DocumentBlock) BlockType() ContentBlockType { return ContentBlockDocument }
 
+// RedactedThinkingBlock 加密思考内容块（Anthropic redacted_thinking）。
+//
+// 用于 Anthropic 响应中的加密 thinking block，多轮对话必须原样传回。
+type RedactedThinkingBlock struct {
+	Type ContentBlockType `json:"type"`
+	Data string           `json:"data"`
+}
+
+func (b *RedactedThinkingBlock) BlockType() ContentBlockType { return ContentBlockRedactedThinking }
+
 // ── 内容块类型注册表 ──
 
 var (
@@ -145,6 +159,7 @@ func init() {
 	RegisterBlockType(ContentBlockToolResult, func() ContentBlock { return &ToolResultBlock{} })
 	RegisterBlockType(ContentBlockImage, func() ContentBlock { return &ImageBlock{} })
 	RegisterBlockType(ContentBlockDocument, func() ContentBlock { return &DocumentBlock{} })
+	RegisterBlockType(ContentBlockRedactedThinking, func() ContentBlock { return &RedactedThinkingBlock{} })
 }
 
 // ContentBlocks 内容块切片，支持 JSON 反序列化时根据 type 字段分派到具体类型。
@@ -280,4 +295,11 @@ func NewImageBlockWithCache(source ContentSource, cc *provider.CacheControl) Con
 
 func NewDocumentBlockWithCache(source ContentSource, cc *provider.CacheControl) ContentBlock {
 	return &DocumentBlock{Type: ContentBlockDocument, Source: &source, CacheControl: cc}
+}
+
+// NewRedactedThinkingBlock 创建加密思考内容块。
+//
+// data 为 Anthropic 返回的加密 thinking block 数据，多轮对话需原样传回。
+func NewRedactedThinkingBlock(data string) ContentBlock {
+	return &RedactedThinkingBlock{Type: ContentBlockRedactedThinking, Data: data}
 }

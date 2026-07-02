@@ -25,6 +25,7 @@ type messageCreateRequest struct {
 type thinkingConfig struct {
 	Type         string `json:"type"`                    // 思考类型："adaptive" 或 "enabled"
 	BudgetTokens int    `json:"budget_tokens,omitempty"` // 思考 token 预算
+	Display      string `json:"display,omitempty"`       // 思考内容显示模式
 }
 
 // metadata 表示 Anthropic 请求级元数据。
@@ -49,10 +50,11 @@ type messageStreamEvent struct {
 //
 // 支持 text、thinking、tool_use 等类型，字段按需使用。
 type contentBlock struct {
-	Type      string          `json:"type"`                // 内容块类型：text、thinking、tool_use
+	Type      string          `json:"type"`                // 内容块类型：text、thinking、tool_use、redacted_thinking
 	Text      string          `json:"text,omitempty"`      // 文本内容
 	Thinking  string          `json:"thinking,omitempty"`  // 思考过程内容
 	Signature string          `json:"signature,omitempty"` // 思考签名
+	Data      string          `json:"data,omitempty"`      // redacted_thinking 加密数据
 	ID        string          `json:"id,omitempty"`        // 工具调用 ID
 	Name      string          `json:"name,omitempty"`      // 工具名称
 	Input     json.RawMessage `json:"input,omitempty"`     // 工具调用输入（JSON 原始数据）

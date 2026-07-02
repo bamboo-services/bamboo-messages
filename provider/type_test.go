@@ -1,6 +1,9 @@
 package provider
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 // TestGetExtraFloat64 测试从 ProviderExtra 中安全获取 float64 值
 func TestGetExtraFloat64(t *testing.T) {
@@ -205,7 +208,42 @@ func TestGetExtraString(t *testing.T) {
 	}
 }
 
-// TestGetExtraAny 测试从 ProviderExtra 中获取任意类型值
+// TestThinkingConfigDisplayMarshal 验证 ThinkingConfig 的 Display 字段 JSON 序列化。
+func TestThinkingConfigDisplayMarshal(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  ThinkingConfig
+		want string
+	}{
+		{
+			name: "包含 display 字段",
+			cfg:  ThinkingConfig{Effort: "high", Display: "omitted"},
+			want: `{"effort":"high","display":"omitted"}`,
+		},
+		{
+			name: "仅 effort 字段",
+			cfg:  ThinkingConfig{Effort: "medium"},
+			want: `{"effort":"medium"}`,
+		},
+		{
+			name: "空值时 omitempty",
+			cfg:  ThinkingConfig{},
+			want: `{}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := json.Marshal(tt.cfg)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+			if string(got) != tt.want {
+				t.Errorf("json.Marshal() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
 func TestGetExtraAny(t *testing.T) {
 	tests := []struct {
 		name   string

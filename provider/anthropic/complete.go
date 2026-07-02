@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -82,6 +83,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	}
 
 	// 遍历响应内容块，提取文本、思考和工具调用
+	var signatures []string
 	for _, block := range msgResp.Content {
 		switch block.Type {
 		case "text":
@@ -90,8 +92,10 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 			result.Thinking += block.Thinking
 			// 保留 thinking 签名（用于多轮对话验证）
 			if block.Signature != "" {
-				result.ThinkingSignature = block.Signature
+				signatures = append(signatures, block.Signature)
 			}
+		case "redacted_thinking":
+			result.RedactedThinking = append(result.RedactedThinking, block.Data)
 		case "tool_use":
 			inputStr := string(block.Input)
 			if len(block.Input) == 0 {
@@ -106,6 +110,10 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 				},
 			})
 		}
+	}
+
+	if len(signatures) > 0 {
+		result.ThinkingSignature = strings.Join(signatures, "\n---\n")
 	}
 
 	return result, nil

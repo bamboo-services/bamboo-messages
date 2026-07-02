@@ -19,6 +19,15 @@ const (
 
 	// FinishReasonStopSequence 遇到指定的停止序列而停止。
 	FinishReasonStopSequence FinishReason = "stop_sequence"
+
+	// FinishReasonPauseTurn 暂停等待用户输入。
+	FinishReasonPauseTurn FinishReason = "pause_turn"
+
+	// FinishReasonRefusal 模型拒绝生成内容。
+	FinishReasonRefusal FinishReason = "refusal"
+
+	// FinishReasonServerToolUse 服务器端工具调用。
+	FinishReasonServerToolUse FinishReason = "server_tool_use"
 )
 
 // Response 非流式对话的完整响应。

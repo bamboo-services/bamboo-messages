@@ -42,15 +42,16 @@ const (
 type StreamDeltaType string
 
 const (
-	StreamDeltaTypeTextOutput    StreamDeltaType = "text_output"     // 文本输出事件，表示 AI 模型生成的文本响应
-	StreamDeltaTypeThinking      StreamDeltaType = "thinking"        // 思考事件，表示 AI 模型的推理或思考过程内容（如 Claude 的 extended thinking）
-	StreamDeltaTypeSignature     StreamDeltaType = "signature"       // 签名事件，表示推理内容的加密签名/密文（OpenAI encrypted_content / Anthropic signature）
-	StreamDeltaTypeToolCall      StreamDeltaType = "tool_call"       // 工具调用事件，表示 AI 模型请求调用某个工具
-	StreamDeltaTypeToolCallDelta StreamDeltaType = "tool_call_delta" // 工具调用增量事件，表示工具调用 JSON 参数的增量部分
-	StreamDeltaTypeUsage         StreamDeltaType = "usage"           // 用量统计事件，表示本次对话的 Token 使用量统计信息
-	StreamDeltaTypeBlockStart    StreamDeltaType = "block_start"     // 内容块开始事件，标记新内容块的起始
-	StreamDeltaTypeBlockStop     StreamDeltaType = "block_stop"      // 内容块停止事件，标记内容块的结束
-	StreamDeltaTypeMetadata      StreamDeltaType = "metadata"        // 元数据事件，携带响应 ID / reasoning ID 等非内容性信息
+	StreamDeltaTypeTextOutput       StreamDeltaType = "text_output"       // 文本输出事件，表示 AI 模型生成的文本响应
+	StreamDeltaTypeThinking         StreamDeltaType = "thinking"          // 思考事件，表示 AI 模型的推理或思考过程内容（如 Claude 的 extended thinking）
+	StreamDeltaTypeSignature        StreamDeltaType = "signature"         // 签名事件，表示推理内容的加密签名/密文（OpenAI encrypted_content / Anthropic signature）
+	StreamDeltaTypeToolCall         StreamDeltaType = "tool_call"         // 工具调用事件，表示 AI 模型请求调用某个工具
+	StreamDeltaTypeToolCallDelta    StreamDeltaType = "tool_call_delta"   // 工具调用增量事件，表示工具调用 JSON 参数的增量部分
+	StreamDeltaTypeUsage            StreamDeltaType = "usage"             // 用量统计事件，表示本次对话的 Token 使用量统计信息
+	StreamDeltaTypeBlockStart       StreamDeltaType = "block_start"       // 内容块开始事件，标记新内容块的起始
+	StreamDeltaTypeBlockStop        StreamDeltaType = "block_stop"        // 内容块停止事件，标记内容块的结束
+	StreamDeltaTypeMetadata         StreamDeltaType = "metadata"          // 元数据事件，携带响应 ID / reasoning ID 等非内容性信息
+	StreamDeltaTypeRedactedThinking StreamDeltaType = "redacted_thinking" // redacted_thinking 事件，Anthropic 响应中的加密 thinking block
 )
 
 // ============================================
@@ -73,6 +74,11 @@ type ThinkingData string
 // - Anthropic: extended thinking 的验证签名
 // - OpenAI Responses: encrypted_content（服务端加密的不透明 token）
 type SignatureData string
+
+// RedactedThinkingData redacted_thinking 数据。
+//
+// 用于 Anthropic 响应中的加密 thinking block，多轮对话必须原样传回。
+type RedactedThinkingData string
 
 // ToolCallData 工具调用开始数据。
 //
@@ -344,5 +350,18 @@ func NewMetadataDelta(responseID, reasoningID, encryptedContent string) StreamDe
 			ReasoningID:      reasoningID,
 			EncryptedContent: encryptedContent,
 		},
+	}
+}
+
+// NewRedactedThinkingDelta 创建 redacted_thinking 增量事件。
+//
+// 参数:
+//   - data - redacted_thinking 数据
+//
+// 返回类型为 StreamDelta[any] 的 redacted_thinking 增量事件。
+func NewRedactedThinkingDelta(data string) StreamDelta[any] {
+	return StreamDelta[any]{
+		Type: StreamDeltaTypeRedactedThinking,
+		Data: RedactedThinkingData(data),
 	}
 }

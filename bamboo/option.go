@@ -98,3 +98,15 @@ func WithSystemCacheControl(cc *provider.CacheControl) RequestOption {
 func WithPromptCacheKey(key string) RequestOption {
 	return func(cfg *RequestConfig) { cfg.PromptCacheKey = key }
 }
+
+// WithThinkingDisplay 设置思考内容的显示模式。
+//
+// 支持 "summarized"（摘要显示）和 "omitted"（完全隐藏）两种模式。
+func WithThinkingDisplay(display string) RequestOption {
+	return func(cfg *RequestConfig) {
+		if cfg.ThinkingConfig == nil {
+			cfg.ThinkingConfig = &ThinkingConfig{}
+		}
+		cfg.ThinkingConfig.Display = display
+	}
+}

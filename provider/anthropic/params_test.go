@@ -458,15 +458,33 @@ func TestBuildParams_NonLegacy_ThinkingFromExtraAdaptive(t *testing.T) {
 	}
 }
 
-func TestBuildParams_LegacyCompat_ThinkingNoneOmitted(t *testing.T) {
+func TestBuildParams_LegacyCompat_ThinkingNoneDisabled(t *testing.T) {
 	p := NewProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat())
 	config := &provider.ChatConfig{
 		ThinkingConfig: &provider.ThinkingConfig{Effort: "none"},
 	}
 	params := p.buildParams("", nil, config)
 
-	if params.Thinking != nil {
-		t.Errorf("Thinking should be nil for effort=none, got %+v", params.Thinking)
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil for effort=none")
+	}
+	if params.Thinking.Type != "disabled" {
+		t.Errorf("Thinking.Type = %q, want 'disabled'", params.Thinking.Type)
+	}
+}
+
+func TestBuildParams_NonLegacy_ThinkingNoneDisabled(t *testing.T) {
+	p := NewProvider("test-key")
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "none"},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil for effort=none")
+	}
+	if params.Thinking.Type != "disabled" {
+		t.Errorf("Thinking.Type = %q, want 'disabled'", params.Thinking.Type)
 	}
 }
 
@@ -477,5 +495,111 @@ func TestBuildParams_LegacyCompat_NoThinkingConfig(t *testing.T) {
 
 	if params.Thinking != nil {
 		t.Errorf("Thinking should be nil when no ThinkingConfig, got %+v", params.Thinking)
+	}
+}
+
+func TestBuildParams_LegacyCompat_ThinkingHighWithMaxTokens40000(t *testing.T) {
+	p := NewProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat())
+	config := &provider.ChatConfig{
+		MaxTokens:      40000,
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil for effort=high in legacy mode")
+	}
+	if params.Thinking.Type != "enabled" {
+		t.Errorf("Thinking.Type = %q, want 'enabled'", params.Thinking.Type)
+	}
+	if params.Thinking.BudgetTokens != 32000 {
+		t.Errorf("Thinking.BudgetTokens = %d, want 32000", params.Thinking.BudgetTokens)
+	}
+}
+
+func TestBuildParams_LegacyCompat_ThinkingXHighWithMaxTokens50000(t *testing.T) {
+	p := NewProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat())
+	config := &provider.ChatConfig{
+		MaxTokens:      50000,
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "xhigh"},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil for effort=xhigh in legacy mode")
+	}
+	if params.Thinking.Type != "enabled" {
+		t.Errorf("Thinking.Type = %q, want 'enabled'", params.Thinking.Type)
+	}
+	if params.Thinking.BudgetTokens != 48000 {
+		t.Errorf("Thinking.BudgetTokens = %d, want 48000", params.Thinking.BudgetTokens)
+	}
+}
+
+func TestBuildParams_LegacyCompat_ThinkingMaxWithMaxTokens65000(t *testing.T) {
+	p := NewProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat())
+	config := &provider.ChatConfig{
+		MaxTokens:      65000,
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "max"},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil for effort=max in legacy mode")
+	}
+	if params.Thinking.Type != "enabled" {
+		t.Errorf("Thinking.Type = %q, want 'enabled'", params.Thinking.Type)
+	}
+	if params.Thinking.BudgetTokens != 64000 {
+		t.Errorf("Thinking.BudgetTokens = %d, want 64000", params.Thinking.BudgetTokens)
+	}
+}
+
+func TestBuildParams_LegacyCompat_ThinkingWithMaxTokens500(t *testing.T) {
+	p := NewProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat())
+	config := &provider.ChatConfig{
+		MaxTokens:      500,
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking != nil {
+		t.Errorf("Thinking should be nil when max_tokens=500 (<1025), got %+v", params.Thinking)
+	}
+}
+
+func TestBuildParams_ThinkingConfig_DisplaySet(t *testing.T) {
+	p := NewProvider("test-api-key")
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "high", Display: "omitted"},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil for effort=high")
+	}
+	if params.Thinking.Type != "adaptive" {
+		t.Errorf("Thinking.Type = %q, want 'adaptive'", params.Thinking.Type)
+	}
+	if params.Thinking.Display != "omitted" {
+		t.Errorf("Thinking.Display = %q, want 'omitted'", params.Thinking.Display)
+	}
+}
+
+func TestBuildParams_ThinkingConfig_DisplayEmpty(t *testing.T) {
+	p := NewProvider("test-api-key")
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil for effort=high")
+	}
+	if params.Thinking.Type != "adaptive" {
+		t.Errorf("Thinking.Type = %q, want 'adaptive'", params.Thinking.Type)
+	}
+	if params.Thinking.Display != "" {
+		t.Errorf("Thinking.Display = %q, want empty", params.Thinking.Display)
 	}
 }

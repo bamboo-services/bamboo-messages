@@ -192,6 +192,80 @@ func TestBuildMessages_ToolResultMerged(t *testing.T) {
 	}
 }
 
+// TestBuildMessages_ToolResultWithName 验证 RoleTool 带 ToolName 时 tool_result 包含 name 字段。
+func TestBuildMessages_ToolResultWithName(t *testing.T) {
+	p := NewProvider("test-api-key")
+
+	messages := []provider.Message{
+		{
+			Role:       provider.RoleTool,
+			Content:    `{"temp": 25}`,
+			ToolCallID: "call-1",
+			ToolName:   "get_weather",
+		},
+	}
+
+	result := p.buildMessages(messages)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+
+	content, ok := result[0]["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected content to be []map[string]any, got %T", result[0]["content"])
+	}
+	if len(content) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(content))
+	}
+
+	block := content[0]
+	if block["type"] != "tool_result" {
+		t.Fatalf("expected tool_result block, got type=%v", block["type"])
+	}
+	if block["tool_use_id"] != "call-1" {
+		t.Errorf("expected tool_use_id 'call-1', got %v", block["tool_use_id"])
+	}
+	if block["name"] != "get_weather" {
+		t.Errorf("expected name 'get_weather', got %v", block["name"])
+	}
+}
+
+// TestBuildMessages_ToolResultWithoutName 验证 RoleTool 无 ToolName 时 tool_result 不包含 name 键。
+func TestBuildMessages_ToolResultWithoutName(t *testing.T) {
+	p := NewProvider("test-api-key")
+
+	messages := []provider.Message{
+		{
+			Role:       provider.RoleTool,
+			Content:    `{"temp": 25}`,
+			ToolCallID: "call-1",
+		},
+	}
+
+	result := p.buildMessages(messages)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+
+	content, ok := result[0]["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected content to be []map[string]any, got %T", result[0]["content"])
+	}
+	if len(content) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(content))
+	}
+
+	block := content[0]
+	if block["type"] != "tool_result" {
+		t.Fatalf("expected tool_result block, got type=%v", block["type"])
+	}
+	if _, exists := block["name"]; exists {
+		t.Errorf("expected 'name' key not to exist when ToolName is empty")
+	}
+}
+
 // TestBuildMessages_AssistantWithThinking 验证 thinking block 保留在 assistant 消息中。
 func TestBuildMessages_AssistantWithThinking(t *testing.T) {
 	p := NewProvider("test-api-key")
@@ -228,5 +302,79 @@ func TestBuildMessages_AssistantWithThinking(t *testing.T) {
 	}
 	if content[0]["signature"] != "sig_abc123" {
 		t.Errorf("expected signature, got %v", content[0]["signature"])
+	}
+}
+
+// TestBuildMessages_AssistantWithRedactedThinking 验证 RedactedThinkingData 产生 redacted_thinking block。
+func TestBuildMessages_AssistantWithRedactedThinking(t *testing.T) {
+	p := NewProvider("test-api-key")
+
+	messages := []provider.Message{
+		{
+			Role:                 provider.RoleAssistant,
+			Content:              "The answer is 42.",
+			RedactedThinkingData: "rt_encrypted_data_xyz",
+		},
+	}
+
+	result := p.buildMessages(messages)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+
+	content, ok := result[0]["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected content to be []map[string]any, got %T", result[0]["content"])
+	}
+
+	// 应包含 redacted_thinking block 和 text block
+	var foundRedacted bool
+	for _, block := range content {
+		if block["type"] == "redacted_thinking" {
+			foundRedacted = true
+			if block["data"] != "rt_encrypted_data_xyz" {
+				t.Errorf("redacted_thinking data = %v, want 'rt_encrypted_data_xyz'", block["data"])
+			}
+		}
+	}
+	if !foundRedacted {
+		t.Error("expected redacted_thinking block in content, not found")
+	}
+}
+
+// TestBuildMessages_AssistantWithThinkingAndRedactedThinking 验证 thinking + redacted_thinking + text 的顺序。
+func TestBuildMessages_AssistantWithThinkingAndRedactedThinking(t *testing.T) {
+	p := NewProvider("test-api-key")
+
+	messages := []provider.Message{
+		{
+			Role:                 provider.RoleAssistant,
+			Content:              "Answer.",
+			ThinkingContent:      "Let me think...",
+			ThinkingSignature:    "sig_abc",
+			RedactedThinkingData: "rt_data",
+		},
+	}
+
+	result := p.buildMessages(messages)
+
+	content, ok := result[0]["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected content to be []map[string]any, got %T", result[0]["content"])
+	}
+	if len(content) < 3 {
+		t.Fatalf("expected at least 3 blocks (thinking + redacted + text), got %d", len(content))
+	}
+
+	// 顺序: thinking → redacted_thinking → text
+	if content[0]["type"] != "thinking" {
+		t.Errorf("block[0] type = %v, want 'thinking'", content[0]["type"])
+	}
+	if content[1]["type"] != "redacted_thinking" {
+		t.Errorf("block[1] type = %v, want 'redacted_thinking'", content[1]["type"])
+	}
+	if content[2]["type"] != "text" {
+		t.Errorf("block[2] type = %v, want 'text'", content[2]["type"])
 	}
 }

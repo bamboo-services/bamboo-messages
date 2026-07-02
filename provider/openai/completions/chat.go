@@ -8,8 +8,8 @@ import (
 	"io"
 	"net/http"
 
-	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
