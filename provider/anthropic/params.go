@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
@@ -87,11 +88,27 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 	}
 
 	// ThinkingConfig 映射
-	//   effort != "" 且 effort != "none" → {"type":"adaptive"}
 	//   effort == "none" → 不设置 thinking 字段
+	//   非 Legacy 模式（Anthropic 官方端点）:
+	//     - 优先使用 ProviderExtra["thinking"] 原始配置（跨协议场景保留 type 和 budget_tokens）
+	//     - 回退合成 {type:"adaptive"}
+	//   Legacy 模式（GLM/Kimi 等第三方兼容端点）:
+	//     - 优先使用 ProviderExtra["thinking"] 并归一化（adaptive→enabled，保留 budget_tokens）
+	//     - 回退合成 {type:"enabled"}
 	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
 		if config.ThinkingConfig.Effort != "none" {
-			params.Thinking = &thinkingConfig{Type: "adaptive"}
+			if tc := parseThinkingFromExtra(config.ProviderExtra); tc != nil {
+				if p.legacyCompat && tc.Type == "adaptive" {
+					tc.Type = "enabled"
+				}
+				params.Thinking = tc
+			} else {
+				if p.legacyCompat {
+					params.Thinking = &thinkingConfig{Type: "enabled"}
+				} else {
+					params.Thinking = &thinkingConfig{Type: "adaptive"}
+				}
+			}
 		}
 	}
 
@@ -131,8 +148,6 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 }
 
 // anthropicCacheNormalizationEnabled 检查是否启用了缓存标准化模式。
-//
-// 启用时不发送 metadata，避免与 Anthropic 的缓存断点冲突。
 func anthropicCacheNormalizationEnabled(config *provider.ChatConfig) bool {
 	if config == nil {
 		return false
@@ -144,4 +159,42 @@ func anthropicCacheNormalizationEnabled(config *provider.ChatConfig) bool {
 		return enabled
 	}
 	return false
+}
+
+// parseThinkingFromExtra 从 ProviderExtra["thinking"] 解析 thinkingConfig。
+//
+// 跨协议场景下（如 Anthropic 入口 → 任意适配器），codec 层将原始 thinking JSON
+// 存入 ProviderExtra["thinking"]，此函数将其解析为 thinkingConfig 结构体。
+// 返回 nil 表示 ProviderExtra 中无 thinking 或解析失败。
+func parseThinkingFromExtra(extra map[string]any) *thinkingConfig {
+	raw, ok := provider.GetExtraAny(extra, "thinking")
+	if !ok || raw == nil {
+		return nil
+	}
+
+	var tc thinkingConfig
+	switch v := raw.(type) {
+	case json.RawMessage:
+		if err := json.Unmarshal(v, &tc); err != nil {
+			return nil
+		}
+	case []byte:
+		if err := json.Unmarshal(v, &tc); err != nil {
+			return nil
+		}
+	case map[string]any:
+		if t, ok := v["type"].(string); ok {
+			tc.Type = t
+		}
+		if bt, ok := v["budget_tokens"].(float64); ok {
+			tc.BudgetTokens = int(bt)
+		}
+	default:
+		return nil
+	}
+
+	if tc.Type == "" {
+		return nil
+	}
+	return &tc
 }

@@ -8,8 +8,10 @@ import (
 //
 // 在去 SDK 化重构后，不再嵌入 anthropic-sdk-go Client，
 // 而是统一持有 *provider.HTTPClient 进行 HTTP 通信。
+// legacyCompat 标志控制旧版端点兼容行为（如 GLM/Kimi 等 Anthropic 兼容端点）。
 type Provider struct {
-	httpClient *provider.HTTPClient
+	httpClient   *provider.HTTPClient
+	legacyCompat bool
 }
 
 // ============================================
@@ -25,10 +27,11 @@ type Option func(*config)
 //
 // 存储 API Key、BaseURL、自定义 Headers 等配置。
 type config struct {
-	apiKey  string
-	baseURL string
-	headers map[string]string
-	debug   bool
+	apiKey       string
+	baseURL      string
+	headers      map[string]string
+	debug        bool
+	legacyCompat bool
 	// interceptors 请求拦截器链，通过 WithInterceptor 注册。
 	// 构造 Provider 时若非空，会用 interceptorTransport 包装 HTTP client，
 	// 让所有上游请求都先经过拦截器链。
@@ -72,6 +75,19 @@ func WithHeader(key, value string) Option {
 // 等价于设置环境变量 BAMBOO_DEBUG=1。
 func WithDebug() Option {
 	return func(c *config) { c.debug = true }
+}
+
+// WithLegacyCompat 启用旧版兼容模式。
+//
+// 适用于 GLM/Kimi 等第三方 Anthropic 兼容端点，这些端点仅识别 thinking.type:"enabled"，
+// 不支持 Anthropic 官方的 thinking.type:"adaptive" 自适应模式。
+//
+// 启用后的行为差异：
+//   - thinking 参数: type 强制为 "enabled"（adaptive → enabled），保留 budget_tokens
+//   - 优先读取 ProviderExtra["thinking"] 原始配置（跨协议场景保留 budget_tokens 等）
+//   - 无原始配置时从 ThinkingConfig.Effort 合成 {type:"enabled"}
+func WithLegacyCompat() Option {
+	return func(c *config) { c.legacyCompat = true }
 }
 
 // WithInterceptor 注册一个请求拦截器。
@@ -136,7 +152,8 @@ func NewProviderWithOptions(opts ...Option) *Provider {
 	}
 
 	return &Provider{
-		httpClient: httpClient,
+		httpClient:   httpClient,
+		legacyCompat: cfg.legacyCompat,
 	}
 }
 

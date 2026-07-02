@@ -206,8 +206,15 @@ func TestBuildParams_CacheNormalizationRemovesDynamicMetadataOnlyWhenEnabled(t *
 	if params.Metadata != nil {
 		t.Fatalf("metadata should be nil when cache normalization is enabled, got %#v", params.Metadata)
 	}
-	if params.Thinking == nil || params.Thinking.Type != "adaptive" {
-		t.Fatal("parsed ThinkingConfig should remain available; only raw ProviderExtra thinking is ignored")
+	// 非 Legacy 模式下，ProviderExtra["thinking"] 原始配置应被保留（enabled + budget_tokens）
+	if params.Thinking == nil {
+		t.Fatal("Thinking should be non-nil")
+	}
+	if params.Thinking.Type != "enabled" {
+		t.Errorf("Thinking.Type = %q, want 'enabled' (preserved from ProviderExtra)", params.Thinking.Type)
+	}
+	if params.Thinking.BudgetTokens != 1024 {
+		t.Errorf("Thinking.BudgetTokens = %d, want 1024", params.Thinking.BudgetTokens)
 	}
 	// system prompt 应保持字符串格式
 	sysStr, ok := params.System.(string)
@@ -351,5 +358,124 @@ func TestBuildParams_Marshalable(t *testing.T) {
 
 	if _, err := json.Marshal(params); err != nil {
 		t.Fatalf("buildParams result not marshalable: %v", err)
+	}
+}
+
+// ==============================
+// Legacy 兼容模式测试
+// ==============================
+
+func TestBuildParams_LegacyCompat_ThinkingAdaptiveFromEffort(t *testing.T) {
+	p := NewProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat())
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil for effort=high in legacy mode")
+	}
+	if params.Thinking.Type != "enabled" {
+		t.Errorf("Thinking.Type = %q, want 'enabled' (legacy mode synthesizes enabled)", params.Thinking.Type)
+	}
+}
+
+func TestBuildParams_LegacyCompat_ThinkingFromExtraAdaptive(t *testing.T) {
+	p := NewProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat())
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
+		ProviderExtra: map[string]any{
+			"thinking": json.RawMessage(`{"type":"adaptive"}`),
+		},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil")
+	}
+	if params.Thinking.Type != "enabled" {
+		t.Errorf("Thinking.Type = %q, want 'enabled' (adaptive→enabled in legacy mode)", params.Thinking.Type)
+	}
+}
+
+func TestBuildParams_LegacyCompat_ThinkingFromExtraEnabledWithBudget(t *testing.T) {
+	p := NewProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat())
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "medium"},
+		ProviderExtra: map[string]any{
+			"thinking": json.RawMessage(`{"type":"enabled","budget_tokens":10000}`),
+		},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil")
+	}
+	if params.Thinking.Type != "enabled" {
+		t.Errorf("Thinking.Type = %q, want 'enabled'", params.Thinking.Type)
+	}
+	if params.Thinking.BudgetTokens != 10000 {
+		t.Errorf("Thinking.BudgetTokens = %d, want 10000 (preserved from ProviderExtra)", params.Thinking.BudgetTokens)
+	}
+}
+
+func TestBuildParams_NonLegacy_ThinkingFromExtraEnabledWithBudget(t *testing.T) {
+	p := NewProvider("test-key")
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "medium"},
+		ProviderExtra: map[string]any{
+			"thinking": json.RawMessage(`{"type":"enabled","budget_tokens":10000}`),
+		},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil")
+	}
+	if params.Thinking.Type != "enabled" {
+		t.Errorf("Thinking.Type = %q, want 'enabled' (preserved in non-legacy mode)", params.Thinking.Type)
+	}
+	if params.Thinking.BudgetTokens != 10000 {
+		t.Errorf("Thinking.BudgetTokens = %d, want 10000", params.Thinking.BudgetTokens)
+	}
+}
+
+func TestBuildParams_NonLegacy_ThinkingFromExtraAdaptive(t *testing.T) {
+	p := NewProvider("test-key")
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
+		ProviderExtra: map[string]any{
+			"thinking": json.RawMessage(`{"type":"adaptive"}`),
+		},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking == nil {
+		t.Fatal("expected Thinking to be non-nil")
+	}
+	if params.Thinking.Type != "adaptive" {
+		t.Errorf("Thinking.Type = %q, want 'adaptive' (preserved in non-legacy mode)", params.Thinking.Type)
+	}
+}
+
+func TestBuildParams_LegacyCompat_ThinkingNoneOmitted(t *testing.T) {
+	p := NewProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat())
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "none"},
+	}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking != nil {
+		t.Errorf("Thinking should be nil for effort=none, got %+v", params.Thinking)
+	}
+}
+
+func TestBuildParams_LegacyCompat_NoThinkingConfig(t *testing.T) {
+	p := NewProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat())
+	config := &provider.ChatConfig{}
+	params := p.buildParams("", nil, config)
+
+	if params.Thinking != nil {
+		t.Errorf("Thinking should be nil when no ThinkingConfig, got %+v", params.Thinking)
 	}
 }
