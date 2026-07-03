@@ -44,6 +44,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	if err != nil {
 		return nil, pkgErrors.NewError(ctx, nil, "Anthropic 非流式响应读取失败", false, err)
 	}
+	provider.DebugResponse("anthropic", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header), respBody)
 
 	// 检查 HTTP 状态码，解析错误响应
 	if resp.StatusCode >= 400 {

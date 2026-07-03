@@ -51,6 +51,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	if err != nil {
 		return nil, pkgErrors.NewError(ctx, nil, "Gemini 非流式对话响应读取失败", false, err)
 	}
+	provider.DebugResponse("gemini", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header), respBytes)
 
 	// HTTP 状态码 >= 400 → 解析错误响应
 	if resp.StatusCode >= 400 {

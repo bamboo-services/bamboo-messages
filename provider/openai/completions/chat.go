@@ -81,6 +81,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 
 		// 创建 SSE 扫描器
 		scanner := provider.NewSSEScanner(resp.Body)
+		provider.DebugSSEResponse("openai", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header))
 		defer func() {
 			// best-effort drain：读取残余数据以确保连接可被 Transport 复用（HTTP/1.1 keep-alive）
 			_, _ = io.Copy(io.Discard, resp.Body)
@@ -95,7 +96,8 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 
 		// SSE 事件循环
 		for {
-			_, data, done, scanErr := scanner.Next()
+			eventType, data, done, scanErr := scanner.Next()
+			provider.DebugSSEFrame("openai", eventType, data)
 			if done {
 				break
 			}

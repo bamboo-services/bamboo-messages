@@ -388,6 +388,127 @@ func TestTruncateContent_Regression(t *testing.T) {
 }
 
 // ────────────────────────────────────────────────────────
+// Response Debug 测试
+// ────────────────────────────────────────────────────────
+
+// TestFormatDebugResponse_JSON 测试非流式响应 JSON body 的格式化输出。
+//
+// 验证返回字符串包含 provider、status、header key、body 内容。
+func TestFormatDebugResponse_JSON(t *testing.T) {
+	got := FormatDebugResponse("anthropic", 200,
+		map[string]string{"Content-Type": "application/json"},
+		[]byte(`{"id":"msg_001","content":[{"type":"text","text":"hello"}]}`))
+
+	for _, want := range []string{"anthropic", "200", "Content-Type", "msg_001"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("FormatDebugResponse 输出应包含 %q, got: %s", want, got)
+		}
+	}
+}
+
+// TestFormatDebugResponse_EmptyBody 测试空 body 不 panic 且包含基本字段。
+func TestFormatDebugResponse_EmptyBody(t *testing.T) {
+	got := FormatDebugResponse("anthropic", 200, nil, []byte{})
+
+	for _, want := range []string{"anthropic", "200"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("FormatDebugResponse 空body输出应包含 %q, got: %s", want, got)
+		}
+	}
+}
+
+// TestFormatDebugResponse_NonJSON 测试非 JSON body（如 HTML 错误页）的格式化。
+func TestFormatDebugResponse_NonJSON(t *testing.T) {
+	got := FormatDebugResponse("anthropic", 500, nil, []byte(`<html>error</html>`))
+
+	for _, want := range []string{"500", "<html>"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("FormatDebugResponse 非 JSON 输出应包含 %q, got: %s", want, got)
+		}
+	}
+}
+
+// TestFormatDebugResponse_HeaderRedaction 测试敏感 header 被脱敏。
+func TestFormatDebugResponse_HeaderRedaction(t *testing.T) {
+	got := FormatDebugResponse("anthropic", 200,
+		map[string]string{"Authorization": "Bearer sk-ant-xxxxx-yyyy"}, nil)
+
+	if strings.Contains(got, "sk-ant-xxxxx-yyyy") {
+		t.Errorf("Authorization 值应被脱敏, 不应出现在输出中, got: %s", got)
+	}
+}
+
+// TestFormatDebugResponse_BodyTruncation 测试超长 body 被截断。
+func TestFormatDebugResponse_BodyTruncation(t *testing.T) {
+	longText := strings.Repeat("x", 600)
+	body := []byte(`{"content":"` + longText + `"}`)
+
+	got := FormatDebugResponse("anthropic", 200, nil, body)
+
+	if !strings.Contains(got, "...(truncated)") {
+		t.Errorf("超长 body 应被截断并包含 ...(truncated) 标记, got: %s", got[:min(len(got), 200)])
+	}
+}
+
+// TestFormatDebugSSEResponse 测试 SSE 响应头格式化。
+func TestFormatDebugSSEResponse(t *testing.T) {
+	got := FormatDebugSSEResponse("anthropic", 200,
+		map[string]string{"Content-Type": "text/event-stream"})
+
+	for _, want := range []string{"anthropic", "200", "text/event-stream"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("FormatDebugSSEResponse 输出应包含 %q, got: %s", want, got)
+		}
+	}
+}
+
+// TestFormatDebugSSEFrame_Normal 测试正常 SSE 帧格式化。
+func TestFormatDebugSSEFrame_Normal(t *testing.T) {
+	got := FormatDebugSSEFrame("anthropic", "content_block_delta",
+		[]byte(`{"type":"content_block_delta","delta":{"text":"你好"}}`))
+
+	for _, want := range []string{"anthropic", "content_block_delta", "你好"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("FormatDebugSSEFrame 输出应包含 %q, got: %s", want, got)
+		}
+	}
+}
+
+// TestFormatDebugSSEFrame_EmptyData 测试空 data 不 panic。
+func TestFormatDebugSSEFrame_EmptyData(t *testing.T) {
+	got := FormatDebugSSEFrame("anthropic", "ping", []byte{})
+
+	if !strings.Contains(got, "anthropic") {
+		t.Errorf("FormatDebugSSEFrame 空 data 输出应包含 provider, got: %s", got)
+	}
+	if !strings.Contains(got, "ping") {
+		t.Errorf("FormatDebugSSEFrame 空 data 输出应包含 event type, got: %s", got)
+	}
+}
+
+// TestFormatDebugSSEFrame_LargeData 测试超长 SSE 帧数据被截断。
+func TestFormatDebugSSEFrame_LargeData(t *testing.T) {
+	longText := strings.Repeat("x", 600)
+	data := []byte(`{"text":"` + longText + `"}`)
+
+	got := FormatDebugSSEFrame("anthropic", "content_block_delta", data)
+
+	if !strings.Contains(got, "...(truncated)") {
+		t.Errorf("超长 SSE 帧数据应被截断, got: %s", got[:min(len(got), 200)])
+	}
+}
+
+// TestDebugResponse_Off 测试 DebugEnabled=false 时 DebugResponse 不 panic。
+func TestDebugResponse_Off(t *testing.T) {
+	old := DebugEnabled
+	defer func() { DebugEnabled = old }()
+	DebugEnabled = false
+
+	// 不应 panic
+	DebugResponse("anthropic", 200, nil, []byte(`{}`))
+}
+
+// ────────────────────────────────────────────────────────
 // 辅助函数
 // ────────────────────────────────────────────────────────
 

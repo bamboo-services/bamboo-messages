@@ -95,6 +95,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 
 		// 使用 SSEScanner 解析 SSE 流
 		scanner := provider.NewSSEScanner(resp.Body)
+		provider.DebugSSEResponse("openai-responses", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header))
 		defer func() {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = scanner.Close()
@@ -107,6 +108,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 
 		for {
 			eventType, data, done, scanErr := scanner.Next()
+			provider.DebugSSEFrame("openai-responses", eventType, data)
 			if done {
 				break
 			}

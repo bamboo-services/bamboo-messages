@@ -36,6 +36,14 @@ func shouldDebug(cfg *Config) bool {
 	return envDebugEnabled
 }
 
+// logRelayDebug 在 dbg 启用时输出 relay 层 debug 日志。
+func logRelayDebug(dbg bool, msg string) {
+	if !dbg {
+		return
+	}
+	xLog.WithName("bamboo/debug").SugarInfo(context.Background(), msg)
+}
+
 // debugRelayInput 输出 relay 层接收到的原始请求体 debug 日志。
 //
 // 在 codec.ParseRequest 之前调用，打印上游调用方（如 newapi）传入的原始 JSON body，
@@ -48,12 +56,17 @@ func shouldDebug(cfg *Config) bool {
 //   - outFormat: 输出协议格式
 //   - body: 原始请求体 JSON 字节
 func debugRelayInput(enabled bool, fn string, inFormat, outFormat any, body []byte) {
-	if !enabled {
-		return
-	}
-	xLog.WithName("bamboo/debug").SugarInfo(context.Background(),
-		fmt.Sprintf("relay input | fn=%s in=%v out=%v | raw body: %s",
-			fn, inFormat, outFormat, truncateContent(string(body))))
+	logRelayDebug(enabled, FormatRelayInput(fn, inFormat, outFormat, body))
+}
+
+// formatRelayDebugLine 生成统一的 relay debug 日志行。
+//
+// 格式：[bamboo/debug] {prefix} | fn={fn} in={inFormat} out={outFormat} | {label}: {content}
+func formatRelayDebugLine(prefix, fn string, inFormat, outFormat any, label, content string) string {
+	return fmt.Sprintf(
+		"[bamboo/debug] %s | fn=%s in=%v out=%v | %s: %s",
+		prefix, fn, inFormat, outFormat, label, content,
+	)
 }
 
 // FormatRelayInput 格式化 relay 输入的 debug 信息并返回字符串。
@@ -63,10 +76,7 @@ func debugRelayInput(enabled bool, fn string, inFormat, outFormat any, body []by
 //
 // 适用于上层业务需要自定义日志格式、写入文件、或通过 HTTP 接口暴露 debug 信息的场景。
 func FormatRelayInput(fn string, inFormat, outFormat any, body []byte) string {
-	return fmt.Sprintf(
-		"[bamboo/debug] relay input | fn=%s in=%v out=%v | raw body: %s",
-		fn, inFormat, outFormat, truncateContent(string(body)),
-	)
+	return formatRelayDebugLine("relay input", fn, inFormat, outFormat, "raw body", truncateContent(string(body)))
 }
 
 // debugRelayParsed 输出 relay 层 codec 解析后的统一请求 debug 日志。
@@ -80,21 +90,7 @@ func FormatRelayInput(fn string, inFormat, outFormat any, body []byte) string {
 //   - inFormat: 输入协议格式
 //   - req: codec 解析后的 RelayRequest
 func debugRelayParsed(enabled bool, fn string, inFormat any, req any) {
-	if !enabled {
-		return
-	}
-	var reqJSON string
-	if req != nil {
-		raw, err := json.Marshal(req)
-		if err != nil {
-			reqJSON = "<marshal error: " + err.Error() + ">"
-		} else {
-			reqJSON = truncateContent(string(raw))
-		}
-	}
-	xLog.WithName("bamboo/debug").SugarInfo(context.Background(),
-		fmt.Sprintf("relay parsed | fn=%s in=%v | RelayRequest: %s",
-			fn, inFormat, reqJSON))
+	logRelayDebug(enabled, FormatRelayParsed(fn, inFormat, req))
 }
 
 // FormatRelayParsed 格式化 relay 解析结果的 debug 信息并返回字符串。
@@ -115,6 +111,61 @@ func FormatRelayParsed(fn string, inFormat any, req any) string {
 		"[bamboo/debug] relay parsed | fn=%s in=%v | RelayRequest: %s",
 		fn, inFormat, reqJSON,
 	)
+}
+
+// debugRelayResponse 输出 relay 非流式响应 debug 日志。
+//
+// 在 codec.SerializeResponse 之后调用，打印 relay 返回给上游调用方的响应 body。
+//
+// 参数：
+//   - dbg: 是否启用 debug（来自 Config.Debug）
+//   - fn: 调用场景标识（"Relay" 或 "RelayStream"）
+//   - inFormat: 输入协议格式
+//   - outFormat: 输出协议格式
+//   - data: 响应体 JSON 字节
+func debugRelayResponse(dbg bool, fn string, inFormat, outFormat any, data []byte) {
+	logRelayDebug(dbg, FormatRelayResponse(fn, inFormat, outFormat, data))
+}
+
+// FormatRelayResponse 格式化 relay 非流式响应的 debug 信息并返回字符串。
+//
+// 与 debugRelayResponse 功能相同，但返回字符串而非打日志。
+// 不受 debug 开关影响，调用即返回。
+func FormatRelayResponse(fn string, inFormat, outFormat any, data []byte) string {
+	return formatRelayDebugLine("relay response", fn, inFormat, outFormat, "body", truncateBytes(data, maxDebugBodyLen))
+}
+
+// debugRelayResponseFrame 输出 relay 流式逐帧响应 debug 日志。
+//
+// 在 RelayStream 每次向输出 channel 写入 SSE 帧之前调用，打印即将发送的原始帧内容。
+//
+// 参数：
+//   - dbg: 是否启用 debug（来自 Config.Debug）
+//   - fn: 调用场景标识（通常为 "RelayStream"）
+//   - inFormat: 输入协议格式
+//   - outFormat: 输出协议格式
+//   - data: 原始 SSE 帧字节
+func debugRelayResponseFrame(dbg bool, fn string, inFormat, outFormat any, data []byte) {
+	logRelayDebug(dbg, FormatRelayResponseFrame(fn, inFormat, outFormat, data))
+}
+
+// FormatRelayResponseFrame 格式化 relay 流式逐帧响应的 debug 信息并返回字符串。
+//
+// 与 debugRelayResponseFrame 功能相同，但返回字符串而非打日志。
+// 不受 debug 开关影响，调用即返回。
+func FormatRelayResponseFrame(fn string, inFormat, outFormat any, data []byte) string {
+	return formatRelayDebugLine("relay response stream", fn, inFormat, outFormat, "frame", truncateBytes(data, maxDebugBodyLen))
+}
+
+// truncateBytes 将字节切片转换为字符串并按字符数简单截断。
+//
+// 超过 maxLen 时返回前 maxLen 个字符并追加 "...(truncated)"。
+func truncateBytes(data []byte, maxLen int) string {
+	s := string(data)
+	if len(s) > maxLen {
+		return s[:maxLen] + "...(truncated)"
+	}
+	return s
 }
 
 // truncateContent 截断 JSON 字符串中已知长文本字段的值，避免 debug 日志过长。

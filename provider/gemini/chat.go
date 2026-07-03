@@ -83,6 +83,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 
 		// 创建 SSE 扫描器
 		scanner := provider.NewSSEScanner(resp.Body)
+		provider.DebugSSEResponse("gemini", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header))
 		defer func() {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = scanner.Close()
@@ -96,7 +97,8 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 
 		// SSE 事件循环
 		for {
-			_, data, done, scanErr := scanner.Next()
+			eventType, data, done, scanErr := scanner.Next()
+			provider.DebugSSEFrame("gemini", eventType, data)
 			if done {
 				break
 			}

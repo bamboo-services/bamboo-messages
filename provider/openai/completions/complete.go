@@ -43,6 +43,7 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 	if err != nil {
 		return nil, pkgErrors.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 读取响应体失败: %v", err), false, err)
 	}
+	provider.DebugResponse("openai", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header), body)
 
 	// HTTP 状态码检查
 	if resp.StatusCode >= 400 {

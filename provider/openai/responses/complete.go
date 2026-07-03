@@ -130,6 +130,8 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 		return nil, pkgErrors.NewError(ctx, nil, "OpenAI Responses 响应体读取失败", false, err)
 	}
 
+	provider.DebugResponse("openai-responses", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header), respBody)
+
 	// 检查 HTTP 状态码，解析错误响应
 	if resp.StatusCode >= 400 {
 		var apiErr openaiError

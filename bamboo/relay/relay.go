@@ -88,6 +88,7 @@ func Relay(
 		// 将上游错误序列化为目标协议格式的错误响应 body，
 		// 确保调用方（如 newapi）拿到协议格式的错误 JSON 而非空 body。
 		errorBody := outCodec.SerializeError(err)
+		debugRelayResponse(dbg, "Relay", inFormat, outFormat, errorBody)
 		return errorBody, fmt.Errorf("relay: provider complete failed: %w", err)
 	}
 
@@ -100,6 +101,7 @@ func Relay(
 		cfg.triggerError(err)
 		return nil, fmt.Errorf("relay: failed to serialize response: %w", err)
 	}
+	debugRelayResponse(dbg, "Relay", inFormat, outFormat, data)
 
 	return data, nil
 }
@@ -258,6 +260,7 @@ func RelayStream(
 				cfg.triggerError(fmt.Errorf("relay: serialize error: %w", sErr))
 				continue
 			}
+			debugRelayResponseFrame(dbg, "RelayStream", inFormat, outFormat, data)
 			if data != nil {
 				// ping 保活帧绕过 SmoothPacer，直接写入 out channel。
 				// 原因：ping 的作用是对抗反向代理 idle timeout，如果经过 pacer 队列

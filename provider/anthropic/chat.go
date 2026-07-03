@@ -79,6 +79,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 
 		// 创建 SSE 扫描器
 		scanner := provider.NewSSEScanner(resp.Body)
+		provider.DebugSSEResponse("anthropic", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header))
 		defer func() {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = scanner.Close()
@@ -92,6 +93,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 		// SSE 事件循环 — Anthropic SSE 有 event: 行，eventType 由 scanner 返回
 		for {
 			eventType, data, done, scanErr := scanner.Next()
+			provider.DebugSSEFrame("anthropic", eventType, data)
 			if done {
 				break
 			}
