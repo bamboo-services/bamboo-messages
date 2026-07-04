@@ -26,7 +26,7 @@ provider/
 ├── options_test.go          # 公共 Options 单元测试
 ├── interceptor_test.go      # 拦截器链单元测试
 ├── interceptor_transport_test.go # 拦截器 Transport 集成测试
-├── http_client_test.go      # HTTPClient 单元测试（Do/DoWithDebug/buildURL/applyHeaders）
+├── http_client_test.go      # HTTPClient 单元测试（Do/DoWith Debug/buildURL/applyHeaders）
 ├── sse_scanner_test.go      # SSEScanner 单元测试（帧解析/json.Valid 容错/GLM 截断恢复）
 ├── timing_test.go           # 耗时收集器单元测试
 ├── debug_test.go            # Debug 机制单元测试
@@ -45,7 +45,7 @@ provider/
 | 理解核心接口 | `provider.go` | 6 个方法：Chat, ChatWithSystem, Complete, CompleteWithSystem, GetProviderType, GetAvailableModels |
 | 理解通用类型 | `type.go` | Message, ChatConfig, Tool, CompletionResult, ThinkingConfig, CacheControl, ProviderExtra |
 | 理解流式模型 | `stream.go` | StreamEvent channel + 7 种 DeltaData 类型 + 11 个构造函数 + IndexedToolCallDeltaData |
-| 理解 Debug 机制 | `debug.go` | `DebugEnabled` 全局开关 + `SetDebug()` + `DebugRequest()` + 环境变量 `BAMBOO_DEBUG` |
+| 理解 Debug 机制 | `debug.go` | `DebugEnabled` 全局开关 + 环境变量 `BAMBOO_DEBUG` 唯一入口 |
 | 理解版本/UserAgent | `version.go` | `GetUserAgent()` 返回 `"BM-SDK/{version}"`，基于 `runtime/debug.ReadBuildInfo()` |
 | 理解请求拦截器 | `interceptor.go` + `interceptor_transport.go` | `RequestInterceptor` 函数类型 + `ApplyInterceptors` 链式执行 + `NewInterceptorHTTPClient` Transport 注入 |
 | 理解公共 Options | `options.go` | `Options` 结构体 + `WithInterceptor` + `ApplyOptions` — 各适配器 config 可匿名嵌入 |
@@ -70,7 +70,7 @@ provider/
 | `HTTPClient` | 结构体 | http_client.go | 统一 HTTP 通信基座（认证/自定义头/拦截器/User-Agent/URL 拼接） |
 | `NewHTTPClient` | 函数 | http_client.go | 创建统一 HTTP 客户端实例 |
 | `HTTPClient.Do` | 方法 | http_client.go | 发起 HTTP 请求 `(ctx, method, path, body) → (*http.Response, error)` — 适配器统一入口 |
-| `HTTPClient.DoWithDebug` | 方法 | http_client.go | 发起 HTTP 请求并输出 debug 日志（providerType/endpoint/headers 脱敏/body 截断） |
+| `HTTPClient.DoWithDebug` | 方法 | http_client.go | 发起 HTTP 请求并输出 debug 日志（providerType/endpoint/headers 脱敏/body 截断），debug 开关关闭时等同 `Do` |
 | `HTTPClient.GetBaseURL` | 方法 | http_client.go | 返回基础 URL 字符串 |
 | `SSEScanner` | 结构体 | sse_scanner.go | 共享 SSE 帧解析器，内置 json.Valid 容错与 GLM 截断恢复 |
 | `NewSSEScanner` | 函数 | sse_scanner.go | 从 io.ReadCloser 创建 SSE 帧解析器 |
@@ -144,11 +144,14 @@ provider/
 
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
-| `RateSampleKind` | 类型 | timing.go | 速率采样类型: `"thinking"` / `"output"` |
+| `RateSampleKind` | 类型 | timing.go | 速率采样类型: `"thinking"` / `"output"` / `"tool"` |
 | `RateSampleKindThinking` | 常量 | timing.go | 思考阶段速率采样 |
 | `RateSampleKindOutput` | 常量 | timing.go | 输出阶段速率采样 |
-| `TimingStats` | 结构体 | timing.go | 流式耗时统计 (TotalDuration, FirstByteDuration/TTFT, ThinkingDuration, ContentDuration, ToolDuration) |
-| `TokenRates` | 结构体 | timing.go | Token 生成速率 (.2f 精度): ThinkingTokensPerSec, OutputTokensPerSec |
+| `RateSampleKindTool` | 常量 | timing.go | 工具调用阶段速率采样 `"tool"` |
+| `TimingStats` | 结构体 | timing.go | 流式耗时统计 (TotalDuration, FirstByteDuration/TTFT, ThinkingDuration, ContentDuration, ToolDuration, ToolTokens / TotalTokens / TokenSource) |
+| `TokenRates` | 结构体 | timing.go | Token 生成速率 (.2f 精度): ThinkingTokensPerSec, OutputTokensPerSec, ToolTokensPerSec |
+| `minReliableDuration` | 常量 | timing.go | 最小可信耗时阈值 (1ms)，低于此值的速率标记为不可靠（负值） |
+| `computeRate` | 方法 | timing.go | 计算 token/s 速率，耗时低于阈值时取负标记不可靠 |
 | `RateSample` | 结构体 | timing.go | 速率采样点 (ElapsedSec, TokensPerSec, Kind) |
 | `TimingCollector` | 结构体 | timing.go | 流式请求耗时收集器（零侵入 Observe 模式） |
 | `NewTimingCollector` | 函数 | timing.go | 创建耗时收集器实例 |
@@ -163,9 +166,8 @@ provider/
 
 | 符号 | 类型 | 位置 | 作用 |
 |------|------|------|------|
-| `DebugEnabled` | 变量 | debug.go | Debug 全局开关，通过环境变量 `BAMBOO_DEBUG` 初始化 |
+| `DebugEnabled` | 变量 | debug.go | Debug 全局开关，通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用（唯一入口） |
 | `MaxDebugBodyLen` | 常量 | debug.go | debug 日志中请求体最大长度 (500) |
-| `SetDebug` | 函数 | debug.go | 全局开启/关闭 Provider 层 debug 日志 |
 | `DebugRequest` | 函数 | debug.go | 输出请求 debug 日志（providerType/endpoint/headers/body） |
 | `FormatDebugRequest` | 函数 | debug.go | 返回格式化 debug 字符串（不受开关限制） |
 | `SummarizeTools` | 函数 | debug.go | 简化 tools 数组的 debug 输出（供 relay 层复用） |
@@ -188,7 +190,7 @@ provider/
 - **ReasoningID 独立追踪** — `Message.ReasoningID` 用于 OpenAI Responses API 的 reasoning item 标识（如 `"rs_xxx"`），与 `ThinkingSignature`（加密内容）分离
 - **ToolName/ToolCallID 分离** — `Message.ToolName` 存储函数名（Gemini FunctionResponse 需要），`Message.ToolCallID` 存储调用 ID；其他 Provider 通常只需 ToolCallID
 - **FinishReason 流式透传** — `StreamEvent.FinishReason` 仅在 `StreamTypeStop` 事件中由适配器填充，标识流结束的具体原因（stop/tool_calls/length/content_filter 等），上层可通过此字段判断流结束状态
-- **Debug 三入口** — 环境变量 `BAMBOO_DEBUG=1/true/on` / `provider.SetDebug(true)` / 适配器 `WithDebug()` Option；三者任一启用即生效，适配器在发起请求前调用 `DebugRequest()` 输出实际参数
+- **Debug 环境变量唯一入口** — 仅通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；`provider.DebugEnabled` 为全局开关变量，所有 debug 函数检查此变量；编程式开关函数和适配器 Debug Option 已移除
 - **Debug 敏感字段脱敏** — `Authorization` / `X-API-Key` / `API-Key` / `X-Goog-API-Key` 等敏感 header 自动脱敏（仅保留前 4 和后 4 字符）
 - **Debug 长文本截断** — `content` / `text` / `system` / `thinking` / `reasoning_content` / `arguments` 等长文本字段超过 `MaxDebugBodyLen` (500) 时自动截断
 - **Prompt Caching 统一抽象** — `CacheControl` 统一结构体表达缓存断点：Anthropic 显式标记、OpenAI 自动缓存（`PromptCacheKey` 仅作路由粘性键）、Gemini 通过 `cached_content` ProviderExtra 引用外部资源
@@ -198,11 +200,12 @@ provider/
 - **公共 Options 嵌入模式** — `provider.Options` 通过匿名嵌入为各 Provider 提供统一的拦截器注册能力；`Interceptors` 字段首字母大写保证嵌入子包后仍可访问
 - **统一 SSE 解析** — 所有适配器流式响应使用 `provider.SSEScanner` 解析，内置 json.Valid 校验与 GLM 截断容错
 - **TimingCollector 零侵入** — 用户代码主动创建 `TimingCollector` 并在事件循环中调用 `Observe(event)`，不修改 StreamEvent 结构；非并发安全（单 goroutine 使用）
-- **TimingCollector 阶段状态机** — 内部 `collectorPhase` (init → thinking → content → tool) 驱动耗时计算
+- **TimingCollector 阶段状态机** — 内部 `collectorPhase` (init → thinking → content → tool) 驱动耗时计算，tool 阶段从首个 tool BlockStart/ToolCall 到 Stop
 - **Token 估算规则标准化** — CJK 1:1, Latin 4:1, Other 2:1（与 `SmoothPacer.TokenSplitter` 的 CJK 切分规则互补）
+- **不可靠速率标记** — 阶段耗时低于 `minReliableDuration` (1ms) 时，`Rates()` 返回负值标记不可靠；绝对值为基于阈值估算的参考值（如 -6000 表示不可靠的 6000 tok/s）；零值表示阶段未发生
 - **带索引工具调用** — `IndexedToolCallDeltaData` + `ToolCallData.HasIndex/Index` 支持 OpenAI 并行工具调用的原生索引
 - **HTTPClient.Do 统一入口** — 所有适配器通过 `httpClient.Do(ctx, method, path, body)` 发起请求，path 为相对路径（如 `/v1/messages`），由 `buildURL` 拼接 BaseURL；debug 模式下改用 `DoWithDebug`，两者共享 URL 拼接和 header 注入逻辑
-- **HTTP 错误结构化委托** — `HTTPClient.Do` 仅返回 `*http.Response`，不包装错误；适配器 `complete.go` 负责检查 `resp.StatusCode >= 400` 并使用 `pkgErrors.NewHTTPError` 包装，使状态码作为结构化字段贯穿错误链路
+- **HTTP 错误结构化委托** — `HTTPClient.Do` 仅返回 `*http.Response`，不包装错误；适配器 `complete.go` 负责检查 `resp.StatusCode >= 400` 并使用 `pkgErrors` 的结构化错误包装，使状态码作为结构化字段贯穿错误链路
 
 ## 反模式
 
@@ -221,12 +224,12 @@ provider/
 3. 流事件丢失 → 检查 `stream.go` 的 StreamEvent 是否正确构造和发送
 4. UserAgent 异常 → 检查 `version.go` 的 `ReadBuildInfo()` 是否返回正确信息
 5. ProviderExtra 取值失败 → 检查 key 常量是否正确，类型断言是否匹配
-6. 请求参数不确定 → 启用 Debug（`BAMBOO_DEBUG=1` 或 `WithDebug()`），查看实际发送的 headers 和 body
+6. 请求参数不确定 → 启用 Debug（`BAMBOO_DEBUG=1`），查看实际发送的 headers 和 body
 7. Prompt caching 不生效 → 检查 `CacheControl` 标记位置（system / messages / tools）和 TTL 值
 8. FinishReason 缺失 → 检查适配器是否在 `StreamTypeStop` 事件中正确填充 `StreamEvent.FinishReason`
 9. Thinking 内容丢失 → 检查适配器是否正确提取 thinking/reasoning content 并填充到 `CompletionResult.Thinking` 或 `Message.ThinkingContent`
 10. 拦截器不生效 → 检查 `NewInterceptorHTTPClient` 是否返回 nil（空拦截器列表），确认适配器构造函数正确注入
-11. 耗时统计不准 → 确认 `TimingCollector.Observe` 在单 goroutine 中调用，检查阶段状态机是否正确切换
+11. 耗时统计不准 → 确认 `TimingCollector.Observe` 在单 goroutine 中调用，检查阶段状态机是否正确切换；速率值为负表示耗时低于 1ms 不可靠
 12. 并行工具调用索引丢失 → 检查适配器是否使用 `NewToolCallDeltaWithIndex` / `NewToolCallDeltaDataWithIndex` 而非无索引版本
 
 ## 引用

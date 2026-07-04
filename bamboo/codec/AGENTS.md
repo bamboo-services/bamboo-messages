@@ -11,7 +11,7 @@ bamboo/codec/
 ├── codec.go                # Codec 接口 + StreamSerializer 接口 + FormatType 常量
 ├── types.go                # RelayRequest 统一请求中间表示
 ├── registry.go             # 全局 Codec 注册变量 + Get() 查找函数
-├── errors.go               # CodecError 错误类型 + ErrorType 常量
+├── errors.go               # 包注释（错误处理统一使用 pkg/errors.BambooError，Codec 层不再单独定义错误类型）
 ├── anthropic/              # Anthropic Messages 协议编解码
 │   ├── codec.go            # 全局 Codec 实例 + init() 注册
 │   ├── request.go          # ParseRequest: Anthropic JSON → RelayRequest（含 document 块解析、tool_choice forced_tool_name）
@@ -47,7 +47,7 @@ bamboo/codec/
 | 添加新协议格式 | 子包目录 | 新建子包，实现 Codec + StreamSerializer，在 `init()` 中注册到全局变量 |
 | 理解请求中间表示 | `types.go` | `RelayRequest` — 解析后的统一请求结构 |
 | 查找已注册 Codec | `registry.go` | `Get(format)` 函数返回 `(Codec, error)` + 4 个全局 Codec 变量 |
-| 错误分类 | `errors.go` | `CodecError` + 5 种 `ErrorType` + `NewError` / `NewErrorWithCause` |
+| 错误处理 | `errors.go` | 统一使用 `pkg/errors.BambooError`，Codec 层不再单独定义错误类型 |
 | 修改 Anthropic 编解码 | `anthropic/` | `request.go`(解析) / `response.go`(序列化) / `stream.go`(流式) |
 | 修改 OpenAI 编解码 | `openai/` | 结构与 `anthropic/` 完全一致 |
 | 修改 Responses 编解码 | `responses/` | 结构与 `anthropic/` 完全一致 |
@@ -61,7 +61,7 @@ bamboo/codec/
 - **Codec 无状态** — `Codec` 接口本身无状态，可安全并发使用；有状态操作通过 `NewSerializer()` 创建独立的 `StreamSerializer` 实例
 - **init() 自动注册** — 每个格式子包在 `init()` 中将自身 Codec 赋值到 `registry.go` 的全局变量，只要 import 了对应子包即自动注册
 - **RelayRequest 中间表示** — 所有外部协议的请求体先解析为 `RelayRequest`（包含 `Messages`/`System`/`Config`/`IsStream`），再由 relay 层交给 Provider 处理
-- **错误分类标准化** — 使用 `CodecError` + `ErrorType` 分类错误（invalid_request / provider_error / authentication_error / rate_limit_exceeded / internal_error），每个子包的 `SerializeError` 负责将错误映射为对应协议的错误响应格式；`NewError` / `NewErrorWithCause` 创建 CodecError；`CodecError.Unwrap()` 支持 `errors.Is/As` 链式追踪
+- **错误处理统一** — Codec 层不再单独定义 `CodecError` / `ErrorType`，统一使用 `pkg/errors.BambooError`；每个子包的 `SerializeError` 负责将错误映射为对应协议的错误响应格式
 - **子包结构一致** — 四个格式子包（anthropic / openai / responses / gemini）内部文件分工完全一致：`codec.go` + `request.go` + `response.go` + `stream.go` + `error.go`
 - **cache_creation_input_tokens 已知限制** — OpenAI / Responses / Gemini 协议无原生 `cache_creation_input_tokens` 字段，仅映射 `CacheReadInputTokens`；`CacheCreationInputTokens` 在跨协议转换（Anthropic→其他）中会丢失，此为已知限制
 - **DeltaSignature 跨协议丢弃** — `signature_delta` 为 Anthropic Extended Thinking 特有的签名增量，OpenAI / Responses / Gemini 协议无对应字段，在流式序列化中静默丢弃（返回 nil）
@@ -85,7 +85,7 @@ bamboo/codec/
 - **禁止** 在 Codec 层直接调用 Provider — Codec 只做格式转换，Provider 调用由 `bamboo/relay` 负责
 - **禁止** 在 `Codec` 接口方法中保存状态 — 有状态逻辑必须通过 `NewSerializer()` 返回的 `StreamSerializer` 实例处理
 - **禁止** 忘记在子包 `init()` 中注册全局变量 — 否则 `registry.Get()` 返回 nil Codec
-- **禁止** 裸返回 error — 内部错误应包装为 `CodecError` 以保留错误分类信息
+- **禁止** 裸返回 error — 内部错误应包装为 `pkg/errors.BambooError` 以保留错误分类信息
 - **禁止** 在 Gemini codec 中将 safety_settings 存为原始 JSON 结构 — 必须转换为 `[]*genai.SafetySetting`，否则 relay→provider 路径类型断言失败导致静默丢弃
 - **禁止** 在非 Anthropic 协议中输出 DeltaSignature — 应返回 nil 静默丢弃，避免生成协议不支持的 SSE 帧
 - **禁止** 在响应序列化中遗漏 ToolResultBlock/ImageBlock/DocumentBlock 的警告日志 — 不支持的 block 类型必须记录 warning 后跳过，不得静默丢弃

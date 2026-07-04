@@ -8,7 +8,7 @@ OpenAI Chat Completions 协议适配器，将 OpenAI Chat Completions API 转换
 
 ```text
 provider/openai/completions/
-├── provider.go              # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithLegacyCompat/WithDebug/WithInterceptor) + legacyCompat 标志 + 拦截器 Transport 注入
+├── provider.go              # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithLegacyCompat/WithInterceptor) + legacyCompat 标志 + 拦截器 Transport 注入
 ├── params.go                # buildParams — 共享参数构建（含 Legacy 分支 + Prediction JSON 回退）
 ├── chat.go                  # 流式对话实现
 ├── complete.go              # 非流式对话实现 — 含 reasoning_content 提取
@@ -42,7 +42,7 @@ provider/openai/completions/
 | 修改工具定义转换 | `tools.go` | `buildTools` 和 `buildStop` 函数 |
 | 配置特有参数 | `option.go` | `WithFrequencyPenalty` / `WithPresencePenalty` / `WithSeed` / `WithPrediction` |
 | 测试 Legacy 兼容 | `legacy_compat_test.go` | max_tokens / parallel_tool_calls / reasoning_effort 差异测试 |
-| 启用 debug 日志 | `provider.go` | `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` |
+| 启用 debug 日志 | `provider.go` | 环境变量 `BAMBOO_DEBUG=1/true/on` |
 
 ## 代码地图
 
@@ -75,9 +75,9 @@ provider/openai/completions/
 - **Usage 流式返回** — 通过请求 DTO 的 `stream_options.include_usage=true` 启用，在最后一个 chunk 中提取
 - **参数透传** — FrequencyPenalty / PresencePenalty / Seed / Prediction 通过 `OpenaiCompletionsOption` 设置，合并到 ProviderExtra 后透传；ToolChoice / ResponseFormat 通过 `ChatConfig` 类型化字段传递
 - **ReasoningEffort 映射** — `ThinkingConfig.Effort` → 请求 DTO 的 `reasoning_effort` 字段（Legacy 模式仍透传 thinking）
-- **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
+- **Debug 日志** — 通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client
-- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewHTTPError(resp.StatusCode, ...)` 包装错误，使状态码作为结构化字段贯穿错误链路（`pkgErrors.HTTPError` → `bamboo.wrapProviderError` → `BambooError.StatusCode`）
+- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewBambooError(category, message, statusCode)` 包装错误，使状态码作为结构化字段贯穿错误链路；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError`，直接透传避免重复包装
 
 ## 反模式
 
@@ -100,7 +100,7 @@ provider/openai/completions/
 8. 空 tool_calls 问题 → 检查 `buildAssistantMessage` 是否正确跳过空 ToolCalls
 9. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成工具定义（`[]map[string]any`）
 10. Usage 统计缺失 → 确认 `StreamOptions.IncludeUsage` 已设置
-11. 请求参数不确定 → 启用 `WithDebug()` 或设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
+11. 请求参数不确定 → 设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
 
 ## BaseURL 配置说明
 

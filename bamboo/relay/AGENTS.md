@@ -8,9 +8,9 @@
 
 ```text
 bamboo/relay/
-├── config.go              # Config + Option + WithUsageCallback/WithErrorCallback/WithDebug/WithRateSampleCallback + applyOptions
+├── config.go              # Config + Option + WithUsageCallback/WithErrorCallback/WithRateSampleCallback + applyOptions
 ├── relay.go               # Relay() 非流式互转（含 SerializeError） + RelayStream() 流式互转（含速率采样集成）
-├── debug.go               # shouldDebug + debugRelayInput/debugRelayParsed + FormatRelayInput/FormatRelayParsed + 长文本截断
+├── debug.go               # debugRelayInput/debugRelayParsed + FormatRelayInput/FormatRelayParsed + 长文本截断
 ├── smooth.go              # SmoothLevel/SmoothParams/SmoothConfig + WithSmoothBuffer/WithSmoothBufferCustom Option
 ├── smooth_pacer.go        # SmoothPacer 流式平滑缓冲器（三模式状态机：NORMAL/DRAIN/FLUSH）+ SetRateSampleCallback + Close
 ├── smooth_parser.go       # TokenSplitter token 切分器 + FrameParser SSE 帧解析器（支持 4 种协议格式）
@@ -29,8 +29,8 @@ bamboo/relay/
 |------|------|------|
 | 非流式协议互转 | `relay.go` | `Relay(ctx, p, body, inFormat, outFormat, opts...)` |
 | 流式协议互转 | `relay.go` | `RelayStream(ctx, p, body, inFormat, outFormat, opts...)` |
-| 配置回调 | `config.go` | `WithUsageCallback(fn)` / `WithErrorCallback(fn)` / `WithDebug(bool)` / `WithRateSampleCallback(fn)` |
-| 启用 debug 日志 | `config.go` | `WithDebug(true)` Option 或环境变量 `BAMBOO_DEBUG=1` |
+| 配置回调 | `config.go` | `WithUsageCallback(fn)` / `WithErrorCallback(fn)` / `WithRateSampleCallback(fn)` |
+| 启用 debug 日志 | `config.go` | 环境变量 `BAMBOO_DEBUG=1`（relay 层直接检查 `provider.DebugEnabled`） |
 | 理解内部流程 | `relay.go` | Relay: ParseRequest -> Complete -> SerializeResponse；RelayStream: ParseRequest -> Chat -> Serialize -> channel |
 | 查看 debug 输出格式 | `debug.go` | `debugRelayInput` (原始 body) + `debugRelayParsed` (解析后的 RelayRequest) |
 | 自定义日志格式 | `debug.go` | `FormatRelayInput()` / `FormatRelayParsed()` 返回字符串（不受开关限制） |
@@ -88,7 +88,7 @@ bamboo/relay/
 - **Error 回调不影响返回** — 错误仍正常返回给调用方，回调仅用于异步通知（日志/告警）
 - **流式 channel 自动关闭** — `RelayStream` 返回的 `<-chan []byte` 在流结束后自动 close，调用方 range 遍历即可
 - **context 取消传播** — 非流式和流式均尊重 `ctx.Done()`，在 goroutine 中 select ctx 实现取消传播
-- **Debug 双层开关** — `Config.Debug`（通过 `WithDebug(true)`）优先；未设置时回退到环境变量 `BAMBOO_DEBUG=1/true/on`；启用后在 `ParseRequest` 前后分别输出原始 body 和解析后的 RelayRequest，便于排查 codec 转换偏差
+- **Debug 环境变量统一** — relay 层 debug 函数直接检查 `provider.DebugEnabled`（由环境变量 `BAMBOO_DEBUG` 控制）；原有的 debug 配置字段和 Option 已移除
 - **Debug 长文本截断** — `content` / `text` / `system` / `thinking` / `reasoning_content` / `arguments` 等字段超过 `maxDebugBodyLen` (500) 时自动截断，避免日志爆炸
 - **平滑缓冲预设档位** — `SmoothLevel` 定义三档预设：gentle（2 token/frame, 20-100ms）、smooth（1 token/frame, 15-80ms）、typewriter（1 token/frame, 30-120ms）；传入 `SmoothLevelOff` 或未知档位时静默跳过
 - **平滑缓冲自定义参数** — `WithSmoothBufferCustom(params)` 允许完全自定义 `SmoothParams`，档位标记为 "custom"
@@ -104,6 +104,7 @@ bamboo/relay/
 - **速率采样回调** — `Config.OnRateSample` 在 SmoothPacer 每次输出 tick 时触发，区分 thinking 阶段（`RateSampleKindThinking`）和 output 阶段（`RateSampleKindOutput`）；仅 SmoothBuffer 启用时生效
 - **Relay 失败返回协议格式错误** — `Relay` 在 provider 失败时调用 `outCodec.SerializeError(err)` 返回协议格式化的错误 body，而非 nil body
 - **Usage 触发守卫** — `RelayStream` 中 `usageTriggered` 标志防止 Usage 回调重复触发
+- **RelayStream 流式帧 debug 已移除** — `RelayStream` 不再通过 `debugRelayResponseFrame` 输出逐帧 debug 日志；上层业务（如 newapi）可通过自身中间层从输出 channel 捕获完整流内容
 
 ## 反模式
 
@@ -123,7 +124,7 @@ bamboo/relay/
 3. 回调未触发 -> 检查 `cfg.triggerUsage` / `cfg.triggerError` 调用路径是否被遗漏
 4. Provider 调用失败 -> 检查 `bamboo.NewClient(p).Complete()` 或 `.Chat()` 是否返回错误
 5. Flush 数据丢失 -> 检查 `RelayStream` goroutine 结束前是否调用了 `serializer.Flush()`
-6. Codec 解析偏差 -> 启用 `WithDebug(true)` 或设置 `BAMBOO_DEBUG=1`，对比 `relay input`（原始 body）与 `relay parsed`（RelayRequest）的差异
+6. Codec 解析偏差 -> 启用 `BAMBOO_DEBUG=1` 环境变量，对比 `relay input`（原始 body）与 `relay parsed`（RelayRequest）的差异
 7. 平滑缓冲输出不匀速 -> 检查 `SmoothParams` 的 `EMAAlpha` 是否过大（导致间隔抖动），或 `MinInterval`/`MaxInterval` 范围是否合理
 8. 平滑缓冲尾部数据丢失 -> 检查是否遗漏 `SignalEnd()` 调用，或 `Wait()` 未返回就 close(out)
 9. 平滑缓冲 ctx 取消后卡死 -> 检查 pacer goroutine 是否正确处理 FLUSH 模式（`enterFlushAndExit` 应立即排空后 return）

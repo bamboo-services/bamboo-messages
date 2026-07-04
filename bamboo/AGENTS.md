@@ -120,12 +120,8 @@ bamboo/
 
 | 符号 | 类型 | 文件 | 作用 |
 |------|------|------|------|
-| `BambooError` | 结构体 | errors.go | Bamboo SDK 统一错误类型 (Type + Message + Code + StatusCode + ProviderType) |
-| `ErrorTypeInvalidRequest` / `Authentication` / `RateLimit` / `API` / `Provider` | 常量 | errors.go | 5 种错误类型常量 |
-| `NewBambooError` | 函数 | errors.go | 创建 BambooError 实例 |
-| `NewBambooErrorWithCode` | 函数 | errors.go | 创建带 Code 的 BambooError |
-| `NewBambooErrorWithStatusCode` | 函数 | errors.go | 通过 HTTP 状态码自动映射 ErrorType 并创建 BambooError（携带 StatusCode 字段） |
-| `MapStatusCodeToErrorType` | 函数 | errors.go | HTTP 状态码 → ErrorType 映射（429→RateLimit、401→Authentication、400→InvalidRequest、5xx→API、其他→Provider） |
+| `BambooError` | 类型别名 | errors.go | = `pkgErrors.BambooError`，Bamboo SDK 统一错误类型 (Category + Message + StatusCode) |
+| `NewBambooError` | var 别名 | errors.go | = `pkgErrors.NewBambooError`，签名 `(category, message string, statusCode int) *BambooError` |
 
 ### 类型转换
 
@@ -160,7 +156,7 @@ bamboo/
 - **终止事件超时保障** — `terminateWriteTimeout` (5s) 确保终止事件（message_stop 等）写入 out channel 时既不被 `default` 丢弃，也不会因消费端卡死而无限阻塞 goroutine
 - **ctx 取消合成错误** — 流式中途 ctx 取消时，发送合成 `xerr.Error` 到 converter 后退出
 - **Complete 部分成功** — `Complete` 在 provider 返回 error + 部分结果时返回 `(resp, error)`
-- **HTTPError 错误链路映射** — `bamboo.go` 的 `wrapProviderError` 使用 `pkgErrors.AsHTTPError(err)` 从错误链提取 `*pkgErrors.HTTPError`，若存在则通过 `NewBambooErrorWithStatusCode` 自动映射状态码为正确的 ErrorType（429→RateLimit/401→Authentication/400→InvalidRequest/5xx→API）；否则降级为 `ErrorTypeProvider`。确保上游 HTTP 状态码不丢失，贯穿到 `BambooError.StatusCode` 字段
+- **错误透传简化** — `wrapProviderError` 使用 `errors.As` 提取 `*BambooError`，若已存在则直接透传避免重复包装；否则降级为 `NewBambooError("SDK", err.Error(), 0)`
 
 ## 反模式
 
@@ -181,7 +177,7 @@ bamboo/
 5. 客户端初始化失败 → 确认 `NewClient` 传入了非 nil 的 provider；或检查 `NewClientWithOptions` 的 `WithProvider` 是否设置
 6. 协议互转异常 → 先查 `codec/` 对应格式子包的解析/序列化，再查 `relay/` 的调用链
 7. Prompt caching 未命中 → 检查 `SystemCacheControl` / ContentBlock `CacheControl` 是否正确设置
-8. 请求参数不确定 → 启用 relay 层 `WithDebug(true)` 或环境变量 `BAMBOO_DEBUG=1`
+8. 请求参数不确定 → 启用环境变量 `BAMBOO_DEBUG=1`
 9. ThinkingBlock 内容丢失 → 检查 `messagesToProvider` 是否正确将 ThinkingBlock 内容写入 `provider.Message.ThinkingContent`
 10. FinishReason 不正确 → 检查 `recordFinishReason` 优先级策略是否被覆盖
 11. system 角色被降级 → "system" 消息角色会记录警告并降级为 user，应通过 `Chat`/`Complete` 的 system 参数传递

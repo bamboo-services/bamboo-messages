@@ -8,7 +8,7 @@ Google Gemini 协议适配器，将 Google Gemini API 转换为统一的 `provid
 
 ```text
 provider/gemini/
-├── provider.go      # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithDebug/WithInterceptor) + 类型别名 + 拦截器 HTTPClient 注入
+├── provider.go      # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithInterceptor) + 类型别名 + 拦截器 HTTPClient 注入
 ├── params.go        # buildContentConfig — 共享参数构建（Chat/Complete 统一入口）+ mapThinkingConfig/mapToolChoice + MaxTokens 溢出保护 + UserID→Labels
 ├── chat.go          # 流式对话实现 (Chat/ChatWithSystem) — GenerateContentStream
 ├── complete.go      # 非流式对话实现 (Complete/CompleteWithSystem) — 含 thinking parts 提取
@@ -39,7 +39,7 @@ provider/gemini/
 | 修改 ToolChoice 映射 | `params.go` | `mapToolChoice` (字符串 → `functionCallingConfig`) |
 | 添加支持的模型 | `models.go` | 在 `GetAvailableModels` 中追加 Gemini 模型常量 |
 | 修改工具定义转换 | `tools.go` | `buildTools` → `geminiTool` (FunctionDeclaration) |
-| 启用 debug 日志 | `provider.go` | `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` |
+| 启用 debug 日志 | `provider.go` | 环境变量 `BAMBOO_DEBUG=1/true/on` |
 
 ## 代码地图
 
@@ -81,9 +81,9 @@ provider/gemini/
 - **ResponseFormat 映射** — `"json_object"` → 请求 DTO `generationConfig.ResponseMIMEType: "application/json"`
 - **TopK / SafetySettings / CachedContent** — 通过 ProviderExtra 提取（Gemini 特有参数），合并到请求 DTO
 - **ParallelToolCalls 不支持** — Gemini 不支持此参数，当设置时仅输出 debug 日志，不报错
-- **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
+- **Debug 日志** — 通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client
-- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewHTTPError(resp.StatusCode, ...)` 包装错误，使状态码作为结构化字段贯穿错误链路（`pkgErrors.HTTPError` → `bamboo.wrapProviderError` → `BambooError.StatusCode`）
+- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewBambooError(category, message, statusCode)` 包装错误，使状态码作为结构化字段贯穿错误链路；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError`，直接透传避免重复包装
 
 ## 反模式
 
@@ -108,7 +108,7 @@ provider/gemini/
 11. 认证失败 → 确认 API Key 有效，或检查 `WithBaseURL` 是否指向正确的 Gemini 兼容端点
 12. 模型不可用 → 检查 `models.go` 的模型常量是否与 Gemini API 当前支持的版本匹配
 13. Thinking 配置不生效 → 检查 `mapThinkingConfig` 中 effort 到 `thinkingConfig.ThinkingLevel` 的映射
-14. 请求参数不确定 → 启用 `WithDebug()` 或设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
+14. 请求参数不确定 → 设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
 
 ## 引用
 

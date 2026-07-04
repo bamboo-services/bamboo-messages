@@ -8,7 +8,7 @@ Anthropic Messages 协议适配器，将 Anthropic Claude 系列模型的原生�
 
 ```text
 provider/anthropic/
-├── provider.go      # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithDebug/WithInterceptor) + 类型别名 + 拦截器 Transport 注入
+├── provider.go      # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithInterceptor) + 类型别名 + 拦截器 Transport 注入
 ├── params.go        # buildParams — 共享参数构建（Chat/Complete 统一入口）+ ResponseFormat/ParallelToolCalls 处理
 ├── chat.go          # 流式对话实现 (Chat/ChatWithSystem) + finishReason 跨事件追踪
 ├── complete.go      # 非流式对话实现 (Complete/CompleteWithSystem) — 含 thinking content block 处理
@@ -42,7 +42,7 @@ provider/anthropic/
 | 添加支持的模型 | `models.go` | 在 `GetAvailableModels` 列表中追加 |
 | 修改工具定义转换 | `tools.go` | `buildTools` 函数 |
 | 配置 TopK 等特有参数 | `option.go` | `WithTopK` / `WithBudgetTokens` |
-| 启用 debug 日志 | `provider.go` | `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` |
+| 启用 debug 日志 | `provider.go` | 环境变量 `BAMBOO_DEBUG=1/true/on` |
 | 配置 prompt caching | `message.go` / `tools.go` | `CacheControl` 标记（通过 `provider.NewEphemeralCacheControl()`） |
 
 ## 代码地图
@@ -53,7 +53,7 @@ provider/anthropic/
 | `Option` | 函数类型 | provider.go | `func(*config)` — Provider 配置选项 |
 | `AnthropicMessagesOption` | 函数类型 | option.go | `func(*anthropicRequestConfig)` — 请求级配置选项 |
 | `NewProvider` | 函数 | provider.go | 最简构造函数 |
-| `NewProviderWithOptions` | 函数 | provider.go | 完整构造函数 (WithAPIKey/WithBaseURL/WithHeader/WithDebug/WithInterceptor) |
+| `NewProviderWithOptions` | 函数 | provider.go | 完整构造函数 (WithAPIKey/WithBaseURL/WithHeader/WithInterceptor) |
 | `WithInterceptor` | 函数 | provider.go | 注册请求拦截器（转发到 `provider.WithInterceptor`） |
 | `WithTopK` / `WithBudgetTokens` | 函数 | option.go | AnthropicMessagesOption: TopK 采样 / 思考 token 预算（后者已废弃） |
 | `buildParams` | 方法 | params.go | Chat/Complete 共享参数构建入口 |
@@ -80,9 +80,9 @@ provider/anthropic/
 - **消息角色映射** — `RoleUser` 映射为 `user` 消息，`RoleAssistant` 映射为支持 text/tool_use blocks 的 assistant 消息，`RoleTool` 映射为 `tool_result` 块
 - **UserAgent 统一** — 由 `provider.HTTPClient` 自动注入统一 `User-Agent: BM-SDK/{version}`
 - **Prompt Caching 原生支持** — Anthropic 是唯一使用显式缓存断点的 Provider；`Message.CacheControl` / `Tool.CacheControl` / `ChatConfig.SystemCacheControl` 通过 `provider.NewEphemeralCacheControl()` 创建标记，序列化到请求 DTO 的 `cache_control` 字段
-- **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；启用后调用 `provider.SetDebug(true)`，请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
+- **Debug 日志** — 通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client（零包装开销）
-- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewHTTPError(resp.StatusCode, ...)` 包装错误，使状态码作为结构化字段贯穿错误链路（`pkgErrors.HTTPError` → `bamboo.wrapProviderError` → `BambooError.StatusCode`），避免状态码仅存在于消息字符串中
+- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewBambooError(category, message, statusCode)` 包装错误，使状态码作为结构化字段贯穿错误链路；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError`，直接透传避免重复包装
 
 ## 反模式
 
@@ -102,7 +102,7 @@ provider/anthropic/
 7. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成工具定义（`[]map[string]any`）
 8. 认证/连接问题 → 检查 `provider.go` 中 Options 是否正确应用到 `sdkOpts`
 9. 缓存未命中 → 检查 `CacheControl` 标记是否正确设置在 system/messages/tools 上，确认 TTL 值
-10. 请求参数不确定 → 启用 `WithDebug()` 或设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
+10. 请求参数不确定 → 设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
 
 ## BaseURL 配置说明
 

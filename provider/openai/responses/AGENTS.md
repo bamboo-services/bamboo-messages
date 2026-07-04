@@ -8,7 +8,7 @@ OpenAI Responses 协议适配器，将 OpenAI Responses API 转换为统一的 `
 
 ```text
 provider/openai/responses/
-├── provider.go       # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithDebug/WithInterceptor) + 类型别名 + 拦截器 Transport 注入
+├── provider.go       # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithInterceptor) + 类型别名 + 拦截器 Transport 注入
 ├── params.go         # buildParams — 共享参数构建（Chat/Complete 统一入口）
 ├── chat.go           # 流式对话实现
 ├── complete.go       # 非流式对话实现 — 含 reasoning items 提取 + incomplete 状态处理
@@ -41,7 +41,7 @@ provider/openai/responses/
 | 修改工具定义转换 | `tools.go` | `buildTools` 函数 |
 | 配置特有参数 | `option.go` | `WithStore` / `WithModalities` / `WithPreviousResponseID` / `WithTruncation` |
 | 测试流式事件处理 | `stream_test.go` | reasoning_text.delta 相关测试 |
-| 启用 debug 日志 | `provider.go` | `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` |
+| 启用 debug 日志 | `provider.go` | 环境变量 `BAMBOO_DEBUG=1/true/on` |
 
 ## 代码地图
 
@@ -72,9 +72,9 @@ provider/openai/responses/
 - **ResponseFormat 字符串模式** — 支持 `"text"` 和 `"json_object"` 两种简单字符串值
 - **ToolChoice 字符串模式** — 支持 `"auto"` / `"none"` / `"required"` 等值，序列化到请求 DTO 的 `tool_choice` 字段
 - **输入格式差异** — 使用请求 DTO 的 `Input` 字段（字符串或消息数组），支持更丰富的输入类型
-- **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
+- **Debug 日志** — 通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client
-- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewHTTPError(resp.StatusCode, ...)` 包装错误，使状态码作为结构化字段贯穿错误链路（`pkgErrors.HTTPError` → `bamboo.wrapProviderError` → `BambooError.StatusCode`）
+- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewBambooError(category, message, statusCode)` 包装错误，使状态码作为结构化字段贯穿错误链路；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError`，直接透传避免重复包装
 
 ## 反模式
 
@@ -94,7 +94,7 @@ provider/openai/responses/
 6. 响应格式不生效 → 检查 `ResponseFormat` 字符串值是否为 `"text"` 或 `"json_object"`
 7. 完成原因错误 → 检查 `complete.go` 中根据 `Status` 和 ToolCalls 推断的逻辑
 8. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成工具定义（`map[string]any` 数组）
-9. 请求参数不确定 → 启用 `WithDebug()` 或设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
+9. 请求参数不确定 → 设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
 
 ## 引用
 

@@ -1,7 +1,7 @@
 # 项目知识库
 
-**生成日期:** 2026-07-04
-**提交:** e8be986
+**生成日期:** 2026-07-05
+**提交:** dcb2c97
 **分支:** master
 
 ## 概述
@@ -74,19 +74,18 @@ bamboo-messages/
 │   ├── option.go                  # ClientOption + RequestOption + WithToolChoice/WithResponseFormat/WithUserID/WithParallelToolCalls/WithProvider/WithDefaultModel/WithSystemCacheControl/WithPromptCacheKey/WithExtra
 │   ├── convert.go                 # 类型转换 (provider ↔ bamboo) + StreamConverter (优先级 FinishReason + Error 自动 flush + 双键工具 Block)
 │   ├── content.go                 # ContentBlock 构造函数 + WithCache 变体 + RegisterBlockType + ContentBlocks 反序列化
-│   ├── errors.go                  # BambooError 错误类型
+│   ├── errors.go                  # BambooError 类型别名（= pkgErrors.BambooError）+ NewBambooError 变量别名
 │   ├── codec/                     # N-to-N 协议编解码层（anthropic/openai/responses/gemini 格式）
 │   ├── relay/                     # 跨协议中继层 (Relay / RelayStream + SmoothPacer 平滑缓冲 + 速率采样 + Debug)
 │   └── *_test.go                  # 单元测试 + 集成测试
 │
 ├── pkg/                            # 通用组件工具包 — 可复用的工具函数和类型
 │   ├── option/                     # 通用 Functional Options 模式
-│   │   └── option.go               # WithAPIKey/WithBaseURL/WithHeader/WithDebug + ApplyOptions + Getters/Setters
+│   │   └── option.go               # WithAPIKey/WithBaseURL/WithHeader + ApplyOptions + Getters/Setters
 │   ├── helpers/                    # 通用工具函数
 │   │   └── helpers.go              # PtrFloat64/PtrBool/PtrInt64/PtrString + GetExtra* 安全取值
 │   └── errors/                     # 通用错误类型
-│       ├── errors.go               # Error + BambooError 错误类型 + 5 种 ErrorType 常量
-│       └── http_error.go           # HTTPError 结构化错误类型（携带 HTTP 状态码）+ NewHTTPError/AsHTTPError
+│       ├── errors.go               # BambooError 统一错误类型 (Category + Message + StatusCode)
 │
 ├── internal/
 │   └── xerr/                      # 内部最小错误类型（替代 bamboo-base-go/common/error）
@@ -110,11 +109,11 @@ bamboo-messages/
 | 理解核心接口 | `provider/provider.go` | 6 个方法，Chat/Complete 各有带 System 变体 |
 | 理解通用类型 | `provider/type.go` | Message, ChatConfig, Tool, CompletionResult, ThinkingConfig, CacheControl, ContentBlock, ProviderExtra |
 | 理解流式模型 | `provider/stream.go` | StreamEvent channel + 6 种 DeltaData 类型 + 含缓存的 UsageData + IndexedToolCallDeltaData |
-| 理解 Debug 机制 | `provider/debug.go` | `DebugEnabled` 全局开关 + `SetDebug()` + `DebugRequest()` + 环境变量 `BAMBOO_DEBUG` |
+| 理解 Debug 机制 | `provider/debug.go` | `DebugEnabled` 全局开关 + 环境变量 `BAMBOO_DEBUG` 唯一入口 |
 | 理解 UserAgent/版本 | `provider/version.go` | SDKName + GetUserAgent() + GetSDKVersion() |
 | 理解请求拦截器 | `provider/interceptor.go` + `interceptor_transport.go` | RequestInterceptor + ApplyInterceptors + NewInterceptorHTTPClient |
 | 理解公共 Options | `provider/options.go` | Options 结构体 + WithInterceptor + ApplyOptions |
-| 理解流式耗时统计 | `provider/timing.go` | TimingCollector + TimingStats + TokenRates + RateSample |
+| 理解流式耗时统计 | `provider/timing.go` | TimingCollector + TimingStats + TokenRates + RateSample + 不可靠速率标记 |
 | 添加新协议适配器 | 参见 `provider/AGENTS.md` | 结构完全模板化 |
 | 理解消息转换 | `*/message.go` | 各适配器的 协议类型 ↔ provider 类型映射 |
 | 理解参数构建 | `*/params.go` | 各适配器的 buildParams / buildContentConfig 共享入口 |
@@ -128,10 +127,9 @@ bamboo-messages/
 | 理解 N-to-N 协议互转 | `bamboo/codec/` + `bamboo/relay/` | codec 编解码 + relay 中继 |
 | 理解流式平滑缓冲 | `bamboo/relay/smooth*.go` | SmoothPacer EMA 自适应 + CJK 切分 + 三阶段模式 + 速率采样 |
 | 理解内部错误类型 | `internal/xerr/error.go` | 最小错误包装，替代外部依赖 |
-| 使用通用 Options 模式 | `pkg/option/option.go` | WithAPIKey/WithBaseURL/WithHeader/WithDebug + ApplyOptions |
+| 使用通用 Options 模式 | `pkg/option/option.go` | WithAPIKey/WithBaseURL/WithHeader + ApplyOptions |
 | 使用通用工具函数 | `pkg/helpers/helpers.go` | PtrFloat64/PtrBool/PtrInt64/PtrString + GetExtra* 安全取值 |
-| 使用通用错误类型 | `pkg/errors/errors.go` | Error + BambooError 错误类型 |
-| 理解 HTTP 错误链路 | `pkg/errors/http_error.go` + `bamboo/bamboo.go` | HTTPError 携带状态码 + wrapProviderError 映射为 BambooError.StatusCode |
+| 使用通用错误类型 | `pkg/errors/errors.go` | BambooError 统一错误类型 |
 
 ## 代码地图
 
@@ -172,12 +170,11 @@ bamboo-messages/
 | `ApplyOptions` | 函数 | options.go | 应用公共选项列表 |
 | `TimingCollector` | 结构体 | timing.go | 流式请求耗时收集器（零侵入 Observe 模式） |
 | `NewTimingCollector` | 函数 | timing.go | 创建耗时收集器实例 |
-| `TimingStats` | 结构体 | timing.go | 流式耗时统计 (TotalDuration, FirstByteDuration/TTFT, ThinkingDuration, ContentDuration, ToolDuration) |
-| `TokenRates` | 结构体 | timing.go | Token 生成速率 (.2f): ThinkingTokensPerSec, OutputTokensPerSec |
+| `TimingStats` | 结构体 | timing.go | 流式耗时统计 (TotalDuration, FirstByteDuration/TTFT, ThinkingDuration, ContentDuration, ToolDuration, ThinkingTokens, OutputTokens, ToolTokens, TotalTokens, TokenSource) |
+| `TokenRates` | 结构体 | timing.go | Token 生成速率 (.2f): ThinkingTokensPerSec, OutputTokensPerSec, ToolTokensPerSec（负值=不可靠） |
 | `RateSample` | 结构体 | timing.go | 速率采样点 (ElapsedSec, TokensPerSec, Kind) |
-| `RateSampleKind` | 类型 | timing.go | 速率采样类型: `"thinking"` / `"output"` |
-| `DebugEnabled` | 变量 | debug.go | Debug 全局开关，通过 `BAMBOO_DEBUG` 环境变量初始化 |
-| `SetDebug` | 函数 | debug.go | 全局开启/关闭 Provider 层 debug 日志 |
+| `RateSampleKind` | 类型 | timing.go | 速率采样类型: `"thinking"` / `"output"` / `"tool"` |
+| `DebugEnabled` | 变量 | debug.go | Debug 全局开关，通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用（唯一入口） |
 | `DebugRequest` | 函数 | debug.go | 输出请求 debug 日志（headers 敏感脱敏、body 长文本截断） |
 | `FormatDebugRequest` | 函数 | debug.go | 返回格式化 debug 字符串（不受开关限制） |
 | `GetUserAgent` | 函数 | version.go | 生成统一 User-Agent 字符串 |
@@ -240,11 +237,10 @@ bamboo-messages/
 |------|------|------|------|
 | `Relay` | 函数 | relay.go | 非流式协议互转（含 SerializeError 错误格式化） |
 | `RelayStream` | 函数 | relay.go | 流式协议互转（含速率采样集成） |
-| `Config` | 结构体 | config.go | relay 运行时配置 (OnUsage/OnError/Debug/Smooth/OnRateSample) |
+| `Config` | 结构体 | config.go | relay 运行时配置 (OnUsage/OnError/Smooth/OnRateSample/EstimateOnMissingUsage) |
 | `Option` | 函数类型 | config.go | Functional Options 配置 |
 | `WithUsageCallback` | 函数 | config.go | 设置 Token 用量回调 |
 | `WithErrorCallback` | 函数 | config.go | 设置错误回调 |
-| `WithDebug` | 函数 | config.go | 启用 relay 层 debug 日志 |
 | `WithRateSampleCallback` | 函数 | config.go | 设置速率采样回调（仅 SmoothBuffer 启用时生效） |
 | `WithSmoothBuffer` | 函数 | smooth.go | 启用流式平滑缓冲（预设档位: gentle/smooth/typewriter） |
 | `WithSmoothBufferCustom` | 函数 | smooth.go | 启用流式平滑缓冲（自定义参数） |
@@ -257,6 +253,7 @@ bamboo-messages/
 | `FrameParser` | 结构体 | smooth_parser.go | SSE 帧解析器（提取 data 行） |
 | `TokenSplitter` | 结构体 | smooth_parser.go | CJK/Latin 文本切分器 |
 | `FormatRelayInput/FormatRelayParsed` | 函数 | debug.go | 返回格式化 debug 字符串（不受开关限制） |
+| `FormatRelayResponse` | 函数 | debug.go | 返回非流式响应的格式化 debug 字符串 |
 
 ### 内部工具 (`internal/xerr/`)
 
@@ -270,24 +267,17 @@ bamboo-messages/
 | 符号 | 类型 | 文件 | 作用 |
 |------|------|------|------|
 | `Option` | 函数类型 | option/option.go | 通用配置选项 func(*Config) |
-| `Config` | 结构体 | option/option.go | 通用 Provider 配置 (APIKey/BaseURL/Headers/Debug) |
+| `Config` | 结构体 | option/option.go | 通用 Provider 配置 (APIKey/BaseURL/Headers) |
 | `WithAPIKey` | 函数 | option/option.go | 设置 API 密钥 |
 | `WithBaseURL` | 函数 | option/option.go | 设置自定义基础 URL |
 | `WithHeader` | 函数 | option/option.go | 添加自定义 HTTP 请求头 |
-| `WithDebug` | 函数 | option/option.go | 启用 debug 日志 |
 | `ApplyOptions` | 函数 | option/option.go | 将选项列表应用到默认配置 |
-| `Config.GetAPIKey/GetBaseURL/GetHeaders/IsDebug` | 方法 | option/option.go | Config Getter 方法 |
-| `Config.SetAPIKey/SetBaseURL/SetHeader/SetDebug` | 方法 | option/option.go | Config Setter 方法 |
+| `Config.GetAPIKey/GetBaseURL/GetHeaders` | 方法 | option/option.go | Config Getter 方法 |
+| `Config.SetAPIKey/SetBaseURL/SetHeader` | 方法 | option/option.go | Config Setter 方法 |
 | `PtrFloat64/PtrBool/PtrInt64/PtrString` | 函数 | helpers/helpers.go | 指针辅助函数 |
 | `GetExtraFloat64/Int64/String/Bool/Any` | 函数 | helpers/helpers.go | ProviderExtra 安全取值 helpers |
-| `Error` | 结构体 | errors/errors.go | 内部最小错误类型 (err + Message) |
-| `BambooError` | 结构体 | errors/errors.go | Bamboo SDK 统一错误类型 |
-| `ErrorTypeInvalidRequest` / `Authentication` / `RateLimit` / `API` / `Provider` | 常量 | errors/errors.go | 5 种错误类型常量 |
-| `NewBambooError/NewBambooErrorWithCode` | 函数 | errors/errors.go | BambooError 构造函数 |
-| `HTTPError` | 结构体 | errors/http_error.go | 携带 HTTP 状态码的结构化错误类型 (StatusCode + Message + Cause)，实现 error/Unwrap 接口 |
-| `NewHTTPError` | 函数 | errors/http_error.go | 创建携带 HTTP 状态码的错误实例 `(statusCode, message, cause...) → *HTTPError` |
-| `NewHTTPErrorFromStdError` | 函数 | errors/http_error.go | 从标准 error 创建 HTTPError（状态码默认 500） |
-| `AsHTTPError` | 函数 | errors/http_error.go | 从错误链中提取 `*HTTPError`（使用 errors.As 遍历 Unwrap 链） |
+| `BambooError` | 结构体 | errors/errors.go | Bamboo SDK 统一错误类型 (Category + Message + StatusCode) |
+| `NewBambooError` | 函数 | errors/errors.go | 创建 BambooError 实例 `(category, message, statusCode) → *BambooError` |
 
 ## 模块架构
 
@@ -339,7 +329,7 @@ bamboo-messages/
 ## 约定
 
 1. **值类型传递** — `Message`, `StreamEvent` 为值类型，通过 channel 安全传递，传递后视为只读
-2. **Functional Options** — 所有适配器统一使用 `Option func(*config)` 模式，提供 `WithAPIKey`, `WithBaseURL`, `WithHeader`, `WithDebug`, `WithInterceptor` 五个选项
+2. **Functional Options** — 所有适配器统一使用 `Option func(*config)` 模式，提供 `WithAPIKey`, `WithBaseURL`, `WithHeader`, `WithInterceptor` 四个选项
 3. **双构造函数** — 每个适配器提供 `New*(apiKey)` 最简形式 + `New*WithOptions(opts...)` 完整形式，前者调用后者
 4. **参数构建集中化** — 每个适配器通过 `params.go` 的 `buildParams`（Gemini 为 `buildContentConfig`）方法统一构建请求参数，Chat 和 Complete 共享同一入口，避免重复逻辑
 5. **文件分工固定** — 每个适配器固定文件：`provider.go` / `params.go` / `chat.go` / `complete.go` / `stream.go` / `message.go` / `models.go` / `option.go` / `tools.go` / `types.go` / `provider_test.go`
@@ -355,7 +345,7 @@ bamboo-messages/
 14. **StreamConverter 防御性自动补发** — 若 Provider 未发送 BlockStart，在首个文本/推理增量时自动合成对应类型的 BlockStart
 15. **Legacy 兼容模式** — OpenAI Completions 适配器通过 `legacyCompat` 标志支持旧版端点兼容（max_tokens 旧字段名、条件性 ParallelToolCalls、跳过 ReasoningEffort 映射）
 16. **Codec 无状态** — `Codec` 接口无状态可并发使用，有状态操作通过 `NewSerializer()` 创建独立 `StreamSerializer`
-17. **Debug 三入口统一** — 环境变量 `BAMBOO_DEBUG=1/true/on` / `provider.SetDebug(true)` / 适配器 `WithDebug()` Option；三者任一启用即生效；relay 层额外提供 `WithDebug(true)` Option 控制单次调用
+17. **Debug 环境变量唯一入口** — 仅通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；`provider.DebugEnabled` 为全局开关变量；`SetDebug()` 函数和 `WithDebug()` Option 已移除；relay 层 debug 函数直接检查 `provider.DebugEnabled`
 18. **Debug 脱敏与截断** — 敏感 header（Authorization/X-API-Key/API-Key/X-Goog-API-Key）自动脱敏（保留前 4 后 4）；长文本字段（content/text/system/thinking/reasoning_content/arguments）超过 500 字符自动截断
 19. **Prompt Caching 三层方案** — Layer 1: Anthropic 显式 CacheControl 断点（system/messages/tools）；Layer 2: OpenAI PromptCacheKey 路由粘性键；Layer 3: Gemini 通过 ProviderExtra 的 `cached_content` 引用外部资源
 20. **Usage 缓存统计透传** — `UsageData` / `Usage` 结构体包含 `CacheCreationInputTokens` / `CacheReadInputTokens`，从 Provider → convert → codec 完整透传
@@ -381,8 +371,8 @@ bamboo-messages/
 40. **速率采样回调** — `Config.OnRateSample` 在 SmoothPacer 输出 tick 时触发，区分 thinking/output 阶段；仅 SmoothBuffer 启用时生效
 41. **Relay 失败返回协议格式错误** — `Relay` 在 provider 失败时调用 `outCodec.SerializeError(err)` 返回协议格式化错误
 42. **Adapter 本地 DTO 不暴露外部类型** — 适配器内部使用本地 `types.go` 定义的请求/响应结构，禁止在公共 API 或返回类型中暴露任何外部 SDK 类型
-43. **HTTP 错误结构化链路** — 适配器 `complete.go` 在上游 HTTP >= 400 时使用 `pkgErrors.NewHTTPError(statusCode, ...)` 包装错误；`bamboo.go` 的 `wrapProviderError` 使用 `pkgErrors.AsHTTPError` 提取状态码，通过 `NewBambooErrorWithStatusCode` 自动映射为正确的 ErrorType（429→RateLimit/401→Authentication/400→InvalidRequest/5xx→API）；状态码贯穿到 `BambooError.StatusCode` 字段，避免仅存在于消息字符串中
-44. **BambooError.StatusCode 字段** — `BambooError` 携带 `StatusCode` 字段（HTTP 状态码），通过 `MapStatusCodeToErrorType` 自动推导 ErrorType；非 HTTP 错误 StatusCode 为 0，降级为 `ErrorTypeProvider`
+43. **错误透传简化** — `BambooError` 简化为 `Category + Message + StatusCode` 三字段（移除 `Type`/`Code`/`ProviderType`）；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError` 直接透传，避免重复包装；非 BambooError 降级为 `NewBambooError("SDK", err.Error(), 0)`
+44. **RelayStream 流式帧 debug 已移除** — `RelayStream` 不再通过 `debugRelayResponseFrame` 输出逐帧 debug 日志；上层业务可通过自身中间层从输出 channel 捕获完整流内容
 
 ## 反模式
 
@@ -410,7 +400,7 @@ bamboo-messages/
 - `StreamConverter` 防御性自动补发 — 若 Provider 未发送 BlockStart，自动合成，兼容不完整的 Provider 实现
 - N-to-N Codec 架构 — `codec` 层提供 4 种格式子包，`relay` 层提供函数式互转 API，实现任意协议间的请求-响应转换
 - `internal/xerr.Error` 最小错误类型 — 替代外部 bamboo-base-go 依赖，使 SDK 内部错误处理自包含
-- Debug 双层实现 — `provider/debug.go`（适配器层，打印请求参数）+ `bamboo/relay/debug.go`（relay 层，打印原始 body 和解析后的 RelayRequest），两者通过同一环境变量 `BAMBOO_DEBUG` 联动
+- Debug 环境变量唯一入口 — `provider/debug.go`（适配器层，打印请求参数）+ `bamboo/relay/debug.go`（relay 层，打印原始 body 和解析后的 RelayRequest），两者通过同一环境变量 `BAMBOO_DEBUG` 联动；RelayStream 流式逐帧 debug 已移除，上层可通过输出 channel 自行捕获
 - Prompt Caching 统一抽象 — `CacheControl` 结构体 + `NewEphemeralCacheControl()` 工厂函数，跨 Provider 表达缓存语义
 - Usage 缓存字段全链路透传 — `UsageData.CacheCreationInputTokens` / `CacheReadInputTokens` 从 Provider 适配器 → `convert.go` → `codec` 序列化，完整传递到上层
 - Thinking 内容全链路保留 — `BambooMessage.ThinkingBlock` ↔ `provider.Message.ThinkingContent/ThinkingSignature/ReasoningID` ↔ `provider.CompletionResult.Thinking/ThinkingSignature/ResponseID` ↔ `bamboo.Response.ThinkingBlock` 双向透传
@@ -420,7 +410,7 @@ bamboo-messages/
 - CJK 文本切分 — `TokenSplitter` 按 rune 切分：CJK 独立 token、Latin 连续合并、标点附着前 token、空格前缀附着后 token；跨帧残余保留在 `pendingTail`
 - 积压感知缩减 — NORMAL 模式下队列积压增长时，有效间隔从 `baseInterval` 线性缩减到 `minIntervalFloor`（2ms）
 - 请求拦截器链 — `RequestInterceptor` + `ApplyInterceptors` + `interceptorTransport` 构成完整的 HTTP 层请求改写机制，正交扩展点
-- TimingCollector 零侵入可观测性 — pull 模式（非 push），用户代码主动创建并在事件循环中调用 `Observe`；4 阶段状态机驱动耗时计算
+- TimingCollector 零侵入可观测性 — pull 模式（非 push），用户代码主动创建并在事件循环中调用 `Observe`；4 阶段状态机驱动耗时计算；耗时低于 1ms 的阶段速率用负值标记不可靠
 - Block 类型注册表 — `RegisterBlockType` + `ContentBlocks.UnmarshalJSON` 实现 JSON 多态反序列化，6 种标准类型 `init()` 自动注册
 - Chat 首事件 peek 模式 — 同步 peek 首个 provider 事件防止空流挂起
 
@@ -444,13 +434,9 @@ go build ./...
 # 依赖整理
 go mod tidy
 
-# 启用 Debug 日志（任选其一）
+# 启用 Debug 日志
 BAMBOO_DEBUG=1 go run ./example
 BAMBOO_DEBUG=true go test ./provider/anthropic/...
-# 或在代码中
-#   provider.SetDebug(true)
-#   anthropic.WithDebug()
-#   relay.WithDebug(true)
 ```
 
 ## 备注
@@ -474,8 +460,7 @@ BAMBOO_DEBUG=true go test ./provider/anthropic/...
 - 请求拦截器（`RequestInterceptor`）为 SDK 用户提供正交的 HTTP 层请求改写能力，无需 fork Provider 实现
 - `TimingCollector` 是 pull 模式的可观测性工具，不是 push 模式的配置；与 `SmoothPacer` 通过 `WithRateSampleCallback` 联动
 - Responses codec 的流式序列化器完全重写为 `responsesStreamSerializer` 状态机，支持 `sequence_number` 自动递增、`response_id` 注入、双轨 reasoning（raw + summary）、`encrypted_content` 透传
-- HTTP 错误结构化链路：适配器 `complete.go` → `pkgErrors.NewHTTPError(statusCode, ...)` → `bamboo.wrapProviderError` → `pkgErrors.AsHTTPError` → `bamboo.NewBambooErrorWithStatusCode` → `MapStatusCodeToErrorType` 自动推导 ErrorType；`BambooError.StatusCode` 字段保留原始 HTTP 状态码
-- `pkg/errors/http_error.go` 的 `HTTPError` 实现 `error` + `Unwrap` 接口，支持 `errors.Is/As` 链式解包；`NewHTTPErrorFromStdError` 用于将非结构化错误回退包装（状态码默认 500）
+- 错误透传简化：`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError` 直接透传，避免重复包装；非 BambooError 降级为 `NewBambooError("SDK", err.Error(), 0)`；`BambooError` 字段为 `Category` + `Message` + `StatusCode`
 
 ## 引用
 
