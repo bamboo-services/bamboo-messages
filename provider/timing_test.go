@@ -671,3 +671,143 @@ func TestTimingCollector_MultipleToolCalls(t *testing.T) {
 		t.Errorf("ToolTokens should be > 0 for multiple tool calls, got %d", stats.ToolTokens)
 	}
 }
+
+func TestTimingCollector_ThinkingToToolWithoutText(t *testing.T) {
+	tc := NewTimingCollector()
+
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(5 * time.Millisecond)
+
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeBlockStart, BlockStartData{BlockType: "thinking"}))
+	time.Sleep(10 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeThinking, ThinkingData("需要调用工具来查询")))
+	time.Sleep(5 * time.Millisecond)
+
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeBlockStart, BlockStartData{BlockType: "tool_use"}))
+	time.Sleep(5 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCall, ToolCallData{ID: "tc1", Name: "search"}))
+	time.Sleep(3 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCallDelta, ToolCallDeltaData(`{"q":"test"}`)))
+	time.Sleep(2 * time.Millisecond)
+
+	tc.Observe(makeStopEvent())
+
+	stats := tc.Stats()
+
+	if stats.ThinkingDuration <= 0 {
+		t.Errorf("ThinkingDuration should be > 0 for thinking→tool transition, got %v", stats.ThinkingDuration)
+	}
+	if stats.ToolDuration <= 0 {
+		t.Errorf("ToolDuration should be > 0, got %v", stats.ToolDuration)
+	}
+	if stats.ContentDuration != 0 {
+		t.Errorf("ContentDuration should be 0 (no text phase), got %v", stats.ContentDuration)
+	}
+}
+
+func TestTimingCollector_RatesUnreliableNegativeMark(t *testing.T) {
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(5 * time.Millisecond)
+
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeBlockStart, BlockStartData{BlockType: "text"}))
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeTextOutput, TextData("hello world")))
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeTextOutput, TextData("foo bar baz")))
+	tc.Observe(makeStopEvent())
+
+	stats := tc.Stats()
+	rates := tc.Rates()
+
+	if stats.ContentDuration >= minReliableDuration {
+		t.Skipf("ContentDuration %v >= %v, not testing unreliable path", stats.ContentDuration, minReliableDuration)
+	}
+	if rates.OutputTokensPerSec >= 0 {
+		t.Errorf("OutputTokensPerSec should be negative (unreliable) for sub-%v duration, got %v",
+			minReliableDuration, rates.OutputTokensPerSec)
+	}
+	if rates.OutputTokensPerSec == 0 {
+		t.Errorf("OutputTokensPerSec should not be 0 (tokens were counted)")
+	}
+}
+
+func TestTimingCollector_RatesReliablePositive(t *testing.T) {
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(2 * time.Millisecond)
+
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeBlockStart, BlockStartData{BlockType: "text"}))
+	time.Sleep(20 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeTextOutput, TextData("hello world foo bar")))
+	time.Sleep(10 * time.Millisecond)
+	tc.Observe(makeStopEvent())
+
+	rates := tc.Rates()
+	if rates.OutputTokensPerSec <= 0 {
+		t.Errorf("OutputTokensPerSec should be positive (reliable) for adequate duration, got %v", rates.OutputTokensPerSec)
+	}
+}
+
+func TestTimingCollector_ToolRateUnreliableNegativeMark(t *testing.T) {
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(3 * time.Millisecond)
+
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCall, ToolCallData{ID: "tc1", Name: "fn"}))
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeToolCallDelta, ToolCallDeltaData(`{"query":"test value"}`)))
+	tc.Observe(makeStopEvent())
+
+	stats := tc.Stats()
+	rates := tc.Rates()
+
+	if stats.ToolDuration >= minReliableDuration {
+		t.Skipf("ToolDuration %v >= %v, not testing unreliable path", stats.ToolDuration, minReliableDuration)
+	}
+	if rates.ToolTokensPerSec >= 0 {
+		t.Errorf("ToolTokensPerSec should be negative (unreliable) for sub-%v duration, got %v",
+			minReliableDuration, rates.ToolTokensPerSec)
+	}
+}
+
+func TestTimingCollector_RatesPhaseStartedButZeroDuration(t *testing.T) {
+	// 模拟真实场景：事件密集到达，toolStart 和 stopTime 时间戳相同 → ToolDuration == 0
+	// 此前 Rates() 因 stats.ToolDuration > 0 为 false 返回 0（误报"未发生"）
+	// 修复后应返回负值（不可靠标记）
+	tc := NewTimingCollector()
+
+	// 手动构造内部状态，精确模拟 duration == 0
+	tc.startTime = time.Now()
+	tc.toolStart = tc.startTime
+	tc.stopTime = tc.startTime // 同一时间戳 → ToolDuration == 0
+	tc.toolChars.add(`{"query":"test value"}`)
+	tc.lastEventTime = tc.startTime
+
+	stats := tc.Stats()
+	if stats.ToolDuration != 0 {
+		t.Fatalf("prerequisite: ToolDuration must be 0, got %v", stats.ToolDuration)
+	}
+
+	rates := tc.Rates()
+	if rates.ToolTokensPerSec == 0 {
+		t.Errorf("ToolTokensPerSec should not be 0 when tool phase started (even with zero duration), got %v", rates.ToolTokensPerSec)
+	}
+	if rates.ToolTokensPerSec >= 0 {
+		t.Errorf("ToolTokensPerSec should be negative (unreliable) for zero duration, got %v", rates.ToolTokensPerSec)
+	}
+}
+
+func TestTimingCollector_RatesPhaseNotStarted_ReturnsZero(t *testing.T) {
+	// 阶段未发生 → 返回 0（与"不可靠"的负值区分）
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(2 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeTextOutput, TextData("hello")))
+	tc.Observe(makeStopEvent())
+
+	rates := tc.Rates()
+	if rates.ThinkingTokensPerSec != 0 {
+		t.Errorf("ThinkingTokensPerSec should be 0 (phase not started), got %v", rates.ThinkingTokensPerSec)
+	}
+	if rates.ToolTokensPerSec != 0 {
+		t.Errorf("ToolTokensPerSec should be 0 (phase not started), got %v", rates.ToolTokensPerSec)
+	}
+}

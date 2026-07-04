@@ -155,6 +155,11 @@ func round2(v float64) float64 {
 	return math.Round(v*100) / 100
 }
 
+// minReliableDuration 最小可信耗时阈值。
+// 低于此值时，阶段内事件密集到达（channel buffer 导致 Observe 时间戳几乎相同），
+// 计算出的 token/s 严重失真（如 5k+ tok/s），用负号标记（如 -6000 表示不可靠的 6000 tok/s）。
+const minReliableDuration = time.Millisecond
+
 // ════════════════════════════════════════════════════════════════════════════
 // TimingCollector
 // ════════════════════════════════════════════════════════════════════════════
@@ -266,15 +271,19 @@ func (tc *TimingCollector) handleDelta(delta StreamDelta[any], now time.Time) {
 				}
 				tc.phase = phaseContent
 
-			case "tool_use":
-				if tc.toolStart.IsZero() {
-					tc.toolStart = now
-				}
-				// 结束内容阶段
-				if tc.contentEnd.IsZero() && !tc.contentStart.IsZero() {
-					tc.contentEnd = now
-				}
-				tc.phase = phaseTool
+		case "tool_use":
+			if tc.toolStart.IsZero() {
+				tc.toolStart = now
+			}
+			// 结束思考阶段（thinking → tool_use 直接切换，无中间 text）
+			if tc.thinkingEnd.IsZero() && !tc.thinkingStart.IsZero() {
+				tc.thinkingEnd = now
+			}
+			// 结束内容阶段
+			if tc.contentEnd.IsZero() && !tc.contentStart.IsZero() {
+				tc.contentEnd = now
+			}
+			tc.phase = phaseTool
 			}
 		}
 
@@ -300,9 +309,11 @@ func (tc *TimingCollector) handleDelta(delta StreamDelta[any], now time.Time) {
 		}
 
 	case StreamDeltaTypeToolCall:
-		// Gemini 可能不发送 BlockStart("tool_use")，直接发 ToolCallDelta
 		if tc.toolStart.IsZero() {
 			tc.toolStart = now
+		}
+		if tc.thinkingEnd.IsZero() && !tc.thinkingStart.IsZero() {
+			tc.thinkingEnd = now
 		}
 		if tc.contentEnd.IsZero() && !tc.contentStart.IsZero() {
 			tc.contentEnd = now
@@ -312,6 +323,9 @@ func (tc *TimingCollector) handleDelta(delta StreamDelta[any], now time.Time) {
 	case StreamDeltaTypeToolCallDelta:
 		if tc.toolStart.IsZero() {
 			tc.toolStart = now
+		}
+		if tc.thinkingEnd.IsZero() && !tc.thinkingStart.IsZero() {
+			tc.thinkingEnd = now
 		}
 		if tc.contentEnd.IsZero() && !tc.contentStart.IsZero() {
 			tc.contentEnd = now
@@ -424,27 +438,39 @@ func (tc *TimingCollector) Stats() TimingStats {
 // Rates 返回 Token 生成速率（.2f 精度）。
 //
 // Token 数基于字符类型估算：CJK ≈ 1 char/token，Latin ≈ 4 chars/token。
-// 速率为零值表示对应阶段未发生或耗时为零。
+// 速率为零值表示对应阶段未发生。
+// 速率为负值表示对应阶段耗时低于 minReliableDuration（含 duration == 0），
+// 数据不可信；绝对值为基于 minReliableDuration 估算的参考值。
 func (tc *TimingCollector) Rates() TokenRates {
 	var rates TokenRates
 	stats := tc.Stats()
 
-	if stats.ThinkingDuration > 0 {
-		tokens := tc.thinkingChars.estimateTokens()
-		rates.ThinkingTokensPerSec = round2(float64(tokens) / stats.ThinkingDuration.Seconds())
+	if !tc.thinkingStart.IsZero() {
+		rates.ThinkingTokensPerSec = tc.computeRate(tc.thinkingChars.estimateTokens(), stats.ThinkingDuration)
 	}
 
-	if stats.ContentDuration > 0 {
-		tokens := tc.outputChars.estimateTokens()
-		rates.OutputTokensPerSec = round2(float64(tokens) / stats.ContentDuration.Seconds())
+	if !tc.contentStart.IsZero() {
+		rates.OutputTokensPerSec = tc.computeRate(tc.outputChars.estimateTokens(), stats.ContentDuration)
 	}
 
-	if stats.ToolDuration > 0 {
-		tokens := tc.toolChars.estimateTokens()
-		rates.ToolTokensPerSec = round2(float64(tokens) / stats.ToolDuration.Seconds())
+	if !tc.toolStart.IsZero() {
+		rates.ToolTokensPerSec = tc.computeRate(tc.toolChars.estimateTokens(), stats.ToolDuration)
 	}
 
 	return rates
+}
+
+// computeRate 计算 token/s 速率，含不可靠标记逻辑。
+// 阶段已发生（start != zero）但耗时低于 minReliableDuration 时，
+// 用 minReliableDuration 作为分母估算参考值并取负标记不可靠。
+func (tc *TimingCollector) computeRate(tokens int64, duration time.Duration) float64 {
+	if tokens == 0 {
+		return 0
+	}
+	if duration < minReliableDuration {
+		return -round2(float64(tokens) / minReliableDuration.Seconds())
+	}
+	return round2(float64(tokens) / duration.Seconds())
 }
 
 // RateSeries 返回速率采样序列。
