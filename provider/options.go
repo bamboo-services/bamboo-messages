@@ -1,6 +1,43 @@
 package provider
 
 // ============================================
+// 流式中断降级策略
+// ============================================
+
+// DegradedReasonStrategy 流式中断降级时补发的完成原因策略。
+//
+// 当上游连接异常断开（非 EOF）但已输出内容时，SDK 需要补发 Stop 事件
+// 以保证客户端收到完整的 block 生命周期。此策略决定补发的 FinishReason：
+//   - DegradedReasonStop（默认）：返回 stop，适用于普通对话
+//   - DegradedReasonToolUse：带 tools 请求返回 tool_calls，让 Agent Loop 继续轮询
+type DegradedReasonStrategy int
+
+const (
+	// DegradedReasonStop 默认策略：中断时补发 finish_reason=stop。
+	//
+	// 适用于普通对话场景。客户端收到 stop 后正常结束。
+	DegradedReasonStop DegradedReasonStrategy = iota
+
+	// DegradedReasonToolUse Agent Loop 策略。
+	//
+	// 中断时若请求携带 tools，补发 finish_reason=tool_calls，
+	// 让 ReAct Agent 继续下一轮工具调用循环，不因上游断连而终止长时任务。
+	// 无 tools 时回退为 stop。
+	DegradedReasonToolUse
+)
+
+// ResolveDegradedReason 根据策略和请求配置解析降级时的完成原因。
+//
+// hasTools 表示当前请求是否携带工具定义。
+// 返回值用于补发 StreamTypeStop 事件的 FinishReason 字段。
+func ResolveDegradedReason(strategy DegradedReasonStrategy, hasTools bool) FinishReason {
+	if strategy == DegradedReasonToolUse && hasTools {
+		return FinishReasonToolCalls
+	}
+	return FinishReasonStop
+}
+
+// ============================================
 // Provider 公共 Options（拦截器等扩展字段）
 // ============================================
 

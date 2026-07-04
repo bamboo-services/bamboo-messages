@@ -9,7 +9,8 @@ import (
 // 在去 SDK 化重构后，不再嵌入 openai-go Client，
 // 而是统一持有 *provider.HTTPClient 进行 HTTP 通信。
 type ResponsesProvider struct {
-	httpClient *provider.HTTPClient
+	httpClient     *provider.HTTPClient
+	degradedReason provider.DegradedReasonStrategy
 }
 
 // ============================================
@@ -27,13 +28,11 @@ type Option func(*config)
 // 保存 ResponsesProvider 的配置信息，
 // 包括 API 密钥、自定义基础 URL 和附加请求头。
 type config struct {
-	apiKey  string
-	baseURL string
-	headers map[string]string
-	// interceptors 请求拦截器链，通过 WithInterceptor 注册。
-	// 构造 Provider 时若非空，会用 interceptorTransport 包装 HTTP client，
-	// 让所有上游请求都先经过拦截器链。
-	interceptors []provider.RequestInterceptor
+	apiKey         string
+	baseURL        string
+	headers        map[string]string
+	interceptors   []provider.RequestInterceptor
+	degradedReason provider.DegradedReasonStrategy
 }
 
 // WithAPIKey 设置 API 密钥。
@@ -79,6 +78,14 @@ func WithInterceptor(fn provider.RequestInterceptor) Option {
 	}
 }
 
+// WithDegradedReason 设置流式中断降级时补发的完成原因策略。
+//
+// 默认 DegradedReasonStop。Agent Loop 场景启用 DegradedReasonToolUse 后，
+// 带 tools 请求中断时返回 tool_calls 让 agent 继续轮询。
+func WithDegradedReason(strategy provider.DegradedReasonStrategy) Option {
+	return func(c *config) { c.degradedReason = strategy }
+}
+
 // ============================================
 // 构造函数
 // ============================================
@@ -114,7 +121,8 @@ func NewResponsesProviderWithOptions(opts ...Option) *ResponsesProvider {
 	)
 
 	return &ResponsesProvider{
-		httpClient: httpClient,
+		httpClient:     httpClient,
+		degradedReason: cfg.degradedReason,
 	}
 }
 

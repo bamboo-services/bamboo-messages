@@ -105,6 +105,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 		textBlockStarted := false
 		thinkingBlockStarted := false
 		startSent := false
+		stopSent := false
 
 		for {
 			eventType, data, done, scanErr := scanner.Next()
@@ -117,7 +118,10 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 				if scanErr == io.EOF {
 					break
 				}
-				// 其他读取错误 → 发送错误事件
+				// 已有内容时优雅降级：后续 Done → converter 发出完整终止序列。
+				if startSent {
+					break
+				}
 				select {
 				case eventCh <- provider.StreamEvent{
 					Type: provider.StreamTypeError,
@@ -154,11 +158,30 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			// 分发事件到处理函数
 			events := p.handleStreamEvent(ctx, event, &textBlockStarted, &thinkingBlockStarted)
 			for _, e := range events {
+				if e.Type == provider.StreamTypeStop {
+					stopSent = true
+				}
 				select {
 				case eventCh <- e:
 				case <-ctx.Done():
 					return
 				}
+			}
+		}
+
+		// 流中断但未收到 response.completed/incomplete，补发 Stop 携带降级完成原因
+		if !stopSent && startSent {
+			finishReason := provider.ResolveDegradedReason(
+				p.degradedReason,
+				config != nil && len(config.Tools) > 0,
+			)
+			select {
+			case eventCh <- provider.StreamEvent{
+				Type:         provider.StreamTypeStop,
+				FinishReason: finishReason,
+			}:
+			case <-ctx.Done():
+				return
 			}
 		}
 

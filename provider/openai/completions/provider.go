@@ -10,9 +10,10 @@ import (
 // 而是统一持有 *provider.HTTPClient 进行 HTTP 通信。
 // legacyCompat 标志控制旧版端点兼容行为。
 type CompletionsProvider struct {
-	httpClient   *provider.HTTPClient
-	legacyCompat bool
-	includeUsage bool // legacyCompat 模式下是否强制发送 stream_options.include_usage
+	httpClient     *provider.HTTPClient
+	legacyCompat   bool
+	includeUsage   bool
+	degradedReason provider.DegradedReasonStrategy
 }
 
 // ============================================
@@ -28,12 +29,13 @@ type Option func(*config)
 //
 // 存储 API Key、BaseURL、Headers 等配置项。
 type config struct {
-	apiKey       string
-	baseURL      string
-	headers      map[string]string
-	legacyCompat bool
-	includeUsage bool
-	interceptors []provider.RequestInterceptor
+	apiKey         string
+	baseURL        string
+	headers        map[string]string
+	legacyCompat   bool
+	includeUsage   bool
+	interceptors   []provider.RequestInterceptor
+	degradedReason provider.DegradedReasonStrategy
 }
 
 // WithAPIKey 设置 API 密钥。
@@ -98,6 +100,15 @@ func WithInterceptor(fn provider.RequestInterceptor) Option {
 	}
 }
 
+// WithDegradedReason 设置流式中断降级时补发的完成原因策略。
+//
+// 默认 DegradedReasonStop（中断时返回 stop）。Agent Loop 场景启用
+// DegradedReasonToolUse 后，带 tools 请求中断时返回 tool_calls，
+// 让上层 agent 继续轮询而非终止。
+func WithDegradedReason(strategy provider.DegradedReasonStrategy) Option {
+	return func(c *config) { c.degradedReason = strategy }
+}
+
 // ============================================
 // 构造函数
 // ============================================
@@ -133,9 +144,10 @@ func NewCompletionsProviderWithOptions(opts ...Option) *CompletionsProvider {
 	)
 
 	return &CompletionsProvider{
-		httpClient:   httpClient,
-		legacyCompat: cfg.legacyCompat,
-		includeUsage: cfg.includeUsage,
+		httpClient:     httpClient,
+		legacyCompat:   cfg.legacyCompat,
+		includeUsage:   cfg.includeUsage,
+		degradedReason: cfg.degradedReason,
 	}
 }
 

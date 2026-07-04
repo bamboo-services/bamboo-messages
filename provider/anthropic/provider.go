@@ -10,8 +10,9 @@ import (
 // 而是统一持有 *provider.HTTPClient 进行 HTTP 通信。
 // legacyCompat 标志控制旧版端点兼容行为（如 GLM/Kimi 等 Anthropic 兼容端点）。
 type Provider struct {
-	httpClient   *provider.HTTPClient
-	legacyCompat bool
+	httpClient     *provider.HTTPClient
+	legacyCompat   bool
+	degradedReason provider.DegradedReasonStrategy
 }
 
 // ============================================
@@ -27,14 +28,12 @@ type Option func(*config)
 //
 // 存储 API Key、BaseURL、自定义 Headers 等配置。
 type config struct {
-	apiKey       string
-	baseURL      string
-	headers      map[string]string
-	legacyCompat bool
-	// interceptors 请求拦截器链，通过 WithInterceptor 注册。
-	// 构造 Provider 时若非空，会用 interceptorTransport 包装 HTTP client，
-	// 让所有上游请求都先经过拦截器链。
-	interceptors []provider.RequestInterceptor
+	apiKey         string
+	baseURL        string
+	headers        map[string]string
+	legacyCompat   bool
+	interceptors   []provider.RequestInterceptor
+	degradedReason provider.DegradedReasonStrategy
 }
 
 // WithAPIKey 设置 API 密钥。
@@ -98,6 +97,14 @@ func WithInterceptor(fn provider.RequestInterceptor) Option {
 	}
 }
 
+// WithDegradedReason 设置流式中断降级时补发的完成原因策略。
+//
+// 默认 DegradedReasonStop。Agent Loop 场景启用 DegradedReasonToolUse 后，
+// 带 tools 请求中断时返回 tool_calls 让 agent 继续轮询。
+func WithDegradedReason(strategy provider.DegradedReasonStrategy) Option {
+	return func(c *config) { c.degradedReason = strategy }
+}
+
 // ============================================
 // 构造函数
 // ============================================
@@ -139,8 +146,9 @@ func NewProviderWithOptions(opts ...Option) *Provider {
 	)
 
 	return &Provider{
-		httpClient:   httpClient,
-		legacyCompat: cfg.legacyCompat,
+		httpClient:     httpClient,
+		legacyCompat:   cfg.legacyCompat,
+		degradedReason: cfg.degradedReason,
 	}
 }
 

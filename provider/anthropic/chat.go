@@ -102,6 +102,10 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 				if errors.Is(scanErr, io.EOF) {
 					break
 				}
+				// 已有内容时优雅降级：后续 Done → converter 发出完整终止序列。
+				if startSent {
+					break
+				}
 				select {
 				case eventCh <- provider.StreamEvent{
 					Type: provider.StreamTypeError,
@@ -173,6 +177,22 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 				case <-ctx.Done():
 					return
 				}
+			}
+		}
+
+		// 降级场景：未收到 message_stop 事件（上游中断），补发 Stop 事件
+		if finishReason == "" && startSent {
+			finishReason = provider.ResolveDegradedReason(
+				p.degradedReason,
+				config != nil && len(config.Tools) > 0,
+			)
+			select {
+			case eventCh <- provider.StreamEvent{
+				Type:         provider.StreamTypeStop,
+				FinishReason: finishReason,
+			}:
+			case <-ctx.Done():
+				return
 			}
 		}
 

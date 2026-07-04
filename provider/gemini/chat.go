@@ -107,6 +107,10 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 				if errors.Is(scanErr, io.EOF) {
 					break
 				}
+				// 已有内容时优雅降级：后续 !stopSent 补发 Stop + Done。
+				if startSent {
+					break
+				}
 				select {
 				case eventCh <- provider.StreamEvent{
 					Type: provider.StreamTypeError,
@@ -149,12 +153,16 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			}
 		}
 
-		// 流正常结束但未收到 FinishReason，补发 Stop 事件
+		// 流正常结束或降级结束但未收到 FinishReason，补发 Stop 事件
 		if !stopSent {
+			finishReason := provider.ResolveDegradedReason(
+				p.degradedReason,
+				config != nil && len(config.Tools) > 0,
+			)
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type:         provider.StreamTypeStop,
-				FinishReason: provider.FinishReasonStop,
+				FinishReason: finishReason,
 			}:
 			case <-ctx.Done():
 				return
