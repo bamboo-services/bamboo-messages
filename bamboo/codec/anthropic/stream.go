@@ -221,8 +221,16 @@ func (s *anthropicStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 	}
 
 	if event.Usage != nil {
+		// Anthropic 协议的 input_tokens 仅统计非缓存输入 token，
+		// bamboo.Usage.InputTokens 是总输入（含 cache_creation + cache_read）。
+		nonCachedInput := event.Usage.InputTokens -
+			event.Usage.CacheCreationInputTokens -
+			event.Usage.CacheReadInputTokens
+		if nonCachedInput < 0 {
+			nonCachedInput = 0
+		}
 		usageMap := map[string]any{
-			"input_tokens":  event.Usage.InputTokens,
+			"input_tokens":  nonCachedInput,
 			"output_tokens": event.Usage.OutputTokens,
 		}
 		if event.Usage.CacheCreationInputTokens > 0 {

@@ -50,6 +50,16 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 		stopSeq = &resp.StopSequence
 	}
 
+	// Anthropic 协议的 input_tokens 仅统计非缓存输入 token，
+	// 而 bamboo.Usage.InputTokens 是总输入（含 cache_creation + cache_read）。
+	// 需要减去缓存部分以匹配 Anthropic 语义，否则下游客户端计算缓存率时会双重计数。
+	nonCachedInput := resp.Usage.InputTokens -
+		resp.Usage.CacheCreationInputTokens -
+		resp.Usage.CacheReadInputTokens
+	if nonCachedInput < 0 {
+		nonCachedInput = 0
+	}
+
 	out := anthropicResponse{
 		ID:           resp.ID,
 		Type:         "message",
@@ -59,7 +69,7 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 		StopReason:   resp.StopReason,
 		StopSequence: stopSeq,
 		Usage: anthropicUsage{
-			InputTokens:              resp.Usage.InputTokens,
+			InputTokens:              nonCachedInput,
 			OutputTokens:             resp.Usage.OutputTokens,
 			CacheCreationInputTokens: resp.Usage.CacheCreationInputTokens,
 			CacheReadInputTokens:     resp.Usage.CacheReadInputTokens,

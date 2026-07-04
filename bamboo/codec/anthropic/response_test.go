@@ -233,3 +233,52 @@ func TestSerializeResponse_EmptyContent(t *testing.T) {
 		t.Errorf("StopReason = %q", out.StopReason)
 	}
 }
+
+// TestSerializeResponse_CacheTokenSemantics 验证 Anthropic 协议的 input_tokens
+// 仅包含非缓存输入 token（bamboo.Usage.InputTokens - cache_creation - cache_read）。
+//
+// Anthropic 协议语义：
+//   - input_tokens = 非缓存输入 token
+//   - cache_creation_input_tokens = 缓存创建 token
+//   - cache_read_input_tokens = 缓存读取 token
+//   - 总输入 = input_tokens + cache_creation + cache_read
+//
+// bamboo.Usage.InputTokens 是总输入（含缓存），需要减去缓存部分。
+func TestSerializeResponse_CacheTokenSemantics(t *testing.T) {
+	resp := &bamboo.Response{
+		ID:         "msg_cache",
+		Model:      "claude-sonnet-4-20250514",
+		StopReason: bamboo.FinishReasonEndTurn,
+		Content:    []bamboo.ContentBlock{bamboo.NewTextBlock("hi")},
+		Usage: bamboo.Usage{
+			InputTokens:              99516,
+			OutputTokens:             139,
+			CacheCreationInputTokens: 0,
+			CacheReadInputTokens:     98880,
+		},
+	}
+
+	data, err := serializeResponse(resp)
+	if err != nil {
+		t.Fatalf("serializeResponse() error = %v", err)
+	}
+
+	var out anthropicResponse
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal error = %v", err)
+	}
+
+	expectedNonCached := int64(99516 - 0 - 98880) // = 636
+	if out.Usage.InputTokens != expectedNonCached {
+		t.Errorf("input_tokens = %d, want %d (non-cached portion)", out.Usage.InputTokens, expectedNonCached)
+	}
+	if out.Usage.CacheReadInputTokens != 98880 {
+		t.Errorf("cache_read_input_tokens = %d, want 98880", out.Usage.CacheReadInputTokens)
+	}
+
+	// 验证总输入 = input_tokens + cache_read = 636 + 98880 = 99516
+	totalReconstructed := out.Usage.InputTokens + out.Usage.CacheCreationInputTokens + out.Usage.CacheReadInputTokens
+	if totalReconstructed != 99516 {
+		t.Errorf("reconstructed total = %d, want 99516 (original InputTokens)", totalReconstructed)
+	}
+}

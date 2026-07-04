@@ -349,6 +349,40 @@ func TestStreamSerializer_MessageDeltaUsage(t *testing.T) {
 	}
 }
 
+// TestStreamSerializer_MessageDeltaUsageWithCache 验证流式 message_delta 中
+// input_tokens 正确减去缓存部分（Anthropic 语义：input_tokens 不含缓存）。
+func TestStreamSerializer_MessageDeltaUsageWithCache(t *testing.T) {
+	s := newStreamSerializer("")
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type: bamboo.EventMessageDelta,
+		Delta: &bamboo.MessageDelta{
+			StopReason: bamboo.FinishReasonEndTurn,
+		},
+		Usage: &bamboo.Usage{
+			InputTokens:              99516,
+			OutputTokens:             139,
+			CacheReadInputTokens:     98880,
+			CacheCreationInputTokens: 0,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Serialize error = %v", err)
+	}
+	_, payload := parseSSEEvent(t, data)
+	usage, ok := payload["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("usage should be object")
+	}
+
+	// input_tokens 应为 99516 - 0 - 98880 = 636（非缓存部分）
+	if usage["input_tokens"].(float64) != 636 {
+		t.Errorf("input_tokens = %v, want 636 (non-cached)", usage["input_tokens"])
+	}
+	if usage["cache_read_input_tokens"].(float64) != 98880 {
+		t.Errorf("cache_read_input_tokens = %v, want 98880", usage["cache_read_input_tokens"])
+	}
+}
+
 func TestMessageStartModelID(t *testing.T) {
 	model := "claude-sonnet-4-20250514"
 	s := newStreamSerializer(model)
