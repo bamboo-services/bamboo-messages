@@ -345,3 +345,62 @@ func indexOf(s, substr string) int {
 	}
 	return -1
 }
+
+// ════════════════════════════════════════════════════════════
+// splitSSEFrames 单元测试
+// ════════════════════════════════════════════════════════════
+
+func TestSplitSSEFrames_SingleFrame(t *testing.T) {
+	data := []byte("data: {\"a\":1}\n\n")
+	frames := splitSSEFrames(data)
+	if len(frames) != 1 {
+		t.Fatalf("期望 1 帧，实际 %d", len(frames))
+	}
+	if string(frames[0]) != "data: {\"a\":1}\n\n" {
+		t.Errorf("帧内容不匹配: %q", string(frames[0]))
+	}
+}
+
+func TestSplitSSEFrames_TwoFrames(t *testing.T) {
+	data := []byte("data: {\"finish_reason\":\"stop\"}\n\ndata: {\"usage\":{\"total\":100}}\n\n")
+	frames := splitSSEFrames(data)
+	if len(frames) != 2 {
+		t.Fatalf("期望 2 帧，实际 %d", len(frames))
+	}
+	if string(frames[0]) != "data: {\"finish_reason\":\"stop\"}\n\n" {
+		t.Errorf("帧 1 内容不匹配: %q", string(frames[0]))
+	}
+	if string(frames[1]) != "data: {\"usage\":{\"total\":100}}\n\n" {
+		t.Errorf("帧 2 内容不匹配: %q", string(frames[1]))
+	}
+}
+
+func TestSplitSSEFrames_CommentFrame(t *testing.T) {
+	data := []byte(": keep-alive\n\n")
+	frames := splitSSEFrames(data)
+	if len(frames) != 1 {
+		t.Fatalf("期望 1 帧，实际 %d", len(frames))
+	}
+	if string(frames[0]) != ": keep-alive\n\n" {
+		t.Errorf("帧内容不匹配: %q", string(frames[0]))
+	}
+}
+
+func TestSplitSSEFrames_DoneSentinel(t *testing.T) {
+	data := []byte("data: [DONE]\n\n")
+	frames := splitSSEFrames(data)
+	if len(frames) != 1 {
+		t.Fatalf("期望 1 帧，实际 %d", len(frames))
+	}
+	if string(frames[0]) != "data: [DONE]\n\n" {
+		t.Errorf("帧内容不匹配: %q", string(frames[0]))
+	}
+}
+
+func TestSplitSSEFrames_NoTrailingNewline(t *testing.T) {
+	data := []byte("data: {\"a\":1}")
+	frames := splitSSEFrames(data)
+	if len(frames) != 1 {
+		t.Fatalf("期望 1 帧（无 \\n\\n 不拆分），实际 %d", len(frames))
+	}
+}

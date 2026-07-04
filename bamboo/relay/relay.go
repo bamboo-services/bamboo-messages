@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -261,22 +262,28 @@ func RelayStream(
 				continue
 			}
 			if data != nil {
-				// ping 保活帧绕过 SmoothPacer，直接写入 out channel。
-				// 原因：ping 的作用是对抗反向代理 idle timeout，如果经过 pacer 队列
-				// 排队，在队列积压时会失去实时保活意义，导致 nginx/ALB 断连。
-				if event.Type == bamboo.EventPing {
-					select {
-					case out <- data:
-					case <-ctx.Done():
-						return
-					}
-				} else if pacer != nil {
-					pacer.Push(data)
-				} else {
-					select {
-					case out <- data:
-					case <-ctx.Done():
-						return
+				// 按 SSE 事件边界拆分：某些 codec 序列化器（如 OpenAI handleMessageDelta）
+				// 会将 finish_reason + usage 两个 data 帧合并为单个 []byte。
+				// 拆分后逐帧发送，确保上游调用方每个 []byte 收到的是单个 SSE 事件。
+				frames := splitSSEFrames(data)
+				for _, frame := range frames {
+					// ping 保活帧绕过 SmoothPacer，直接写入 out channel。
+					// 原因：ping 的作用是对抗反向代理 idle timeout，如果经过 pacer 队列
+					// 排队，在队列积压时会失去实时保活意义，导致 nginx/ALB 断连。
+					if event.Type == bamboo.EventPing {
+						select {
+						case out <- frame:
+						case <-ctx.Done():
+							return
+						}
+					} else if pacer != nil {
+						pacer.Push(frame)
+					} else {
+						select {
+						case out <- frame:
+						case <-ctx.Done():
+							return
+						}
 					}
 				}
 			}
@@ -295,12 +302,15 @@ func RelayStream(
 			return
 		}
 		if flushData != nil {
-			if pacer != nil {
-				pacer.Push(flushData)
-			} else {
-				select {
-				case out <- flushData:
-				case <-ctx.Done():
+			frames := splitSSEFrames(flushData)
+			for _, frame := range frames {
+				if pacer != nil {
+					pacer.Push(frame)
+				} else {
+					select {
+					case out <- frame:
+					case <-ctx.Done():
+					}
 				}
 			}
 		}
@@ -380,4 +390,35 @@ func toBambooError(err error) error {
 		return err
 	}
 	return pkgErrors.NewBambooError("下游", err.Error(), 0)
+}
+
+// splitSSEFrames 按 SSE 事件边界（\n\n）拆分为独立帧。
+//
+// 某些 codec 序列化器（如 OpenAI handleMessageDelta）将多个 SSE 事件
+// 合并为单个 []byte（finish_reason + usage 两个 data 帧连接在一起）。
+// 此函数确保上游调用方每个 []byte 收到的是单个完整 SSE 事件。
+//
+// 在 SSE 规范中，\n\n 是事件边界，不会出现在单个事件的 data 行内
+// （多行 data 按 \n 拼接，最多产生单个 \n，不会产生 \n\n）。
+func splitSSEFrames(data []byte) [][]byte {
+	if !bytes.Contains(data, []byte("\n\n")) {
+		return [][]byte{data}
+	}
+
+	var frames [][]byte
+	parts := bytes.Split(data, []byte("\n\n"))
+	for _, part := range parts {
+		if len(part) == 0 {
+			continue
+		}
+		frame := make([]byte, len(part)+2)
+		copy(frame, part)
+		frame[len(part)] = '\n'
+		frame[len(part)+1] = '\n'
+		frames = append(frames, frame)
+	}
+	if len(frames) == 0 {
+		return [][]byte{data}
+	}
+	return frames
 }

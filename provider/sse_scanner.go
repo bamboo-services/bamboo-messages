@@ -35,12 +35,13 @@ const sseScannerMaxBufferSize = 1 << 20
 // 上层调用方拿到 json.RawMessage 后自行 Unmarshal 为具体类型，
 // 解析失败是上层自己的业务逻辑问题，不影响 SSEScanner 继续读流。
 type SSEScanner struct {
-	rc        io.ReadCloser  // 底层数据源（用于 Close 释放连接）
-	scanner   *bufio.Scanner // 底层行扫描器
-	dataBuf   bytes.Buffer   // 当前事件的 data 累积缓冲（多行 data 按 \n 拼接）
-	eventType string         // 当前事件的 event: 类型（无 event: 行时为空）
-	err       error          // 终端错误状态（scanner.Err 或 io.EOF），设置后 Next() 永远返回同一状态
-	done      bool           // 是否收到 [DONE] 哨兵
+	rc             io.ReadCloser    // 底层数据源（用于 Close 释放连接）
+	scanner        *bufio.Scanner   // 底层行扫描器
+	dataBuf        bytes.Buffer     // 当前事件的 data 累积缓冲（多行 data 按 \n 拼接）
+	eventType      string           // 当前事件的 event: 类型（无 event: 行时为空）
+	err            error            // 终端错误状态（scanner.Err 或 io.EOF），设置后 Next() 永远返回同一状态
+	done           bool             // 是否收到 [DONE] 哨兵
+	pendingFrames  []json.RawMessage // 粘连帧拆分后缓存的额外有效帧（GLM Issue #66 帧粘连容错）
 }
 
 // NewSSEScanner 从 io.ReadCloser 创建 SSE 帧解析器。
@@ -84,6 +85,13 @@ func (s *SSEScanner) Next() (eventType string, data json.RawMessage, done bool, 
 	}
 	if s.err != nil {
 		return "", nil, false, s.err
+	}
+
+	// 优先返回缓存的帧（来自粘连帧拆分，GLM Issue #66 容错）
+	if len(s.pendingFrames) > 0 {
+		frame := s.pendingFrames[0]
+		s.pendingFrames = s.pendingFrames[1:]
+		return "", frame, false, nil
 	}
 
 	for s.scanner.Scan() {
@@ -198,7 +206,18 @@ func (s *SSEScanner) dispatch() (eventType string, data json.RawMessage, done bo
 	if looksLikeJSON {
 		// JSON 完整性校验
 		if !json.Valid(content) {
-			// GLM Issue #66 容错：截断/粘连帧，跳过并继续
+			// GLM Issue #66 容错：帧粘连 — 两个 data: 行在 JSON 对象中间粘连，
+			// 导致合并后的内容不是有效 JSON。尝试按 \n 拆分并逐段校验，
+			// 从粘连帧中恢复有效数据。
+			validParts := s.trySplitConcatenatedJSON(content)
+			if len(validParts) > 0 {
+				if len(validParts) > 1 {
+					s.pendingFrames = append(s.pendingFrames, validParts[1:]...)
+				}
+				return evType, validParts[0], false
+			}
+
+			// 所有拆分尝试都失败，跳过该帧并继续
 			xLog.WithName("SSEScanner").SugarWarn(context.Background(),
 				fmt.Sprintf("跳过无效 JSON 帧（长度 %d）: %s", len(content), truncateForLog(content, 200)))
 			return "", nil, false
@@ -236,4 +255,33 @@ func truncateForLog(data []byte, maxLen int) string {
 		return string(data)
 	}
 	return string(data[:maxLen]) + "...(truncated)"
+}
+
+// trySplitConcatenatedJSON 尝试将粘连的 JSON 帧按 \n 拆分为多个有效 JSON 对象。
+//
+// GLM Issue #66 中，两个 data: 行在 JSON 对象中间粘连，导致合并后的内容
+// （如 `{"id":"1"}\n{"id":"2"}`）不是有效 JSON。此函数按 \n 拆分内容，
+// 逐段做 json.Valid 校验，返回所有有效的 JSON 片段。
+//
+// 返回的切片中的每个元素都是独立的有效 JSON（json.RawMessage 副本），
+// 调用方负责返回第一个，其余通过 pendingFrames 缓存。
+func (s *SSEScanner) trySplitConcatenatedJSON(content []byte) []json.RawMessage {
+	lines := bytes.Split(content, []byte("\n"))
+	var validParts []json.RawMessage
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		// 仅处理看起来像 JSON 的行（以 { 或 [ 开头）
+		if line[0] != '{' && line[0] != '[' {
+			continue
+		}
+		if json.Valid(line) {
+			result := make(json.RawMessage, len(line))
+			copy(result, line)
+			validParts = append(validParts, result)
+		}
+	}
+	return validParts
 }

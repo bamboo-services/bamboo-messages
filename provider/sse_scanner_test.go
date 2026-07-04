@@ -366,3 +366,114 @@ func TestSSEScanner_EOFWithoutTrailingNewline(t *testing.T) {
 		t.Fatalf("期望 2 个事件（含末尾无空行残余），实际 %d", len(events))
 	}
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// GLM Issue #66 帧粘连容错测试
+// ──────────────────────────────────────────────────────────────────────────
+
+// TestSSEScanner_FrameConcatenationRecovery GLM Issue #66 核心场景：
+// 两个 data: 行粘连（无空行分隔），合并后 JSON 无效，应拆分恢复两个有效帧。
+func TestSSEScanner_FrameConcatenationRecovery(t *testing.T) {
+	// 模拟 GLM 帧粘连：两个 data: 行之间没有空行
+	input := "data: {\"id\":\"1\",\"content\":\"hello\"}\ndata: {\"id\":\"2\",\"content\":\"world\"}\n\n"
+	s := newTestScanner(input)
+
+	events, _, err := readAll(t, s)
+	if err != nil && !errors.Is(err, io.EOF) {
+		t.Fatalf("意外错误: %v", err)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("期望 2 个事件（粘连帧拆分恢复），实际 %d", len(events))
+	}
+
+	var v1, v2 map[string]string
+	if err := json.Unmarshal(events[0].Data, &v1); err != nil {
+		t.Fatalf("第一帧 JSON 反序列化失败: %v", err)
+	}
+	if v1["id"] != "1" || v1["content"] != "hello" {
+		t.Errorf("第一帧: 期望 id=1 content=hello，实际 id=%s content=%s", v1["id"], v1["content"])
+	}
+
+	if err := json.Unmarshal(events[1].Data, &v2); err != nil {
+		t.Fatalf("第二帧 JSON 反序列化失败: %v", err)
+	}
+	if v2["id"] != "2" || v2["content"] != "world" {
+		t.Errorf("第二帧: 期望 id=2 content=world，实际 id=%s content=%s", v2["id"], v2["content"])
+	}
+}
+
+// TestSSEScanner_FrameConcatenationThreeFrames 三帧粘连场景。
+func TestSSEScanner_FrameConcatenationThreeFrames(t *testing.T) {
+	input := "data: {\"i\":1}\ndata: {\"i\":2}\ndata: {\"i\":3}\n\n"
+	s := newTestScanner(input)
+
+	events, _, err := readAll(t, s)
+	if err != nil && !errors.Is(err, io.EOF) {
+		t.Fatalf("意外错误: %v", err)
+	}
+
+	if len(events) != 3 {
+		t.Fatalf("期望 3 个事件（三帧粘连拆分），实际 %d", len(events))
+	}
+
+	for i, ev := range events {
+		var v map[string]int
+		if err := json.Unmarshal(ev.Data, &v); err != nil {
+			t.Fatalf("帧 %d JSON 反序列化失败: %v", i, err)
+		}
+		if v["i"] != i+1 {
+			t.Errorf("帧 %d: 期望 i=%d，实际 i=%d", i, i+1, v["i"])
+		}
+	}
+}
+
+// TestSSEScanner_FrameConcatenationWithTruncatedFirst 首帧截断 + 次帧完整。
+// GLM Issue #66 原始场景：第一个 JSON 在字段中间被截断。
+func TestSSEScanner_FrameConcatenationWithTruncatedFirst(t *testing.T) {
+	// 第一个 data: 行的 JSON 被截断（不完整），第二个 data: 行完整
+	input := "data: {\"id\":\"123\",\"object\":\"chat.c\ndata: {\"id\":\"456\",\"content\":\"hi\"}\n\n"
+	s := newTestScanner(input)
+
+	events, _, err := readAll(t, s)
+	if err != nil && !errors.Is(err, io.EOF) {
+		t.Fatalf("意外错误: %v", err)
+	}
+
+	// 截断的第一帧无法恢复，但完整的第二帧应该被恢复
+	if len(events) != 1 {
+		t.Fatalf("期望 1 个事件（截断帧跳过，完整帧恢复），实际 %d", len(events))
+	}
+
+	var v map[string]string
+	if err := json.Unmarshal(events[0].Data, &v); err != nil {
+		t.Fatalf("JSON 反序列化失败: %v", err)
+	}
+	if v["id"] != "456" {
+		t.Errorf("期望 id=456，实际 %s", v["id"])
+	}
+}
+
+// TestSSEScanner_FrameConcatenationBeforeNormalFrame 粘连帧后跟正常帧。
+func TestSSEScanner_FrameConcatenationBeforeNormalFrame(t *testing.T) {
+	input := "data: {\"a\":1}\ndata: {\"b\":2}\n\ndata: {\"c\":3}\n\n"
+	s := newTestScanner(input)
+
+	events, _, err := readAll(t, s)
+	if err != nil && !errors.Is(err, io.EOF) {
+		t.Fatalf("意外错误: %v", err)
+	}
+
+	if len(events) != 3 {
+		t.Fatalf("期望 3 个事件（粘连 2 + 正常 1），实际 %d", len(events))
+	}
+
+	var v1, v2, v3 map[string]int
+	json.Unmarshal(events[0].Data, &v1)
+	json.Unmarshal(events[1].Data, &v2)
+	json.Unmarshal(events[2].Data, &v3)
+
+	if v1["a"] != 1 || v2["b"] != 2 || v3["c"] != 3 {
+		t.Errorf("帧顺序或内容错误: v1=%v v2=%v v3=%v", v1, v2, v3)
+	}
+}
