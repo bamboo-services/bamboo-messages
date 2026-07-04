@@ -44,7 +44,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  pkgErrors.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 请求参数序列化失败: %v", err), false, err),
+				Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Completions 请求参数序列化失败: %v", err), 0),
 			}:
 			case <-ctx.Done():
 			}
@@ -57,7 +57,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  pkgErrors.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 流式对话请求失败: %v", err), false, err),
+				Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Completions 流式对话请求失败: %v", err), 0),
 			}:
 			case <-ctx.Done():
 			}
@@ -71,7 +71,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type:       provider.StreamTypeError,
-				Err:        pkgErrors.NewError(ctx, nil, formatUpstreamError(resp.StatusCode, body), false, nil),
+				Err:        pkgErrors.NewBambooError("上游", formatUpstreamError(resp.StatusCode, body), resp.StatusCode),
 				StatusCode: resp.StatusCode,
 			}:
 			case <-ctx.Done():
@@ -110,7 +110,7 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 				select {
 				case eventCh <- provider.StreamEvent{
 					Type: provider.StreamTypeError,
-					Err:  pkgErrors.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 流读取错误: %v", scanErr), false, scanErr),
+					Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Completions 流读取错误: %v", scanErr), 0),
 				}:
 				case <-ctx.Done():
 					return

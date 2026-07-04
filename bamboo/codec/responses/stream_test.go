@@ -675,8 +675,9 @@ func TestStreamSerializer_ErrorEvent(t *testing.T) {
 	data, err := s.Serialize(bamboo.StreamEvent{
 		Type: bamboo.EventError,
 		Error: &bamboo.BambooError{
-			Type:    "api_error",
-			Message: "rate exceeded",
+			Category:   "下游",
+			Message:    "rate exceeded",
+			StatusCode: 500,
 		},
 	})
 	if err != nil {
@@ -695,7 +696,7 @@ func TestStreamSerializer_ErrorEvent(t *testing.T) {
 	if errObj["message"] != "rate exceeded" {
 		t.Errorf("error.message = %v", errObj["message"])
 	}
-	if errObj["type"] != "api_error" {
+	if errObj["type"] != "server_error" {
 		t.Errorf("error.type = %v", errObj["type"])
 	}
 }

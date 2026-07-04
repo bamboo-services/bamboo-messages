@@ -8,6 +8,7 @@ import (
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 )
 
 // ── OpenAI 请求 JSON 结构体 ──
@@ -83,7 +84,7 @@ type openaiImageURL struct {
 func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	var req openaiRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, codec.NewErrorWithCause(codec.ErrInvalidRequest, "failed to parse request body", err)
+		return nil, pkgErrors.NewBambooError("下游", "failed to parse request body", 0)
 	}
 
 	// 解析消息
@@ -231,7 +232,7 @@ func parseUserMessage(msg openaiMessage) (bamboo.BambooMessage, error) {
 	// 尝试 array
 	var parts []openaiContentPart
 	if err := json.Unmarshal(msg.Content, &parts); err != nil {
-		return bamboo.BambooMessage{}, codec.NewErrorWithCause(codec.ErrInvalidRequest, "failed to parse user message content", err)
+		return bamboo.BambooMessage{}, pkgErrors.NewBambooError("下游", "failed to parse user message content", 0)
 	}
 
 	blocks := make([]bamboo.ContentBlock, 0, len(parts))

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
-	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 )
 
 func TestParseRequest_BasicWithMaxTokens(t *testing.T) {
@@ -479,12 +479,21 @@ func TestParseRequest_InvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
-	var codecErr *codec.CodecError
-	if !errors.As(err, &codecErr) {
-		t.Errorf("expected *codec.CodecError, got %T", err)
+	var bambooErr *pkgErrors.BambooError
+	if !errors.As(err, &bambooErr) {
+		t.Errorf("expected *pkgErrors.BambooError, got %T", err)
 	}
-	if codecErr.Type != codec.ErrInvalidRequest {
-		t.Errorf("Type = %q, want %q", codecErr.Type, codec.ErrInvalidRequest)
+	if bambooErr == nil {
+		t.Fatalf("expected BambooError to be non-nil")
+	}
+	if bambooErr.Category != "下游" {
+		t.Errorf("Category = %q, want %q", bambooErr.Category, "下游")
+	}
+	if bambooErr.Message == "" {
+		t.Errorf("Message should not be empty")
+	}
+	if bambooErr.StatusCode != 0 {
+		t.Errorf("StatusCode = %d, want 0", bambooErr.StatusCode)
 	}
 }
 

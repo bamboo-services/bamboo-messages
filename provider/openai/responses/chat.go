@@ -44,7 +44,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  pkgErrors.NewError(ctx, nil, "OpenAI Responses 请求参数序列化失败", false, err),
+				Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses 请求参数序列化失败: %v", err), 0),
 			}:
 			case <-ctx.Done():
 			}
@@ -57,7 +57,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  pkgErrors.NewError(ctx, nil, "OpenAI Responses 流式对话请求失败", false, err),
+				Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses 流式对话请求失败: %v", err), 0),
 			}:
 			case <-ctx.Done():
 			}
@@ -79,7 +79,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type:       provider.StreamTypeError,
-				Err:        pkgErrors.NewError(ctx, nil, errMsg, false, fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody))),
+				Err:        pkgErrors.NewBambooError("上游", errMsg, resp.StatusCode),
 				StatusCode: resp.StatusCode,
 			}:
 			case <-ctx.Done():
@@ -121,7 +121,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 				select {
 				case eventCh <- provider.StreamEvent{
 					Type: provider.StreamTypeError,
-					Err:  pkgErrors.NewError(ctx, nil, "OpenAI Responses SSE 流读取失败", false, scanErr),
+					Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses SSE 流读取失败: %v", scanErr), 0),
 				}:
 				case <-ctx.Done():
 					return

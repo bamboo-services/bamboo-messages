@@ -308,7 +308,7 @@ func TestCompleteProviderError(t *testing.T) {
 	if err == nil {
 		t.Fatal("期望 provider 错误被传播")
 	}
-	if err.Error() != "provider_error: bamboo: 非流式对话失败: provider error" {
+	if err.Error() != "Bamboo[SDK]错误: provider error" {
 		t.Errorf("错误信息 = %q, 不匹配", err.Error())
 	}
 }
@@ -323,7 +323,7 @@ func TestCompleteProviderErrorWithSystem(t *testing.T) {
 	if err == nil {
 		t.Fatal("期望 provider 错误被传播")
 	}
-	if err.Error() != "provider_error: bamboo: 非流式对话失败: provider error with system" {
+	if err.Error() != "Bamboo[SDK]错误: provider error with system" {
 		t.Errorf("错误信息 = %q, 不匹配", err.Error())
 	}
 }

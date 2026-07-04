@@ -486,15 +486,25 @@ type BambooSettings struct {
 
 ### 7.2 错误体系对接
 
-bamboo 的 `CodecError`（`bamboo/codec/errors.go:28`）需翻译为 new-api 的 `types.NewAPIError`：
+bamboo 的 codec 解析/序列化错误现在统一以 `pkgErrors.BambooError` 返回，通过 `Category` 区分错误来源（"下游" 表示请求格式/参数问题，"上游" 表示模型服务端问题）：
 
 ```go
-func translateCodecError(err *bamboocodec.CodecError) *types.NewAPIError {
-    switch err.Type {
-    case bamboocodec.ErrorTypeParse:
+import (
+    "errors"
+
+    pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
+)
+
+func translateBambooError(err error) *types.NewAPIError {
+    var bambooErr *pkgErrors.BambooError
+    if !errors.As(err, &bambooErr) {
+        return types.NewError(err, types.ErrorCodeDoRequestFailed)
+    }
+    switch bambooErr.Category {
+    case "下游":
         return types.NewError(err, types.ErrorCodeInvalidRequest)
-    case bamboocodec.ErrorTypeSerialize:
-        return types.NewError(err, types.ErrorCodeConvertResponseFailed)
+    case "上游":
+        return types.NewError(err, types.ErrorCodeDoRequestFailed)
     default:
         return types.NewError(err, types.ErrorCodeDoRequestFailed)
     }

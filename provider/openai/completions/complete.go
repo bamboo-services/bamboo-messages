@@ -29,25 +29,25 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 
 	bodyBytes, err := json.Marshal(params)
 	if err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 请求参数序列化失败: %v", err), false, err)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Completions 请求参数序列化失败: %v", err), 0)
 	}
 
 	endpoint := "POST /chat/completions (non-stream, model=" + config.Model + ")"
 	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, "/chat/completions", bodyBytes, string(p.GetProviderType()), endpoint)
 	if err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 非流式对话请求失败: %v", err), false, err)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Completions 非流式对话请求失败: %v", err), 0)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, fmt.Sprintf("OpenAI Completions 读取响应体失败: %v", err), false, err)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Completions 读取响应体失败: %v", err), 0)
 	}
 	provider.DebugResponse("openai", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header), body)
 
 	// HTTP 状态码检查
 	if resp.StatusCode >= 400 {
-		return nil, pkgErrors.NewHTTPError(resp.StatusCode, formatUpstreamError(resp.StatusCode, body))
+		return nil, pkgErrors.NewBambooError("上游", formatUpstreamError(resp.StatusCode, body), resp.StatusCode)
 	}
 
 	// 解析响应
@@ -57,9 +57,9 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 			xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
 				fmt.Sprintf("响应 JSON 解析失败, raw=%s", truncateBody(body)))
 		}
-		return nil, pkgErrors.NewError(ctx, nil, fmt.Sprintf(
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf(
 			"OpenAI Completions 响应解析失败: %v, raw=%s", err, truncateBody(body),
-		), false, err)
+		), 0)
 	}
 
 	// 检查响应
@@ -72,7 +72,7 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 			"OpenAI Completions 返回空响应 (choices=0), model=%s, legacyCompat=%v, tools=%d, maxTokens=%d, resp=%s",
 			config.Model, p.legacyCompat, len(config.Tools), config.MaxTokens, truncateBody(body),
 		)
-		return nil, pkgErrors.NewError(ctx, nil, diag, false, nil)
+		return nil, pkgErrors.NewBambooError("上游", diag, 0)
 	}
 
 	choice := chatResp.Choices[0]

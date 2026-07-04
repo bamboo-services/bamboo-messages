@@ -313,7 +313,7 @@ func (p *ResponsesProvider) contentResponseFailed(ctx context.Context, event res
 	errMsg := "OpenAI 响应失败"
 	events = append(events, provider.StreamEvent{
 		Type: provider.StreamTypeError,
-		Err:  pkgErrors.NewError(ctx, nil, errMsg, false, nil),
+		Err:  pkgErrors.NewBambooError("上游", errMsg, 0),
 	})
 
 	return events

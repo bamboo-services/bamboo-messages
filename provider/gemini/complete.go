@@ -34,7 +34,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	reqBody := p.buildRequestBody(messages, systemPrompt, config, false)
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, "Gemini 非流式对话请求序列化失败", false, err)
+		return nil, pkgErrors.NewBambooError("上游", "Gemini 非流式对话请求序列化失败", 0)
 	}
 
 	// Gemini 非流式端点：/v1beta/models/{model}:generateContent
@@ -42,14 +42,14 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 
 	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, endpoint, bodyBytes, "gemini", endpoint)
 	if err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, "Gemini 非流式对话请求失败", false, err)
+		return nil, pkgErrors.NewBambooError("上游", "Gemini 非流式对话请求失败", 0)
 	}
 	defer resp.Body.Close()
 
 	// 读取响应体
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, "Gemini 非流式对话响应读取失败", false, err)
+		return nil, pkgErrors.NewBambooError("上游", "Gemini 非流式对话响应读取失败", 0)
 	}
 	provider.DebugResponse("gemini", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header), respBytes)
 
@@ -61,14 +61,13 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 		if errResp.Error != nil && errResp.Error.Message != "" {
 			errMsg = errResp.Error.Message
 		}
-		return nil, pkgErrors.NewHTTPError(resp.StatusCode, errMsg,
-			fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBytes)))
+		return nil, pkgErrors.NewBambooError("上游", errMsg, resp.StatusCode)
 	}
 
 	// 反序列化响应
 	var geminiResp generateContentResponse
 	if err := json.Unmarshal(respBytes, &geminiResp); err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, "Gemini 非流式对话响应解析失败", false, err)
+		return nil, pkgErrors.NewBambooError("上游", "Gemini 非流式对话响应解析失败", 0)
 	}
 
 	result := &provider.CompletionResult{

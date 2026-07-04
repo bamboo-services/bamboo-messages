@@ -154,8 +154,9 @@ func TestStreamEvent_Error(t *testing.T) {
 	event := StreamEvent{
 		Type: EventError,
 		Error: &BambooError{
-			Type:    ErrorTypeRateLimit,
-			Message: "请求频率超限，请稍后重试",
+			Category:   "rate_limit",
+			Message:    "请求频率超限，请稍后重试",
+			StatusCode: 429,
 		},
 	}
 
@@ -172,8 +173,11 @@ func TestStreamEvent_Error(t *testing.T) {
 	if parsed.Error == nil {
 		t.Fatal("Error 不应为 nil")
 	}
-	if parsed.Error.Type != ErrorTypeRateLimit {
-		t.Errorf("Error.Type 不匹配")
+	if parsed.Error.Category != "rate_limit" {
+		t.Errorf("Error.Category 不匹配")
+	}
+	if parsed.Error.StatusCode != 429 {
+		t.Errorf("Error.StatusCode 不匹配")
 	}
 	if parsed.Error.Message != "请求频率超限，请稍后重试" {
 		t.Errorf("Error.Message 不匹配")

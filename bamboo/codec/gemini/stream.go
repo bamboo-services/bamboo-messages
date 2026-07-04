@@ -8,6 +8,7 @@ import (
 
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/bamboo"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 )
 
 // ── Gemini 流式 chunk JSON 结构（复用 response.go 的部分类型）──
@@ -295,7 +296,7 @@ func (s *geminiStreamSerializer) handleError(event bamboo.StreamEvent) ([]byte, 
 
 	if event.Error != nil {
 		message = event.Error.Message
-		code, status = mapBambooErrorToGemini(event.Error)
+		code, status = mapStatusCodeToGemini(event.Error.StatusCode)
 	}
 
 	payload := geminiStreamError{
@@ -313,23 +314,7 @@ func (s *geminiStreamSerializer) handleError(event bamboo.StreamEvent) ([]byte, 
 func (s *geminiStreamSerializer) marshalChunk(chunk geminiStreamChunk) ([]byte, error) {
 	data, err := json.Marshal(chunk)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal gemini stream chunk: %w", err)
+		return nil, pkgErrors.NewBambooError("下游", fmt.Sprintf("failed to marshal gemini stream chunk: %v", err), 0)
 	}
 	return []byte(fmt.Sprintf("data: %s\n\n", data)), nil
-}
-
-// mapBambooErrorToGemini 将 BambooError 类型映射为 Gemini error code + status。
-func mapBambooErrorToGemini(err *bamboo.BambooError) (int, string) {
-	switch err.Type {
-	case bamboo.ErrorTypeInvalidRequest:
-		return 400, "INVALID_ARGUMENT"
-	case bamboo.ErrorTypeAuthentication:
-		return 401, "UNAUTHENTICATED"
-	case bamboo.ErrorTypeRateLimit:
-		return 429, "RESOURCE_EXHAUSTED"
-	case bamboo.ErrorTypeAPI, bamboo.ErrorTypeProvider:
-		return 500, "INTERNAL"
-	default:
-		return 500, "INTERNAL"
-	}
 }

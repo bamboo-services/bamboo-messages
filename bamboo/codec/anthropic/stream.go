@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 )
 
 // anthropicStreamSerializer Anthropic 流式序列化器，有状态。
@@ -272,9 +273,7 @@ func (s *anthropicStreamSerializer) handleError(event bamboo.StreamEvent) ([]byt
 	errType := "api_error"
 	errMsg := "unknown error"
 	if event.Error != nil {
-		if event.Error.Type != "" {
-			errType = event.Error.Type
-		}
+		errType = mapStatusCodeToAnthropicType(event.Error.StatusCode)
 		if event.Error.Message != "" {
 			errMsg = event.Error.Message
 		}
@@ -295,7 +294,7 @@ func (s *anthropicStreamSerializer) handleError(event bamboo.StreamEvent) ([]byt
 func (s *anthropicStreamSerializer) marshalEvent(eventType string, payload map[string]any) ([]byte, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal stream event: %w", err)
+		return nil, pkgErrors.NewBambooError("下游", fmt.Sprintf("failed to marshal stream event: %v", err), 0)
 	}
 	return []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, data)), nil
 }

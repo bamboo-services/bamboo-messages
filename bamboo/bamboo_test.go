@@ -201,7 +201,7 @@ func TestChat_CtxCancelTriggersTermination(t *testing.T) {
 // 预期：handleError 检测到 started && !stopHandled，自动补发 handleStop →
 // EventError + EventMessageStop。
 func TestChat_ProviderErrorTriggersTermination(t *testing.T) {
-	providerErr := pkgErrors.NewError(context.Background(), nil, "upstream 500 error", false)
+	providerErr := pkgErrors.NewBambooError("上游", "upstream 500 error", 0)
 	p := &mockProviderWithEvents{
 		events: []provider.StreamEvent{
 			{Type: provider.StreamTypeStart},
@@ -316,8 +316,8 @@ func TestChat_NormalStreamTermination(t *testing.T) {
 // 预期：handleError 第一次调用时补发 handleStop（stopHandled=true），
 // 第二次 handleError 不再补发。最终只收到一次 EventMessageStop。
 func TestChat_MultipleErrorsOnlyOneStop(t *testing.T) {
-	err1 := pkgErrors.NewError(context.Background(), nil, "error 1", false)
-	err2 := pkgErrors.NewError(context.Background(), nil, "error 2", false)
+	err1 := pkgErrors.NewBambooError("上游", "error 1", 0)
+	err2 := pkgErrors.NewBambooError("上游", "error 2", 0)
 	p := &mockProviderWithEvents{
 		events: []provider.StreamEvent{
 			{Type: provider.StreamTypeStart},

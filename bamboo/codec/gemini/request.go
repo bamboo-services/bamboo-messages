@@ -7,6 +7,7 @@ import (
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 )
 
 // ── Gemini 请求 JSON 结构体 ──
@@ -121,7 +122,7 @@ type geminiSafetySetting struct {
 func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	var req geminiRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, codec.NewErrorWithCause(codec.ErrInvalidRequest, "failed to parse gemini request body", err)
+		return nil, pkgErrors.NewBambooError("下游", "failed to parse gemini request body", 0)
 	}
 
 	// ── 1. 解析 systemInstruction ──

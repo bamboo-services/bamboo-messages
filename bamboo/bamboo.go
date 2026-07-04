@@ -7,6 +7,7 @@ package bamboo
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -89,17 +90,16 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 	select {
 	case firstEvent, hasFirst = <-providerCh:
 	case <-ctx.Done():
-		return nil, fmt.Errorf("bamboo: 对话已取消: %w", ctx.Err())
+		return nil, pkgErrors.NewBambooError("SDK", "对话已取消: "+ctx.Err().Error(), 0)
 	}
 	if !hasFirst {
-		return nil, fmt.Errorf("bamboo: provider 流在发出任何事件前已关闭")
+		return nil, pkgErrors.NewBambooError("SDK", "provider 流在发出任何事件前已关闭", 0)
 	}
 	if firstEvent.Type == provider.StreamTypeError && firstEvent.Err != nil {
-		return nil, NewBambooErrorWithStatusCode(firstEvent.StatusCode,
-			fmt.Sprintf("bamboo: provider 对话失败: %v", firstEvent.Err))
+		return nil, firstEvent.Err
 	}
 	if firstEvent.Type == provider.StreamTypeDone {
-		return nil, fmt.Errorf("bamboo: provider 流已关闭但未产生任何内容")
+		return nil, pkgErrors.NewBambooError("SDK", "provider 流已关闭但未产生任何内容", 0)
 	}
 
 	// 创建 bamboo 输出 channel 并启动转换 goroutine
@@ -115,10 +115,11 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 		// panic 时尝试发送 error 事件，防止消费者无限等待
 		defer func() {
 			if r := recover(); r != nil {
+				panicMsg := fmt.Sprintf("bamboo: 内部 panic: %v", r)
 				select {
 				case out <- StreamEvent{
 					Type:  EventError,
-					Error: NewBambooError(ErrorTypeProvider, fmt.Sprintf("bamboo: 内部 panic: %v", r)),
+					Error: pkgErrors.NewBambooError("SDK", panicMsg, 0),
 				}:
 				default:
 				}
@@ -166,8 +167,7 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 
 				select {
 				case <-ctx.Done():
-					cancelErr := pkgErrors.NewError(context.Background(), nil,
-						fmt.Sprintf("bamboo: 对话已取消: %s", ctx.Err()), false)
+					cancelErr := pkgErrors.NewBambooError("SDK", "对话已取消: "+ctx.Err().Error(), 0)
 					writeAll(converter.Convert(provider.StreamEvent{
 						Type: provider.StreamTypeError,
 						Err:  cancelErr,
@@ -221,15 +221,14 @@ func (c *client) Complete(ctx context.Context, messages []BambooMessage, system 
 	return resultToResponse(result, providerType), nil
 }
 
-// wrapProviderError 将 Provider 返回的错误包装为携带状态码的 BambooError。
+// wrapProviderError 将 Provider 返回的错误包装为 BambooError。
 //
-// 若错误链中包含 *pkgErrors.HTTPError，提取 StatusCode 并映射为正确的 ErrorType；
-// 否则降级为 ErrorTypeProvider。
+// 若错误链中已包含 *BambooError，则直接透传，避免重复包装；
+// 否则降级为通用 SDK 错误。
 func wrapProviderError(err error) *BambooError {
-	if httpErr := pkgErrors.AsHTTPError(err); httpErr != nil {
-		return NewBambooErrorWithStatusCode(httpErr.StatusCode,
-			fmt.Sprintf("bamboo: 非流式对话失败: %s", httpErr.Message))
+	var bambooErr *BambooError
+	if errors.As(err, &bambooErr) {
+		return bambooErr
 	}
-	return NewBambooError(ErrorTypeProvider,
-		fmt.Sprintf("bamboo: 非流式对话失败: %v", err))
+	return pkgErrors.NewBambooError("SDK", err.Error(), 0)
 }

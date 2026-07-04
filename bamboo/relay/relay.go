@@ -2,12 +2,14 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -44,10 +46,10 @@ func Relay(
 	inCodec, err := codec.Get(inFormat)
 	if err != nil {
 		cfg.triggerError(err)
-		return nil, fmt.Errorf("relay: failed to get input codec: %w", err)
+		return nil, toBambooError(err)
 	}
 	if inCodec == nil {
-		err = fmt.Errorf("relay: input codec %q is not registered", inFormat)
+		err = pkgErrors.NewBambooError("下游", fmt.Sprintf("codec %q is not registered", inFormat), 0)
 		cfg.triggerError(err)
 		return nil, err
 	}
@@ -55,10 +57,10 @@ func Relay(
 	outCodec, err := codec.Get(outFormat)
 	if err != nil {
 		cfg.triggerError(err)
-		return nil, fmt.Errorf("relay: failed to get output codec: %w", err)
+		return nil, toBambooError(err)
 	}
 	if outCodec == nil {
-		err = fmt.Errorf("relay: output codec %q is not registered", outFormat)
+		err = pkgErrors.NewBambooError("下游", fmt.Sprintf("codec %q is not registered", outFormat), 0)
 		cfg.triggerError(err)
 		return nil, err
 	}
@@ -70,7 +72,7 @@ func Relay(
 	req, err := inCodec.ParseRequest(body)
 	if err != nil {
 		cfg.triggerError(err)
-		return nil, fmt.Errorf("relay: failed to parse request: %w", err)
+		return nil, toBambooError(err)
 	}
 
 	debugRelayParsed(dbg, "Relay", inFormat, req)
@@ -89,7 +91,7 @@ func Relay(
 		// 确保调用方（如 newapi）拿到协议格式的错误 JSON 而非空 body。
 		errorBody := outCodec.SerializeError(err)
 		debugRelayResponse(dbg, "Relay", inFormat, outFormat, errorBody)
-		return errorBody, fmt.Errorf("relay: provider complete failed: %w", err)
+		return errorBody, toBambooError(err)
 	}
 
 	// ── 触发 Usage 回调 ──
@@ -99,7 +101,7 @@ func Relay(
 	data, err := outCodec.SerializeResponse(resp)
 	if err != nil {
 		cfg.triggerError(err)
-		return nil, fmt.Errorf("relay: failed to serialize response: %w", err)
+		return nil, toBambooError(err)
 	}
 	debugRelayResponse(dbg, "Relay", inFormat, outFormat, data)
 
@@ -140,10 +142,10 @@ func RelayStream(
 	inCodec, err := codec.Get(inFormat)
 	if err != nil {
 		cfg.triggerError(err)
-		return nil, fmt.Errorf("relay: failed to get input codec: %w", err)
+		return nil, toBambooError(err)
 	}
 	if inCodec == nil {
-		err = fmt.Errorf("relay: input codec %q is not registered", inFormat)
+		err = pkgErrors.NewBambooError("下游", fmt.Sprintf("codec %q is not registered", inFormat), 0)
 		cfg.triggerError(err)
 		return nil, err
 	}
@@ -151,10 +153,10 @@ func RelayStream(
 	outCodec, err := codec.Get(outFormat)
 	if err != nil {
 		cfg.triggerError(err)
-		return nil, fmt.Errorf("relay: failed to get output codec: %w", err)
+		return nil, toBambooError(err)
 	}
 	if outCodec == nil {
-		err = fmt.Errorf("relay: output codec %q is not registered", outFormat)
+		err = pkgErrors.NewBambooError("下游", fmt.Sprintf("codec %q is not registered", outFormat), 0)
 		cfg.triggerError(err)
 		return nil, err
 	}
@@ -166,7 +168,7 @@ func RelayStream(
 	req, err := inCodec.ParseRequest(body)
 	if err != nil {
 		cfg.triggerError(err)
-		return nil, fmt.Errorf("relay: failed to parse request: %w", err)
+		return nil, toBambooError(err)
 	}
 
 	debugRelayParsed(dbg, "RelayStream", inFormat, req)
@@ -176,7 +178,7 @@ func RelayStream(
 	eventCh, err := client.Chat(ctx, req.Messages, req.System, req.Config)
 	if err != nil {
 		cfg.triggerError(err)
-		return nil, fmt.Errorf("relay: provider chat failed: %w", err)
+		return nil, toBambooError(err)
 	}
 
 	// ── 启动转换 goroutine ──
@@ -201,7 +203,7 @@ func RelayStream(
 		// pacerCleanup 必须在 close(out) 之前执行（LIFO 中后注册先执行）
 		defer func() {
 			if r := recover(); r != nil {
-				cfg.triggerError(fmt.Errorf("relay: goroutine panic: %v", r))
+				cfg.triggerError(pkgErrors.NewBambooError("下游", fmt.Sprintf("goroutine panic: %v", r), 0))
 				if pacer != nil {
 					pacer.SignalEnd()
 				}
@@ -257,7 +259,7 @@ func RelayStream(
 			// 序列化事件
 			data, sErr := serializer.Serialize(event)
 			if sErr != nil {
-				cfg.triggerError(fmt.Errorf("relay: serialize error: %w", sErr))
+				cfg.triggerError(toBambooError(sErr))
 				continue
 			}
 			debugRelayResponseFrame(dbg, "RelayStream", inFormat, outFormat, data)
@@ -292,7 +294,7 @@ func RelayStream(
 		// ── Flush 终止标记 ──
 		flushData, fErr := serializer.Flush()
 		if fErr != nil {
-			cfg.triggerError(fmt.Errorf("relay: flush error: %w", fErr))
+			cfg.triggerError(toBambooError(fErr))
 			return
 		}
 		if flushData != nil {
@@ -370,4 +372,15 @@ func estimateUsage(messages []bamboo.BambooMessage, system string, output string
 		InputTokens:  estimateTokenCount(inputText.String()),
 		OutputTokens: estimateTokenCount(output.String()),
 	}
+}
+
+func toBambooError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var be *pkgErrors.BambooError
+	if errors.As(err, &be) {
+		return err
+	}
+	return pkgErrors.NewBambooError("下游", err.Error(), 0)
 }

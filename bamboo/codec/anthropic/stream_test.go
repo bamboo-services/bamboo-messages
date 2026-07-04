@@ -185,8 +185,9 @@ func TestStreamSerializer_ErrorEvent(t *testing.T) {
 	data, err := s.Serialize(bamboo.StreamEvent{
 		Type: bamboo.EventError,
 		Error: &bamboo.BambooError{
-			Type:    "rate_limit_error",
-			Message: "rate exceeded",
+			Category:   "上游",
+			Message:    "rate exceeded",
+			StatusCode: 429,
 		},
 	})
 	if err != nil {

@@ -1,7 +1,6 @@
 package anthropic
 
 import (
-	"context"
 	"encoding/json"
 
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
@@ -219,7 +218,7 @@ func (p *Provider) contentError(event messageStreamEvent) []provider.StreamEvent
 	}
 	return []provider.StreamEvent{{
 		Type: provider.StreamTypeError,
-		Err:  pkgErrors.NewError(context.Background(), nil, "Anthropic 流式事件错误: "+event.Error.Message, false),
+		Err:  pkgErrors.NewBambooError("上游", "Anthropic 流式事件错误: "+event.Error.Message, 0),
 	}}
 }
 

@@ -30,19 +30,19 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 
 	body, err := json.Marshal(params)
 	if err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, "Anthropic 请求参数序列化失败", false, err)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("Anthropic 请求参数序列化失败: %v", err), 0)
 	}
 
 	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, "/v1/messages", body, "anthropic", "POST /v1/messages (non-stream, model="+config.Model+")")
 	if err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, "Anthropic 非流式对话请求失败", false, err)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("Anthropic 非流式对话请求失败: %v", err), 0)
 	}
 	defer resp.Body.Close()
 
 	// 读取响应体
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, "Anthropic 非流式响应读取失败", false, err)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("Anthropic 非流式响应读取失败: %v", err), 0)
 	}
 	provider.DebugResponse("anthropic", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header), respBody)
 
@@ -50,17 +50,17 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	if resp.StatusCode >= 400 {
 		var errResp anthropicErrorResponse
 		if jsonErr := json.Unmarshal(respBody, &errResp); jsonErr == nil && errResp.Error != nil {
-			return nil, pkgErrors.NewHTTPError(resp.StatusCode,
-				fmt.Sprintf("Anthropic API 错误 [%d]: %s", resp.StatusCode, errResp.Error.Message))
+			return nil, pkgErrors.NewBambooError("上游",
+				fmt.Sprintf("Anthropic API 错误 [%d]: %s", resp.StatusCode, errResp.Error.Message), resp.StatusCode)
 		}
-		return nil, pkgErrors.NewHTTPError(resp.StatusCode,
-			fmt.Sprintf("Anthropic API 返回错误状态码 %d", resp.StatusCode))
+		return nil, pkgErrors.NewBambooError("上游",
+			fmt.Sprintf("Anthropic API 返回错误状态码 %d", resp.StatusCode), resp.StatusCode)
 	}
 
 	// 解析响应
 	var msgResp messageResponse
 	if err := json.Unmarshal(respBody, &msgResp); err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, "Anthropic 非流式响应解析失败", false, err)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("Anthropic 非流式响应解析失败: %v", err), 0)
 	}
 
 	// 构建 CompletionResult

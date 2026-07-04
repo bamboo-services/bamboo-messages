@@ -724,24 +724,21 @@ func TestConvertStreamError(t *testing.T) {
 		Type: provider.StreamTypeError,
 		Err:  nil,
 	})
-	// Err 为 nil 时应返回 unknown error
+	// Err 为 nil 时仍应输出 EventError，Error 字段保持 nil
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
 	if events[0].Type != EventError {
 		t.Errorf("Type = %q, want error", events[0].Type)
 	}
-	if events[0].Error == nil {
-		t.Fatal("Error is nil")
-	}
-	if events[0].Error.Message != "未知错误" {
-		t.Errorf("Error.Message = %q, want 未知错误", events[0].Error.Message)
+	if events[0].Error != nil {
+		t.Errorf("Error = %v, want nil", events[0].Error)
 	}
 }
 
 func TestConvertStreamErrorWithMessage(t *testing.T) {
 	sc := NewStreamConverter()
-	testErr := pkgErrors.NewError(nil, nil, "connection reset", false)
+	testErr := pkgErrors.NewBambooError("SDK", "connection reset", 0)
 	events := sc.Convert(provider.StreamEvent{
 		Type: provider.StreamTypeError,
 		Err:  testErr,

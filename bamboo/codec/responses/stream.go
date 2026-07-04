@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 )
 
 type responseObj struct {
@@ -480,7 +481,7 @@ func (s *responsesStreamSerializer) handleError(event bamboo.StreamEvent) ([]byt
 	errType := "server_error"
 	if event.Error != nil {
 		errMsg = event.Error.Message
-		errType = event.Error.Type
+		errType = mapStatusCodeToResponsesCode(event.Error.StatusCode)
 	}
 	resp := responseObj{
 		ID:        s.responseID,
@@ -578,7 +579,7 @@ func buildResponsesUsage(usage *bamboo.Usage) *responsesUsage {
 func (s *responsesStreamSerializer) marshalSSE(eventType string, payload any) ([]byte, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal %s event: %w", eventType, err)
+		return nil, pkgErrors.NewBambooError("下游", fmt.Sprintf("failed to marshal %s event: %v", eventType, err), 0)
 	}
 
 	merged := make(map[string]any, 8)
@@ -589,7 +590,7 @@ func (s *responsesStreamSerializer) marshalSSE(eventType string, payload any) ([
 
 	data, err := json.Marshal(merged)
 	if err != nil {
-		return nil, fmt.Errorf("failed to re-marshal %s event with type: %w", eventType, err)
+		return nil, pkgErrors.NewBambooError("下游", fmt.Sprintf("failed to re-marshal %s event with type: %v", eventType, err), 0)
 	}
 	return []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, data)), nil
 }
@@ -597,7 +598,7 @@ func (s *responsesStreamSerializer) marshalSSE(eventType string, payload any) ([
 func (s *responsesStreamSerializer) marshalSSEWithResponse(eventType string, resp responseObj) ([]byte, error) {
 	respRaw, err := json.Marshal(resp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal response for %s event: %w", eventType, err)
+		return nil, pkgErrors.NewBambooError("下游", fmt.Sprintf("failed to marshal response for %s event: %v", eventType, err), 0)
 	}
 
 	var respMap map[string]any
@@ -612,7 +613,7 @@ func (s *responsesStreamSerializer) marshalSSEWithResponse(eventType string, res
 
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal %s event payload: %w", eventType, err)
+		return nil, pkgErrors.NewBambooError("下游", fmt.Sprintf("failed to marshal %s event payload: %v", eventType, err), 0)
 	}
 	return []byte(fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, data)), nil
 }

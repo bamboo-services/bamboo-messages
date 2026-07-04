@@ -44,7 +44,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  pkgErrors.NewError(ctx, nil, fmt.Sprintf("Gemini 流式对话请求序列化失败: %v", err), false, err),
+				Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("Gemini 流式对话请求序列化失败: %v", err), 0),
 			}:
 			case <-ctx.Done():
 			}
@@ -59,7 +59,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type: provider.StreamTypeError,
-				Err:  pkgErrors.NewError(ctx, nil, fmt.Sprintf("Gemini 流式对话请求失败: %v", err), false, err),
+				Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("Gemini 流式对话请求失败: %v", err), 0),
 			}:
 			case <-ctx.Done():
 			}
@@ -73,7 +73,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type:       provider.StreamTypeError,
-				Err:        pkgErrors.NewError(ctx, nil, formatGeminiError(resp.StatusCode, body), false, nil),
+				Err:        pkgErrors.NewBambooError("上游", formatGeminiError(resp.StatusCode, body), resp.StatusCode),
 				StatusCode: resp.StatusCode,
 			}:
 			case <-ctx.Done():
@@ -110,7 +110,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 				select {
 				case eventCh <- provider.StreamEvent{
 					Type: provider.StreamTypeError,
-					Err:  pkgErrors.NewError(ctx, nil, fmt.Sprintf("Gemini 流读取错误: %v", scanErr), false, scanErr),
+					Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("Gemini 流读取错误: %v", scanErr), 0),
 				}:
 				case <-ctx.Done():
 					return

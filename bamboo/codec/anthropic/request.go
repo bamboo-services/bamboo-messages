@@ -6,6 +6,7 @@ import (
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
@@ -74,7 +75,7 @@ type rawSource struct {
 func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	var req anthropicRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, codec.NewErrorWithCause(codec.ErrInvalidRequest, "failed to parse request body", err)
+		return nil, pkgErrors.NewBambooError("下游", "failed to parse request body", 0)
 	}
 
 	// 解析 system 提示词
@@ -277,7 +278,7 @@ func parseMessage(msg anthropicMessage) (bamboo.BambooMessage, error) {
 	// 解析为 content block 数组
 	var rawBlocks []rawContentBlock
 	if err := json.Unmarshal(msg.Content, &rawBlocks); err != nil {
-		return bamboo.BambooMessage{}, codec.NewErrorWithCause(codec.ErrInvalidRequest, "failed to parse message content", err)
+		return bamboo.BambooMessage{}, pkgErrors.NewBambooError("下游", "failed to parse message content", 0)
 	}
 
 	blocks := make([]bamboo.ContentBlock, 0, len(rawBlocks))

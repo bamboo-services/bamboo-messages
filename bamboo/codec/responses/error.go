@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
-	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
 )
 
 // responsesErrorResponse OpenAI Responses 格式的错误响应 JSON 结构。
@@ -18,18 +17,20 @@ type responsesErrorResponse struct {
 }
 
 // serializeError 将错误序列化为 OpenAI Responses 格式的错误响应。
+//
+// 错误代码通过 BambooError.StatusCode 映射:
+//   - 401/403 → authentication_error
+//   - 429     → rate_limit_exceeded
+//   - 4xx     → invalid_request
+//   - 5xx/0   → server_error
 func serializeError(err error) []byte {
 	code := "server_error"
 	message := "internal error"
 
-	var codecErr *codec.CodecError
 	var bambooErr *bamboo.BambooError
-	if errors.As(err, &codecErr) {
-		message = codecErr.Message
-		code = mapResponsesErrorCode(codecErr.Type)
-	} else if errors.As(err, &bambooErr) {
+	if errors.As(err, &bambooErr) {
 		message = bambooErr.Message
-		code = mapBambooErrorToResponsesCode(bambooErr)
+		code = mapStatusCodeToResponsesCode(bambooErr.StatusCode)
 	} else if err != nil {
 		message = err.Error()
 	}
@@ -46,34 +47,15 @@ func serializeError(err error) []byte {
 	return data
 }
 
-// mapResponsesErrorCode 将 codec ErrorType 映射为 Responses 错误代码。
-func mapResponsesErrorCode(t codec.ErrorType) string {
-	switch t {
-	case codec.ErrInvalidRequest:
-		return "invalid_request"
-	case codec.ErrProviderError:
-		return "provider_error"
-	case codec.ErrAuthError:
+// mapStatusCodeToResponsesCode 将 HTTP 状态码映射为 Responses 错误代码。
+func mapStatusCodeToResponsesCode(statusCode int) string {
+	switch {
+	case statusCode == 401 || statusCode == 403:
 		return "authentication_error"
-	case codec.ErrRateLimit:
+	case statusCode == 429:
 		return "rate_limit_exceeded"
-	case codec.ErrInternal:
-		return "server_error"
-	default:
-		return "server_error"
-	}
-}
-
-func mapBambooErrorToResponsesCode(err *bamboo.BambooError) string {
-	switch err.Type {
-	case bamboo.ErrorTypeInvalidRequest:
+	case statusCode >= 400 && statusCode < 500:
 		return "invalid_request"
-	case bamboo.ErrorTypeAuthentication:
-		return "authentication_error"
-	case bamboo.ErrorTypeRateLimit:
-		return "rate_limit_exceeded"
-	case bamboo.ErrorTypeAPI, bamboo.ErrorTypeProvider:
-		return "provider_error"
 	default:
 		return "server_error"
 	}

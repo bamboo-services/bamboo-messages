@@ -8,6 +8,7 @@ import (
 
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/bamboo"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 )
 
 // openaiChunk OpenAI 流式 chunk JSON 结构。
@@ -297,9 +298,7 @@ func (s *openaiStreamSerializer) handleError(event bamboo.StreamEvent) ([]byte, 
 	errType := "api_error"
 	if event.Error != nil {
 		errMsg = event.Error.Message
-		if event.Error.Type != "" {
-			errType = event.Error.Type
-		}
+		errType = mapStatusCodeToOpenAIType(event.Error.StatusCode)
 	}
 	errPayload := map[string]any{
 		"error": map[string]any{
@@ -322,7 +321,7 @@ func (s *openaiStreamSerializer) marshalChunk(chunk openaiChunk) ([]byte, error)
 	chunk.Model = s.model
 	data, err := json.Marshal(chunk)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal stream chunk: %w", err)
+		return nil, pkgErrors.NewBambooError("下游", fmt.Sprintf("failed to marshal stream chunk: %v", err), 0)
 	}
 	return []byte(fmt.Sprintf("data: %s\n\n", data)), nil
 }

@@ -114,20 +114,20 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 
 	body, err := json.Marshal(params)
 	if err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, "OpenAI Responses 请求参数序列化失败", false, err)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses 请求参数序列化失败: %v", err), 0)
 	}
 
 	// 发送 HTTP 请求（含 debug 日志）
 	resp, err := p.httpClient.DoWithDebug(ctx, "POST", "/responses", body, "openai-responses", "POST /responses (non-stream, model="+config.Model+")")
 	if err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, "OpenAI Responses 非流式对话请求失败", false, err)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses 非流式对话请求失败: %v", err), 0)
 	}
 	defer resp.Body.Close()
 
 	// 读取响应体
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, "OpenAI Responses 响应体读取失败", false, err)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses 响应体读取失败: %v", err), 0)
 	}
 
 	provider.DebugResponse("openai-responses", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header), respBody)
@@ -140,14 +140,13 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 		if apiErr.Error.Message != "" {
 			errMsg += ": " + apiErr.Error.Message
 		}
-		return nil, pkgErrors.NewHTTPError(resp.StatusCode, errMsg,
-			fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody)))
+		return nil, pkgErrors.NewBambooError("上游", errMsg, resp.StatusCode)
 	}
 
 	// 解析响应体
 	var response completeResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
-		return nil, pkgErrors.NewError(ctx, nil, "OpenAI Responses 响应体解析失败", false, err)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses 响应体解析失败: %v", err), 0)
 	}
 
 	// 构建结果

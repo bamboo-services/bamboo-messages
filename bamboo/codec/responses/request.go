@@ -9,6 +9,7 @@ import (
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 )
 
 // ── OpenAI Responses 请求 JSON 结构体 ──
@@ -89,7 +90,7 @@ type inputContent struct {
 func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	var req responsesRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, codec.NewErrorWithCause(codec.ErrInvalidRequest, "failed to parse request body", err)
+		return nil, pkgErrors.NewBambooError("下游", "failed to parse request body", 0)
 	}
 
 	var systemParts []string
@@ -215,7 +216,7 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 	// 尝试 array
 	var items []inputItem
 	if err := json.Unmarshal(raw, &items); err != nil {
-		return nil, "", codec.NewErrorWithCause(codec.ErrInvalidRequest, "failed to parse input field", err)
+		return nil, "", pkgErrors.NewBambooError("下游", "failed to parse input field", 0)
 	}
 
 	var messages []bamboo.BambooMessage

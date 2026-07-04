@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
-	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
 )
 
 // openaiErrorResponse OpenAI 错误响应 JSON 结构。
@@ -21,21 +20,20 @@ type openaiErrorBody struct {
 }
 
 // serializeError 将错误序列化为 OpenAI 格式的错误响应。
+//
+// 错误类型通过 BambooError.StatusCode 映射:
+//   - 401/403 → authentication_error
+//   - 429     → rate_limit_exceeded
+//   - 4xx     → invalid_request_error
+//   - 5xx/0   → api_error
 func serializeError(err error) []byte {
 	errType := "api_error"
 	message := "internal error"
 
-	var codecErr *codec.CodecError
 	var bambooErr *bamboo.BambooError
-	if errors.As(err, &codecErr) {
-		message = codecErr.Message
-		errType = mapCodecErrorType(codecErr.Type)
-	} else if errors.As(err, &bambooErr) {
+	if errors.As(err, &bambooErr) {
 		message = bambooErr.Message
-		errType = bambooErr.Type
-		if errType == "" {
-			errType = "api_error"
-		}
+		errType = mapStatusCodeToOpenAIType(bambooErr.StatusCode)
 	} else if err != nil {
 		message = err.Error()
 	}
@@ -53,19 +51,15 @@ func serializeError(err error) []byte {
 	return data
 }
 
-// mapCodecErrorType 将 codec ErrorType 映射为 OpenAI 错误类型字符串。
-func mapCodecErrorType(t codec.ErrorType) string {
-	switch t {
-	case codec.ErrInvalidRequest:
-		return "invalid_request_error"
-	case codec.ErrProviderError:
-		return "api_error"
-	case codec.ErrAuthError:
+// mapStatusCodeToOpenAIType 将 HTTP 状态码映射为 OpenAI 错误类型字符串。
+func mapStatusCodeToOpenAIType(statusCode int) string {
+	switch {
+	case statusCode == 401 || statusCode == 403:
 		return "authentication_error"
-	case codec.ErrRateLimit:
+	case statusCode == 429:
 		return "rate_limit_exceeded"
-	case codec.ErrInternal:
-		return "api_error"
+	case statusCode >= 400 && statusCode < 500:
+		return "invalid_request_error"
 	default:
 		return "api_error"
 	}

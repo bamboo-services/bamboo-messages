@@ -5,7 +5,6 @@ import (
 	"errors"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
-	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
 )
 
 // geminiErrorResponse Gemini 非流式错误响应结构。
@@ -22,19 +21,22 @@ type geminiErrorBody struct {
 }
 
 // serializeError 将错误序列化为 Gemini 格式的错误响应。
+//
+// 错误 code + status 通过 BambooError.StatusCode 映射（遵循 Google API 规范）:
+//   - 400 → INVALID_ARGUMENT
+//   - 401 → UNAUTHENTICATED
+//   - 403 → PERMISSION_DENIED
+//   - 429 → RESOURCE_EXHAUSTED
+//   - 5xx/0 → INTERNAL
 func serializeError(err error) []byte {
 	code := 500
 	status := "INTERNAL"
 	message := "internal error"
 
-	var codecErr *codec.CodecError
 	var bambooErr *bamboo.BambooError
-	if errors.As(err, &codecErr) {
-		message = codecErr.Message
-		code, status = mapCodecErrorToGemini(codecErr.Type)
-	} else if errors.As(err, &bambooErr) {
+	if errors.As(err, &bambooErr) {
 		message = bambooErr.Message
-		code, status = mapBambooErrorToGemini(bambooErr)
+		code, status = mapStatusCodeToGemini(bambooErr.StatusCode)
 	} else if err != nil {
 		message = err.Error()
 	}
@@ -51,26 +53,19 @@ func serializeError(err error) []byte {
 	return data
 }
 
-// mapCodecErrorToGemini 将 codec ErrorType 映射为 Gemini error code + status。
-//
-// 映射规则（遵循 Google API 规范）:
-//   - ErrInvalidRequest → 400, INVALID_ARGUMENT
-//   - ErrAuthError      → 401, UNAUTHENTICATED
-//   - ErrRateLimit      → 429, RESOURCE_EXHAUSTED
-//   - ErrProviderError  → 500, INTERNAL
-//   - ErrInternal       → 500, INTERNAL
-func mapCodecErrorToGemini(t codec.ErrorType) (int, string) {
-	switch t {
-	case codec.ErrInvalidRequest:
+// mapStatusCodeToGemini 将 HTTP 状态码映射为 Gemini error code + status。
+func mapStatusCodeToGemini(statusCode int) (int, string) {
+	switch {
+	case statusCode == 400:
 		return 400, "INVALID_ARGUMENT"
-	case codec.ErrAuthError:
+	case statusCode == 401:
 		return 401, "UNAUTHENTICATED"
-	case codec.ErrRateLimit:
+	case statusCode == 403:
+		return 403, "PERMISSION_DENIED"
+	case statusCode == 429:
 		return 429, "RESOURCE_EXHAUSTED"
-	case codec.ErrProviderError:
-		return 500, "INTERNAL"
-	case codec.ErrInternal:
-		return 500, "INTERNAL"
+	case statusCode >= 400 && statusCode < 500:
+		return 400, "INVALID_ARGUMENT"
 	default:
 		return 500, "INTERNAL"
 	}
