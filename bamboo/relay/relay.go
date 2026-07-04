@@ -261,7 +261,6 @@ func RelayStream(
 				continue
 			}
 			if data != nil {
-				debugRelayResponseFrame("RelayStream", inFormat, outFormat, data)
 				// ping 保活帧绕过 SmoothPacer，直接写入 out channel。
 				// 原因：ping 的作用是对抗反向代理 idle timeout，如果经过 pacer 队列
 				// 排队，在队列积压时会失去实时保活意义，导致 nginx/ALB 断连。
@@ -296,7 +295,6 @@ func RelayStream(
 			return
 		}
 		if flushData != nil {
-			debugRelayResponseFrame("RelayStream", inFormat, outFormat, flushData)
 			if pacer != nil {
 				pacer.Push(flushData)
 			} else {
