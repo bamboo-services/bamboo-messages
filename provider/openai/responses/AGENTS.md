@@ -19,6 +19,9 @@ provider/openai/responses/
 ├── option.go         # OpenaiResponsesOption + WithStore/WithModalities/WithPreviousResponseID/WithTruncation
 ├── tools.go          # 工具定义转换 (buildTools)
 ├── types.go          # OpenAI Responses 协议原生请求/响应 DTO
+├── mock_test.go      # httptest mock server 测试辅助工具
+├── message_audit_test.go # 消息转换审计测试
+├── stream_test.go    # 流式事件单元测试
 ├── provider_test.go  # 集成测试
 └── params_audit_test.go  # Metadata/Stop 审计测试
 ```
@@ -71,6 +74,7 @@ provider/openai/responses/
 - **输入格式差异** — 使用请求 DTO 的 `Input` 字段（字符串或消息数组），支持更丰富的输入类型
 - **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client
+- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewHTTPError(resp.StatusCode, ...)` 包装错误，使状态码作为结构化字段贯穿错误链路（`pkgErrors.HTTPError` → `bamboo.wrapProviderError` → `BambooError.StatusCode`）
 
 ## 反模式
 

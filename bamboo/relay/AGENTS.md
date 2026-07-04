@@ -18,7 +18,9 @@ bamboo/relay/
 ├── stream_test.go         # 流式互转单元测试
 ├── cross_format_test.go   # 跨格式组合测试（N-to-N 矩阵）
 ├── smooth_test.go         # 平滑缓冲器单元测试（TokenSplitter/FrameParser/SmoothPacer/集成测试）
-└── usage_fallback_test.go # Usage 回退路径单元测试
+├── debug_test.go          # Debug 日志格式化单元测试
+├── usage_fallback_test.go # Usage 回退路径单元测试
+└── usage_estimate_test.go # Token 估算与 Usage 采样单元测试
 ```
 
 ## 导航指南

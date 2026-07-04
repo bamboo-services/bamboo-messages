@@ -1,7 +1,7 @@
 # 项目知识库
 
-**生成日期:** 2026-06-28
-**提交:** 1cecf62
+**生成日期:** 2026-07-04
+**提交:** e8be986
 **分支:** master
 
 ## 概述
@@ -26,21 +26,40 @@ bamboo-messages/
 │   ├── timing.go                  # TimingCollector / TimingStats / TokenRates / RateSample — 流式耗时统计与 Token 速率测量
 │   ├── stream_test.go             # 流模型单元测试
 │   ├── type_test.go               # 类型单元测试
+│   ├── http_client_test.go        # HTTPClient 单元测试（Do/DoWithDebug/buildURL/applyHeaders）
+│   ├── sse_scanner_test.go        # SSEScanner 单元测试（帧解析/json.Valid 容错/GLM 截断恢复）
+│   ├── options_test.go            # 公共 Options 单元测试
+│   ├── interceptor_test.go        # 拦截器链单元测试
+│   ├── interceptor_transport_test.go # 拦截器 Transport 集成测试
+│   ├── timing_test.go             # 耗时收集器单元测试
+│   ├── debug_test.go              # Debug 机制单元测试
+│   ├── testutil_test.go           # 测试辅助工具
 │   ├── anthropic/                 # Anthropic Messages 协议适配器
+│   │   ├── types.go               # Anthropic 协议原生请求/响应 DTO（本地定义）
+│   │   ├── mock_test.go           # httptest mock server 测试辅助工具
+│   │   ├── complete_test.go       # 非流式对话单元测试
 │   │   ├── params_audit_test.go   # 参数映射审计测试
 │   │   ├── interceptor_test.go    # 拦截器注入测试
 │   │   ├── message_test.go        # 消息转换单元测试
+│   │   ├── params_test.go         # buildParams 单元测试
 │   │   └── stream_test.go         # 流式事件单元测试
 │   ├── openai/
 │   │   ├── completions/           # OpenAI Chat Completions 协议适配器
+│   │   │   ├── types.go           # OpenAI Completions 协议原生请求/响应 DTO（本地定义）
+│   │   │   ├── mock_test.go       # httptest mock server 测试辅助工具
 │   │   │   ├── message_test.go    # 消息转换单元测试
 │   │   │   ├── params_audit_test.go # 参数映射审计测试
 │   │   │   ├── legacy_compat_test.go # Legacy 兼容模式测试
 │   │   │   └── integration_cross_protocol_test.go # 跨协议集成测试
 │   │   └── responses/             # OpenAI Responses 协议适配器
+│   │       ├── types.go           # OpenAI Responses 协议原生请求/响应 DTO（本地定义）
+│   │       ├── mock_test.go       # httptest mock server 测试辅助工具
+│   │       ├── message_audit_test.go # 消息转换审计测试
 │   │       ├── params_audit_test.go # 参数映射审计测试
 │   │       └── stream_test.go     # 流式事件单元测试
 │   └── gemini/                    # Google Gemini 协议适配器
+│       ├── types.go               # Gemini 协议原生请求/响应 DTO（本地定义）
+│       ├── mock_test.go           # httptest mock server 测试辅助工具
 │       ├── audit_test.go          # 流事件审计测试
 │       ├── params_audit_test.go   # 参数映射审计测试
 │       └── stream_test.go         # 流式事件单元测试
@@ -66,7 +85,8 @@ bamboo-messages/
 │   ├── helpers/                    # 通用工具函数
 │   │   └── helpers.go              # PtrFloat64/PtrBool/PtrInt64/PtrString + GetExtra* 安全取值
 │   └── errors/                     # 通用错误类型
-│       └── errors.go               # Error + BambooError 错误类型 + 5 种 ErrorType 常量
+│       ├── errors.go               # Error + BambooError 错误类型 + 5 种 ErrorType 常量
+│       └── http_error.go           # HTTPError 结构化错误类型（携带 HTTP 状态码）+ NewHTTPError/AsHTTPError
 │
 ├── internal/
 │   └── xerr/                      # 内部最小错误类型（替代 bamboo-base-go/common/error）
@@ -77,7 +97,8 @@ bamboo-messages/
 │
 ├── docs/                          # 设计文档
 │   ├── new-api-feasibility.md
-│   └── new-api-integration.md
+│   ├── new-api-integration.md
+│   └── glm-stream-interruption-investigation.md # GLM 流式截断中断调研
 │
 └── go.mod                         # Go 1.25，纯标准库 + 无外部 SDK 依赖
 ```
@@ -110,6 +131,7 @@ bamboo-messages/
 | 使用通用 Options 模式 | `pkg/option/option.go` | WithAPIKey/WithBaseURL/WithHeader/WithDebug + ApplyOptions |
 | 使用通用工具函数 | `pkg/helpers/helpers.go` | PtrFloat64/PtrBool/PtrInt64/PtrString + GetExtra* 安全取值 |
 | 使用通用错误类型 | `pkg/errors/errors.go` | Error + BambooError 错误类型 |
+| 理解 HTTP 错误链路 | `pkg/errors/http_error.go` + `bamboo/bamboo.go` | HTTPError 携带状态码 + wrapProviderError 映射为 BambooError.StatusCode |
 
 ## 代码地图
 
@@ -120,6 +142,9 @@ bamboo-messages/
 | `Provider` | 接口 | provider.go | 6 方法：Chat, ChatWithSystem, Complete, CompleteWithSystem, GetProviderType, GetAvailableModels |
 | `HTTPClient` | 结构体 | http_client.go | 统一 HTTP 通信基座（认证/自定义头/拦截器/User-Agent/URL 拼接） |
 | `NewHTTPClient` | 函数 | http_client.go | 创建统一 HTTP 客户端实例 |
+| `HTTPClient.Do` | 方法 | http_client.go | 发起 HTTP 请求 `(ctx, method, path, body) → (*http.Response, error)` — 适配器统一入口 |
+| `HTTPClient.DoWithDebug` | 方法 | http_client.go | 发起 HTTP 请求并输出 debug 日志（headers 脱敏 + body 截断） |
+| `HTTPClient.GetBaseURL` | 方法 | http_client.go | 返回基础 URL 字符串 |
 | `SSEScanner` | 结构体 | sse_scanner.go | 共享 SSE 帧解析器，内置 json.Valid 容错与 GLM 截断恢复 |
 | `NewSSEScanner` | 函数 | sse_scanner.go | 从 io.ReadCloser 创建 SSE 帧解析器 |
 | `Message` | 结构体 | type.go | 统一消息模型 (Role + Content + ContentBlocks + ToolCalls + ToolCallID + ToolName + IsError + CacheControl + ThinkingContent + ThinkingSignature + ReasoningID) |
@@ -259,6 +284,10 @@ bamboo-messages/
 | `BambooError` | 结构体 | errors/errors.go | Bamboo SDK 统一错误类型 |
 | `ErrorTypeInvalidRequest` / `Authentication` / `RateLimit` / `API` / `Provider` | 常量 | errors/errors.go | 5 种错误类型常量 |
 | `NewBambooError/NewBambooErrorWithCode` | 函数 | errors/errors.go | BambooError 构造函数 |
+| `HTTPError` | 结构体 | errors/http_error.go | 携带 HTTP 状态码的结构化错误类型 (StatusCode + Message + Cause)，实现 error/Unwrap 接口 |
+| `NewHTTPError` | 函数 | errors/http_error.go | 创建携带 HTTP 状态码的错误实例 `(statusCode, message, cause...) → *HTTPError` |
+| `NewHTTPErrorFromStdError` | 函数 | errors/http_error.go | 从标准 error 创建 HTTPError（状态码默认 500） |
+| `AsHTTPError` | 函数 | errors/http_error.go | 从错误链中提取 `*HTTPError`（使用 errors.As 遍历 Unwrap 链） |
 
 ## 模块架构
 
@@ -352,6 +381,8 @@ bamboo-messages/
 40. **速率采样回调** — `Config.OnRateSample` 在 SmoothPacer 输出 tick 时触发，区分 thinking/output 阶段；仅 SmoothBuffer 启用时生效
 41. **Relay 失败返回协议格式错误** — `Relay` 在 provider 失败时调用 `outCodec.SerializeError(err)` 返回协议格式化错误
 42. **Adapter 本地 DTO 不暴露外部类型** — 适配器内部使用本地 `types.go` 定义的请求/响应结构，禁止在公共 API 或返回类型中暴露任何外部 SDK 类型
+43. **HTTP 错误结构化链路** — 适配器 `complete.go` 在上游 HTTP >= 400 时使用 `pkgErrors.NewHTTPError(statusCode, ...)` 包装错误；`bamboo.go` 的 `wrapProviderError` 使用 `pkgErrors.AsHTTPError` 提取状态码，通过 `NewBambooErrorWithStatusCode` 自动映射为正确的 ErrorType（429→RateLimit/401→Authentication/400→InvalidRequest/5xx→API）；状态码贯穿到 `BambooError.StatusCode` 字段，避免仅存在于消息字符串中
+44. **BambooError.StatusCode 字段** — `BambooError` 携带 `StatusCode` 字段（HTTP 状态码），通过 `MapStatusCodeToErrorType` 自动推导 ErrorType；非 HTTP 错误 StatusCode 为 0，降级为 `ErrorTypeProvider`
 
 ## 反模式
 
@@ -443,6 +474,8 @@ BAMBOO_DEBUG=true go test ./provider/anthropic/...
 - 请求拦截器（`RequestInterceptor`）为 SDK 用户提供正交的 HTTP 层请求改写能力，无需 fork Provider 实现
 - `TimingCollector` 是 pull 模式的可观测性工具，不是 push 模式的配置；与 `SmoothPacer` 通过 `WithRateSampleCallback` 联动
 - Responses codec 的流式序列化器完全重写为 `responsesStreamSerializer` 状态机，支持 `sequence_number` 自动递增、`response_id` 注入、双轨 reasoning（raw + summary）、`encrypted_content` 透传
+- HTTP 错误结构化链路：适配器 `complete.go` → `pkgErrors.NewHTTPError(statusCode, ...)` → `bamboo.wrapProviderError` → `pkgErrors.AsHTTPError` → `bamboo.NewBambooErrorWithStatusCode` → `MapStatusCodeToErrorType` 自动推导 ErrorType；`BambooError.StatusCode` 字段保留原始 HTTP 状态码
+- `pkg/errors/http_error.go` 的 `HTTPError` 实现 `error` + `Unwrap` 接口，支持 `errors.Is/As` 链式解包；`NewHTTPErrorFromStdError` 用于将非结构化错误回退包装（状态码默认 500）
 
 ## 引用
 

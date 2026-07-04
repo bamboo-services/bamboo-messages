@@ -19,6 +19,7 @@ provider/openai/completions/
 ├── option.go                # OpenaiCompletionsOption + WithFrequencyPenalty/WithPresencePenalty/WithSeed/WithPrediction
 ├── tools.go                 # 工具定义转换 (buildTools/buildStop)
 ├── types.go                 # OpenAI Completions 协议原生请求/响应 DTO
+├── mock_test.go             # httptest mock server 测试辅助工具
 ├── provider_test.go         # 集成测试
 ├── legacy_compat_test.go    # Legacy 兼容模式单元测试
 ├── message_test.go          # 空 tool_calls 序列化测试
@@ -76,6 +77,7 @@ provider/openai/completions/
 - **ReasoningEffort 映射** — `ThinkingConfig.Effort` → 请求 DTO 的 `reasoning_effort` 字段（Legacy 模式仍透传 thinking）
 - **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client
+- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewHTTPError(resp.StatusCode, ...)` 包装错误，使状态码作为结构化字段贯穿错误链路（`pkgErrors.HTTPError` → `bamboo.wrapProviderError` → `BambooError.StatusCode`）
 
 ## 反模式
 

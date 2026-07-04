@@ -120,10 +120,12 @@ bamboo/
 
 | 符号 | 类型 | 文件 | 作用 |
 |------|------|------|------|
-| `BambooError` | 结构体 | errors.go | Bamboo SDK 统一错误类型 (Type + Message + Code + ProviderType) |
+| `BambooError` | 结构体 | errors.go | Bamboo SDK 统一错误类型 (Type + Message + Code + StatusCode + ProviderType) |
 | `ErrorTypeInvalidRequest` / `Authentication` / `RateLimit` / `API` / `Provider` | 常量 | errors.go | 5 种错误类型常量 |
 | `NewBambooError` | 函数 | errors.go | 创建 BambooError 实例 |
 | `NewBambooErrorWithCode` | 函数 | errors.go | 创建带 Code 的 BambooError |
+| `NewBambooErrorWithStatusCode` | 函数 | errors.go | 通过 HTTP 状态码自动映射 ErrorType 并创建 BambooError（携带 StatusCode 字段） |
+| `MapStatusCodeToErrorType` | 函数 | errors.go | HTTP 状态码 → ErrorType 映射（429→RateLimit、401→Authentication、400→InvalidRequest、5xx→API、其他→Provider） |
 
 ### 类型转换
 
@@ -158,6 +160,7 @@ bamboo/
 - **终止事件超时保障** — `terminateWriteTimeout` (5s) 确保终止事件（message_stop 等）写入 out channel 时既不被 `default` 丢弃，也不会因消费端卡死而无限阻塞 goroutine
 - **ctx 取消合成错误** — 流式中途 ctx 取消时，发送合成 `xerr.Error` 到 converter 后退出
 - **Complete 部分成功** — `Complete` 在 provider 返回 error + 部分结果时返回 `(resp, error)`
+- **HTTPError 错误链路映射** — `bamboo.go` 的 `wrapProviderError` 使用 `pkgErrors.AsHTTPError(err)` 从错误链提取 `*pkgErrors.HTTPError`，若存在则通过 `NewBambooErrorWithStatusCode` 自动映射状态码为正确的 ErrorType（429→RateLimit/401→Authentication/400→InvalidRequest/5xx→API）；否则降级为 `ErrorTypeProvider`。确保上游 HTTP 状态码不丢失，贯穿到 `BambooError.StatusCode` 字段
 
 ## 反模式
 

@@ -18,6 +18,8 @@ provider/anthropic/
 ├── option.go        # AnthropicMessagesOption + WithTopK/WithBudgetTokens
 ├── tools.go         # 工具定义转换 (buildTools)
 ├── types.go         # Anthropic 协议原生请求/响应 DTO
+├── mock_test.go     # httptest mock server + newMockProvider 测试辅助工具
+├── complete_test.go # 非流式对话单元测试
 ├── interceptor_test.go  # 拦截器注入集成测试
 ├── message_test.go  # 消息转换单元测试
 ├── stream_test.go   # 流式事件单元测试
@@ -80,6 +82,7 @@ provider/anthropic/
 - **Prompt Caching 原生支持** — Anthropic 是唯一使用显式缓存断点的 Provider；`Message.CacheControl` / `Tool.CacheControl` / `ChatConfig.SystemCacheControl` 通过 `provider.NewEphemeralCacheControl()` 创建标记，序列化到请求 DTO 的 `cache_control` 字段
 - **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；启用后调用 `provider.SetDebug(true)`，请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client（零包装开销）
+- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewHTTPError(resp.StatusCode, ...)` 包装错误，使状态码作为结构化字段贯穿错误链路（`pkgErrors.HTTPError` → `bamboo.wrapProviderError` → `BambooError.StatusCode`），避免状态码仅存在于消息字符串中
 
 ## 反模式
 

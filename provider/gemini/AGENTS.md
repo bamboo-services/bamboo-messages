@@ -19,6 +19,7 @@ provider/gemini/
 ├── option.go        # GeminiOption + WithAPIKey/WithBaseURL/WithHeader
 ├── tools.go         # 工具定义转换 (buildTools)
 ├── types.go         # Gemini 协议原生请求/响应 DTO
+├── mock_test.go     # httptest mock server 测试辅助工具
 ├── audit_test.go    # 工具调用 BlockStart + Thinking BlockStart 审计测试
 └── params_audit_test.go  # MaxTokens 溢出 + SafetySettings + UserID + ParallelToolCalls + ResponseFormat 审计测试
 ```
@@ -82,6 +83,7 @@ provider/gemini/
 - **ParallelToolCalls 不支持** — Gemini 不支持此参数，当设置时仅输出 debug 日志，不报错
 - **Debug 日志** — 通过 `WithDebug()` Option 或环境变量 `BAMBOO_DEBUG=1` 启用；构造函数中检测到 debug 标志后调用 `provider.SetDebug(true)`，请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client
+- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewHTTPError(resp.StatusCode, ...)` 包装错误，使状态码作为结构化字段贯穿错误链路（`pkgErrors.HTTPError` → `bamboo.wrapProviderError` → `BambooError.StatusCode`）
 
 ## 反模式
 

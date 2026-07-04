@@ -20,7 +20,8 @@ bamboo/codec/
 │   ├── error.go            # SerializeError: error → Anthropic 错误 JSON
 │   ├── request_test.go     # 请求解析单元测试
 │   ├── request_audit_test.go  # N-to-N 转换安全性审计测试
-│   └── response_test.go    # 响应序列化单元测试
+│   ├── response_test.go    # 响应序列化单元测试
+│   └── stream_test.go      # 流式序列化单元测试（SSE 帧生成）
 ├── openai/                 # OpenAI Chat Completions 协议编解码（结构同 anthropic/）
 │   ├── codec.go / request.go / response.go / stream.go / error.go
 │   ├── request_test.go / response_test.go

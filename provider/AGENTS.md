@@ -26,6 +26,8 @@ provider/
 ├── options_test.go          # 公共 Options 单元测试
 ├── interceptor_test.go      # 拦截器链单元测试
 ├── interceptor_transport_test.go # 拦截器 Transport 集成测试
+├── http_client_test.go      # HTTPClient 单元测试（Do/DoWithDebug/buildURL/applyHeaders）
+├── sse_scanner_test.go      # SSEScanner 单元测试（帧解析/json.Valid 容错/GLM 截断恢复）
 ├── timing_test.go           # 耗时收集器单元测试
 ├── debug_test.go            # Debug 机制单元测试
 ├── testutil_test.go         # 测试辅助工具
@@ -67,6 +69,9 @@ provider/
 | `Provider` | 接口 | provider.go | 6 方法统一接口（GetProviderType 返回 `ProviderType` 类型） |
 | `HTTPClient` | 结构体 | http_client.go | 统一 HTTP 通信基座（认证/自定义头/拦截器/User-Agent/URL 拼接） |
 | `NewHTTPClient` | 函数 | http_client.go | 创建统一 HTTP 客户端实例 |
+| `HTTPClient.Do` | 方法 | http_client.go | 发起 HTTP 请求 `(ctx, method, path, body) → (*http.Response, error)` — 适配器统一入口 |
+| `HTTPClient.DoWithDebug` | 方法 | http_client.go | 发起 HTTP 请求并输出 debug 日志（providerType/endpoint/headers 脱敏/body 截断） |
+| `HTTPClient.GetBaseURL` | 方法 | http_client.go | 返回基础 URL 字符串 |
 | `SSEScanner` | 结构体 | sse_scanner.go | 共享 SSE 帧解析器，内置 json.Valid 容错与 GLM 截断恢复 |
 | `NewSSEScanner` | 函数 | sse_scanner.go | 从 io.ReadCloser 创建 SSE 帧解析器 |
 | `ProviderType` | 类型 | type.go | 协议类型标识 (string) |
@@ -196,6 +201,8 @@ provider/
 - **TimingCollector 阶段状态机** — 内部 `collectorPhase` (init → thinking → content → tool) 驱动耗时计算
 - **Token 估算规则标准化** — CJK 1:1, Latin 4:1, Other 2:1（与 `SmoothPacer.TokenSplitter` 的 CJK 切分规则互补）
 - **带索引工具调用** — `IndexedToolCallDeltaData` + `ToolCallData.HasIndex/Index` 支持 OpenAI 并行工具调用的原生索引
+- **HTTPClient.Do 统一入口** — 所有适配器通过 `httpClient.Do(ctx, method, path, body)` 发起请求，path 为相对路径（如 `/v1/messages`），由 `buildURL` 拼接 BaseURL；debug 模式下改用 `DoWithDebug`，两者共享 URL 拼接和 header 注入逻辑
+- **HTTP 错误结构化委托** — `HTTPClient.Do` 仅返回 `*http.Response`，不包装错误；适配器 `complete.go` 负责检查 `resp.StatusCode >= 400` 并使用 `pkgErrors.NewHTTPError` 包装，使状态码作为结构化字段贯穿错误链路
 
 ## 反模式
 
