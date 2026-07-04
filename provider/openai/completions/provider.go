@@ -33,7 +33,6 @@ type config struct {
 	headers      map[string]string
 	legacyCompat bool
 	includeUsage bool
-	debug        bool
 	interceptors []provider.RequestInterceptor
 }
 
@@ -83,14 +82,6 @@ func WithLegacyCompat() Option {
 // 非 legacyCompat 模式下此选项无效果（默认已发送 stream_options）。
 func WithIncludeUsage(include bool) Option {
 	return func(c *config) { c.includeUsage = include }
-}
-
-// WithDebug 启用 debug 日志。
-//
-// 启用后，适配器在发起请求前会输出 Provider 类型、端点、headers 和 body（正文截断）。
-// 等价于设置环境变量 BAMBOO_DEBUG=1。
-func WithDebug() Option {
-	return func(c *config) { c.debug = true }
 }
 
 // WithInterceptor 注册一个请求拦截器。
@@ -152,9 +143,6 @@ func applyOptions(opts ...Option) *config {
 	cfg := &config{}
 	for _, opt := range opts {
 		opt(cfg)
-	}
-	if cfg.debug {
-		provider.SetDebug(true)
 	}
 	return cfg
 }

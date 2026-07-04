@@ -370,7 +370,7 @@ func TestHTTPClient_DoWithDebug(t *testing.T) {
 	defer srv.Close()
 
 	// debug 关闭状态下调用 DoWithDebug 应正常工作
-	SetDebug(false)
+	DebugEnabled = false
 	hc := NewHTTPClient(srv.URL, "key", "Authorization", "Bearer ", nil, nil)
 	_, err := hc.DoWithDebug(context.Background(), "POST", "/test", []byte(`{}`), "test-provider", srv.URL+"/test")
 	if err != nil {

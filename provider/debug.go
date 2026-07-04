@@ -1,14 +1,11 @@
 package provider
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
-
-	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 )
 
 // ResponseHeadersToMap 将 http.Header 转换为 map[string]string，用于 response debug。
@@ -29,19 +26,8 @@ func ResponseHeadersToMap(h http.Header) map[string]string {
 
 // DebugEnabled debug 日志全局开关。
 //
-// 通过以下任一方式启用：
-//   - 环境变量 BAMBOO_DEBUG=1 / true / on
-//   - 调用 provider.SetDebug(true)
-//   - 适配器构造时传入 WithDebug() Option
+// 通过环境变量 BAMBOO_DEBUG=1 / true / on 启用。
 var DebugEnabled = false
-
-// SetDebug 全局开启或关闭 Provider 层 debug 日志。
-//
-// 供适配器的 WithDebug() Option 内部调用，也可被上层业务直接调用来
-// 在运行时动态控制 debug 开关。
-func SetDebug(enabled bool) {
-	DebugEnabled = enabled
-}
 
 // init 从环境变量 BAMBOO_DEBUG 初始化 debug 开关。
 //
@@ -71,9 +57,8 @@ func DebugRequest(providerType, endpoint string, headers map[string]string, para
 		return
 	}
 
-	xLog.WithName("bamboo/debug").SugarInfo(context.Background(),
-		fmt.Sprintf("provider=%s endpoint=%s | headers: {%s} | body: %s",
-			providerType, endpoint, formatHeaders(headers), formatParams(params)))
+	fmt.Println(fmt.Sprintf("provider=%s endpoint=%s | headers: {%s} | body: %s",
+		providerType, endpoint, formatHeaders(headers), formatParams(params)))
 }
 
 // FormatDebugRequest 格式化请求的 debug 信息并返回字符串。
@@ -103,8 +88,7 @@ func DebugResponse(providerType string, statusCode int, headers map[string]strin
 	if !DebugEnabled {
 		return
 	}
-	xLog.WithName("bamboo/debug").SugarInfo(context.Background(),
-		FormatDebugResponse(providerType, statusCode, headers, body))
+	fmt.Println(FormatDebugResponse(providerType, statusCode, headers, body))
 }
 
 // FormatDebugResponse 格式化非流式响应的 debug 信息并返回字符串。
@@ -131,8 +115,7 @@ func DebugSSEResponse(providerType string, statusCode int, headers map[string]st
 	if !DebugEnabled {
 		return
 	}
-	xLog.WithName("bamboo/debug").SugarInfo(context.Background(),
-		FormatDebugSSEResponse(providerType, statusCode, headers))
+	fmt.Println(FormatDebugSSEResponse(providerType, statusCode, headers))
 }
 
 // FormatDebugSSEResponse 格式化流式响应起始的 debug 信息并返回字符串。
@@ -159,8 +142,7 @@ func DebugSSEFrame(providerType, eventType string, data []byte) {
 	if !DebugEnabled {
 		return
 	}
-	xLog.WithName("bamboo/debug").SugarInfo(context.Background(),
-		FormatDebugSSEFrame(providerType, eventType, data))
+	fmt.Println(FormatDebugSSEFrame(providerType, eventType, data))
 }
 
 // FormatDebugSSEFrame 格式化单个 SSE 帧的 debug 信息并返回字符串。

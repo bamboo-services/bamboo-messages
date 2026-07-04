@@ -66,8 +66,7 @@ func Relay(
 	}
 
 	// ── 解析请求 ──
-	dbg := shouldDebug(cfg)
-	debugRelayInput(dbg, "Relay", inFormat, outFormat, body)
+	debugRelayInput("Relay", inFormat, outFormat, body)
 
 	req, err := inCodec.ParseRequest(body)
 	if err != nil {
@@ -75,7 +74,7 @@ func Relay(
 		return nil, toBambooError(err)
 	}
 
-	debugRelayParsed(dbg, "Relay", inFormat, req)
+	debugRelayParsed("Relay", inFormat, req)
 
 	// ── 调用 Provider（通过 bamboo client 包装） ──
 	client := bamboo.NewClient(p)
@@ -90,7 +89,7 @@ func Relay(
 		// 将上游错误序列化为目标协议格式的错误响应 body，
 		// 确保调用方（如 newapi）拿到协议格式的错误 JSON 而非空 body。
 		errorBody := outCodec.SerializeError(err)
-		debugRelayResponse(dbg, "Relay", inFormat, outFormat, errorBody)
+		debugRelayResponse("Relay", inFormat, outFormat, errorBody)
 		return errorBody, toBambooError(err)
 	}
 
@@ -103,7 +102,7 @@ func Relay(
 		cfg.triggerError(err)
 		return nil, toBambooError(err)
 	}
-	debugRelayResponse(dbg, "Relay", inFormat, outFormat, data)
+	debugRelayResponse("Relay", inFormat, outFormat, data)
 
 	return data, nil
 }
@@ -162,8 +161,7 @@ func RelayStream(
 	}
 
 	// ── 解析请求 ──
-	dbg := shouldDebug(cfg)
-	debugRelayInput(dbg, "RelayStream", inFormat, outFormat, body)
+	debugRelayInput("RelayStream", inFormat, outFormat, body)
 
 	req, err := inCodec.ParseRequest(body)
 	if err != nil {
@@ -171,7 +169,7 @@ func RelayStream(
 		return nil, toBambooError(err)
 	}
 
-	debugRelayParsed(dbg, "RelayStream", inFormat, req)
+	debugRelayParsed("RelayStream", inFormat, req)
 
 	// ── 调用 Provider 获取流事件 channel ──
 	client := bamboo.NewClient(p)
@@ -262,8 +260,8 @@ func RelayStream(
 				cfg.triggerError(toBambooError(sErr))
 				continue
 			}
-			debugRelayResponseFrame(dbg, "RelayStream", inFormat, outFormat, data)
 			if data != nil {
+				debugRelayResponseFrame("RelayStream", inFormat, outFormat, data)
 				// ping 保活帧绕过 SmoothPacer，直接写入 out channel。
 				// 原因：ping 的作用是对抗反向代理 idle timeout，如果经过 pacer 队列
 				// 排队，在队列积压时会失去实时保活意义，导致 nginx/ALB 断连。
@@ -298,6 +296,7 @@ func RelayStream(
 			return
 		}
 		if flushData != nil {
+			debugRelayResponseFrame("RelayStream", inFormat, outFormat, flushData)
 			if pacer != nil {
 				pacer.Push(flushData)
 			} else {

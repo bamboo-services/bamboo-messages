@@ -1,48 +1,17 @@
 package relay
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
-	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
-
-// envDebugEnabled 通过环境变量 BAMBOO_DEBUG 控制的 relay 层 debug 开关。
-//
-// 作为 Config.Debug 的兜底默认值，WithDebug() Option 可覆盖。
-var envDebugEnabled = false
-
-func init() {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv("BAMBOO_DEBUG")))
-	envDebugEnabled = v == "1" || v == "true" || v == "on"
-}
 
 // maxDebugBodyLen debug 日志中单字段内容的最大长度（字符数）。
 //
 // 超过此长度的 content / text / system 等长文本字段会被截断并追加 "...(truncated)"。
 const maxDebugBodyLen = 500
-
-// shouldDebug 判断本次 relay 调用是否应输出 debug 日志。
-//
-// 优先使用 Config.Debug（WithDebug Option），未设置时回退到环境变量 BAMBOO_DEBUG。
-func shouldDebug(cfg *Config) bool {
-	if cfg != nil && cfg.Debug {
-		return true
-	}
-	return envDebugEnabled
-}
-
-// logRelayDebug 在 dbg 启用时输出 relay 层 debug 日志。
-func logRelayDebug(dbg bool, msg string) {
-	if !dbg {
-		return
-	}
-	xLog.WithName("bamboo/debug").SugarInfo(context.Background(), msg)
-}
 
 // debugRelayInput 输出 relay 层接收到的原始请求体 debug 日志。
 //
@@ -50,13 +19,15 @@ func logRelayDebug(dbg bool, msg string) {
 // 是排查"上游传了什么参数"的第一手数据。
 //
 // 参数：
-//   - enabled: 是否启用 debug（由 shouldDebug(cfg) 判断）
 //   - fn: 调用场景标识（"Relay" 或 "RelayStream"）
 //   - inFormat: 输入协议格式（如 codec.FormatOpenAI）
 //   - outFormat: 输出协议格式
 //   - body: 原始请求体 JSON 字节
-func debugRelayInput(enabled bool, fn string, inFormat, outFormat any, body []byte) {
-	logRelayDebug(enabled, FormatRelayInput(fn, inFormat, outFormat, body))
+func debugRelayInput(fn string, inFormat, outFormat any, body []byte) {
+	if !provider.DebugEnabled {
+		return
+	}
+	fmt.Println(FormatRelayInput(fn, inFormat, outFormat, body))
 }
 
 // formatRelayDebugLine 生成统一的 relay debug 日志行。
@@ -85,12 +56,14 @@ func FormatRelayInput(fn string, inFormat, outFormat any, body []byte) string {
 // 用于与 debugRelayInput 的原始 body 对比，排查 codec 转换是否有偏差。
 //
 // 参数：
-//   - enabled: 是否启用 debug（由 shouldDebug(cfg) 判断）
 //   - fn: 调用场景标识（"Relay" 或 "RelayStream"）
 //   - inFormat: 输入协议格式
 //   - req: codec 解析后的 RelayRequest
-func debugRelayParsed(enabled bool, fn string, inFormat any, req any) {
-	logRelayDebug(enabled, FormatRelayParsed(fn, inFormat, req))
+func debugRelayParsed(fn string, inFormat any, req any) {
+	if !provider.DebugEnabled {
+		return
+	}
+	fmt.Println(FormatRelayParsed(fn, inFormat, req))
 }
 
 // FormatRelayParsed 格式化 relay 解析结果的 debug 信息并返回字符串。
@@ -118,13 +91,15 @@ func FormatRelayParsed(fn string, inFormat any, req any) string {
 // 在 codec.SerializeResponse 之后调用，打印 relay 返回给上游调用方的响应 body。
 //
 // 参数：
-//   - dbg: 是否启用 debug（来自 Config.Debug）
 //   - fn: 调用场景标识（"Relay" 或 "RelayStream"）
 //   - inFormat: 输入协议格式
 //   - outFormat: 输出协议格式
 //   - data: 响应体 JSON 字节
-func debugRelayResponse(dbg bool, fn string, inFormat, outFormat any, data []byte) {
-	logRelayDebug(dbg, FormatRelayResponse(fn, inFormat, outFormat, data))
+func debugRelayResponse(fn string, inFormat, outFormat any, data []byte) {
+	if !provider.DebugEnabled {
+		return
+	}
+	fmt.Println(FormatRelayResponse(fn, inFormat, outFormat, data))
 }
 
 // FormatRelayResponse 格式化 relay 非流式响应的 debug 信息并返回字符串。
@@ -140,13 +115,15 @@ func FormatRelayResponse(fn string, inFormat, outFormat any, data []byte) string
 // 在 RelayStream 每次向输出 channel 写入 SSE 帧之前调用，打印即将发送的原始帧内容。
 //
 // 参数：
-//   - dbg: 是否启用 debug（来自 Config.Debug）
 //   - fn: 调用场景标识（通常为 "RelayStream"）
 //   - inFormat: 输入协议格式
 //   - outFormat: 输出协议格式
 //   - data: 原始 SSE 帧字节
-func debugRelayResponseFrame(dbg bool, fn string, inFormat, outFormat any, data []byte) {
-	logRelayDebug(dbg, FormatRelayResponseFrame(fn, inFormat, outFormat, data))
+func debugRelayResponseFrame(fn string, inFormat, outFormat any, data []byte) {
+	if !provider.DebugEnabled {
+		return
+	}
+	fmt.Println(FormatRelayResponseFrame(fn, inFormat, outFormat, data))
 }
 
 // FormatRelayResponseFrame 格式化 relay 流式逐帧响应的 debug 信息并返回字符串。

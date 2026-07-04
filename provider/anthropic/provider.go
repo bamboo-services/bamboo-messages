@@ -30,7 +30,6 @@ type config struct {
 	apiKey       string
 	baseURL      string
 	headers      map[string]string
-	debug        bool
 	legacyCompat bool
 	// interceptors 请求拦截器链，通过 WithInterceptor 注册。
 	// 构造 Provider 时若非空，会用 interceptorTransport 包装 HTTP client，
@@ -67,14 +66,6 @@ func WithHeader(key, value string) Option {
 		}
 		c.headers[key] = value
 	}
-}
-
-// WithDebug 启用 debug 日志。
-//
-// 启用后，适配器在发起请求前会输出 Provider 类型、端点、headers 和 body（正文截断）。
-// 等价于设置环境变量 BAMBOO_DEBUG=1。
-func WithDebug() Option {
-	return func(c *config) { c.debug = true }
 }
 
 // WithLegacyCompat 启用旧版兼容模式。
@@ -146,10 +137,6 @@ func NewProviderWithOptions(opts ...Option) *Provider {
 		cfg.headers,
 		cfg.interceptors,
 	)
-
-	if cfg.debug {
-		provider.SetDebug(true)
-	}
 
 	return &Provider{
 		httpClient:   httpClient,
