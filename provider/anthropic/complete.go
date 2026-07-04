@@ -51,10 +51,9 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 		var errResp anthropicErrorResponse
 		if jsonErr := json.Unmarshal(respBody, &errResp); jsonErr == nil && errResp.Error != nil {
 			return nil, pkgErrors.NewBambooError("上游",
-				fmt.Sprintf("Anthropic API 错误 [%d]: %s", resp.StatusCode, errResp.Error.Message), resp.StatusCode)
+				fmt.Sprintf("Anthropic: %s", errResp.Error.Message), resp.StatusCode)
 		}
-		return nil, pkgErrors.NewBambooError("上游",
-			fmt.Sprintf("Anthropic API 返回错误状态码 %d", resp.StatusCode), resp.StatusCode)
+		return nil, pkgErrors.NewBambooError("上游", "Anthropic: 未知错误", resp.StatusCode)
 	}
 
 	// 解析响应
@@ -74,9 +73,16 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	}
 
 	// 提取 Token 用量（保留缓存统计）
+	//
+	// Anthropic 的 input_tokens 仅统计非缓存输入 token，不含 cache_creation 和 cache_read。
+	// 为与 OpenAI/Gemini 适配器保持一致（InputTokens = 总输入 token，含缓存），
+	// 此处将三部分相加作为 InputTokens，使 CacheReadInputTokens 始终为 InputTokens 的子集。
 	if msgResp.Usage != nil {
+		totalInput := int64(msgResp.Usage.InputTokens) +
+			int64(msgResp.Usage.CacheCreationInputTokens) +
+			int64(msgResp.Usage.CacheReadInputTokens)
 		result.Usage = provider.UsageData{
-			InputTokens:              int64(msgResp.Usage.InputTokens),
+			InputTokens:              totalInput,
 			OutputTokens:             int64(msgResp.Usage.OutputTokens),
 			CacheCreationInputTokens: int64(msgResp.Usage.CacheCreationInputTokens),
 			CacheReadInputTokens:     int64(msgResp.Usage.CacheReadInputTokens),

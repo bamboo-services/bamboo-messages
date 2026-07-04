@@ -136,7 +136,7 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 	if resp.StatusCode >= 400 {
 		var apiErr openaiError
 		_ = json.Unmarshal(respBody, &apiErr)
-		errMsg := fmt.Sprintf("OpenAI Responses 上游错误 (HTTP %d)", resp.StatusCode)
+		errMsg := "OpenAI Responses"
 		if apiErr.Error.Message != "" {
 			errMsg += ": " + apiErr.Error.Message
 		}

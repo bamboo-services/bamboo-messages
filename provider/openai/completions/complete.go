@@ -175,12 +175,12 @@ const maxUpstreamDumpLen = 1000
 func formatUpstreamError(statusCode int, body []byte) string {
 	var apiErr openaiError
 	if err := json.Unmarshal(body, &apiErr); err == nil && apiErr.Error.Message != "" {
-		return fmt.Sprintf("OpenAI Completions 上游错误 (HTTP %d): %s", statusCode, apiErr.Error.Message)
+		return fmt.Sprintf("OpenAI Completions: %s", apiErr.Error.Message)
 	}
 
 	dump := string(body)
 	if len(dump) > maxUpstreamDumpLen {
 		dump = dump[:maxUpstreamDumpLen] + "...(truncated)"
 	}
-	return fmt.Sprintf("OpenAI Completions 上游错误 (HTTP %d): %s", statusCode, dump)
+	return fmt.Sprintf("OpenAI Completions: %s", dump)
 }

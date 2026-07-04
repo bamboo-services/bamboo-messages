@@ -105,8 +105,8 @@ func TestContentMessageStart_CacheFieldsPropagated(t *testing.T) {
 		t.Fatalf("delta data type = %T, want provider.UsageData", events[0].Delta.Data)
 	}
 
-	if usageData.InputTokens != 100 {
-		t.Errorf("input_tokens = %d, want 100", usageData.InputTokens)
+	if usageData.InputTokens != 175 {
+		t.Errorf("input_tokens = %d, want 175", usageData.InputTokens)
 	}
 	if usageData.OutputTokens != 0 {
 		t.Errorf("output_tokens = %d, want 0", usageData.OutputTokens)

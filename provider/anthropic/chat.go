@@ -193,12 +193,11 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 func formatAnthropicError(statusCode int, body []byte) string {
 	var errResp anthropicErrorResponse
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error != nil {
-		return fmt.Sprintf("Anthropic API 错误 [%d]: %s", statusCode, errResp.Error.Message)
+		return fmt.Sprintf("Anthropic: %s", errResp.Error.Message)
 	}
-	// 截断过长的响应体
 	bodyStr := string(body)
 	if len(bodyStr) > 200 {
 		bodyStr = bodyStr[:200] + "..."
 	}
-	return fmt.Sprintf("Anthropic API 返回错误状态码 %d: %s", statusCode, bodyStr)
+	return fmt.Sprintf("Anthropic: %s", bodyStr)
 }

@@ -178,7 +178,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 func formatGeminiError(statusCode int, body []byte) string {
 	var errResp geminiErrorResponse
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error != nil && errResp.Error.Message != "" {
-		return fmt.Sprintf("Gemini API 错误 (HTTP %d): %s", statusCode, errResp.Error.Message)
+		return fmt.Sprintf("Gemini: %s", errResp.Error.Message)
 	}
-	return fmt.Sprintf("Gemini API 返回错误 (HTTP %d): %s", statusCode, string(body))
+	return fmt.Sprintf("Gemini: %s", string(body))
 }

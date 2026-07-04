@@ -45,12 +45,19 @@ func (p *Provider) handleStreamEvent(event messageStreamEvent, finishReason *pro
 // Anthropic message_start 事件携带 message.usage.input_tokens（此时 output_tokens=0），
 // 发送 NewUsageDeltaWithCache 将 input_tokens 和 cache 字段传递给上层。
 func (p *Provider) contentMessageStart(event messageStreamEvent) []provider.StreamEvent {
-	// message_start 事件已在 ChatWithSystem 中发送 StreamTypeStart，此处仅提取 usage
+	// message_start 事件已在 ChatWithSystem 中发送 StreamTypeStart，此处仅提取 usage。
+	//
+	// Anthropic 的 input_tokens 仅统计非缓存输入 token，不含 cache_creation 和 cache_read。
+	// 为与 OpenAI/Gemini 适配器保持一致（InputTokens = 总输入 token，含缓存），
+	// 此处将三部分相加作为 InputTokens，使 CacheReadInputTokens 始终为 InputTokens 的子集。
 	if event.Message != nil && event.Message.Usage != nil {
+		totalInput := int64(event.Message.Usage.InputTokens) +
+			int64(event.Message.Usage.CacheCreationInputTokens) +
+			int64(event.Message.Usage.CacheReadInputTokens)
 		return []provider.StreamEvent{{
 			Type: provider.StreamTypeDelta,
 			Delta: provider.NewUsageDeltaWithCache(
-				int64(event.Message.Usage.InputTokens),
+				totalInput,
 				0,
 				int64(event.Message.Usage.CacheCreationInputTokens),
 				int64(event.Message.Usage.CacheReadInputTokens),
@@ -184,12 +191,19 @@ func (p *Provider) contentMessageDelta(event messageStreamEvent, finishReason *p
 		*finishReason = mapFinishReason(*msgDelta.StopReason)
 	}
 
-	// 提取 message_delta 中的最终 usage（output_tokens 及 cache 字段）
+	// 提取 message_delta 中的最终 usage（output_tokens 及 cache 字段）。
+	//
+	// Anthropic 的 input_tokens 仅统计非缓存输入 token，不含 cache_creation 和 cache_read。
+	// 为与 OpenAI/Gemini 适配器保持一致（InputTokens = 总输入 token，含缓存），
+	// 此处将三部分相加作为 InputTokens，使 CacheReadInputTokens 始终为 InputTokens 的子集。
 	if msgDelta.Usage != nil {
+		totalInput := int64(msgDelta.Usage.InputTokens) +
+			int64(msgDelta.Usage.CacheCreationInputTokens) +
+			int64(msgDelta.Usage.CacheReadInputTokens)
 		return []provider.StreamEvent{{
 			Type: provider.StreamTypeDelta,
 			Delta: provider.NewUsageDeltaWithCache(
-				int64(msgDelta.Usage.InputTokens),
+				totalInput,
 				int64(msgDelta.Usage.OutputTokens),
 				int64(msgDelta.Usage.CacheCreationInputTokens),
 				int64(msgDelta.Usage.CacheReadInputTokens),

@@ -71,7 +71,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 
 			var apiErr openaiError
 			_ = json.Unmarshal(respBody, &apiErr)
-			errMsg := fmt.Sprintf("OpenAI Responses 上游错误 (HTTP %d)", resp.StatusCode)
+			errMsg := "OpenAI Responses"
 			if apiErr.Error.Message != "" {
 				errMsg += ": " + apiErr.Error.Message
 			}

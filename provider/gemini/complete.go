@@ -57,9 +57,9 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	if resp.StatusCode >= 400 {
 		var errResp geminiErrorResponse
 		_ = json.Unmarshal(respBytes, &errResp)
-		errMsg := "Gemini API 返回错误"
+		errMsg := "Gemini: 未知错误"
 		if errResp.Error != nil && errResp.Error.Message != "" {
-			errMsg = errResp.Error.Message
+			errMsg = "Gemini: " + errResp.Error.Message
 		}
 		return nil, pkgErrors.NewBambooError("上游", errMsg, resp.StatusCode)
 	}

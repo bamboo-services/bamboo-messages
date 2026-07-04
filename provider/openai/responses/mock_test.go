@@ -345,10 +345,10 @@ func TestChat_ErrorResponse(t *testing.T) {
 		t.Error("expected non-nil Err in error event")
 	}
 
-	// 验证错误消息包含 HTTP 状态码
+	// 验证错误消息包含上游错误详情
 	errMsg := errEvent.Err.Error()
-	if !strings.Contains(errMsg, "500") {
-		t.Errorf("error message should contain HTTP 500, got: %s", errMsg)
+	if !strings.Contains(errMsg, "Internal server error") {
+		t.Errorf("error message should contain upstream detail, got: %s", errMsg)
 	}
 
 	// 验证 Done 事件存在
