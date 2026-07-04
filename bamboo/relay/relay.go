@@ -265,11 +265,8 @@ func RelayStream(
 				// 按 SSE 事件边界拆分：某些 codec 序列化器（如 OpenAI handleMessageDelta）
 				// 会将 finish_reason + usage 两个 data 帧合并为单个 []byte。
 				// 拆分后逐帧发送，确保上游调用方每个 []byte 收到的是单个 SSE 事件。
-				frames := splitSSEFrames(data)
+				frames := SplitSSEFrames(data)
 				for _, frame := range frames {
-					// ping 保活帧绕过 SmoothPacer，直接写入 out channel。
-					// 原因：ping 的作用是对抗反向代理 idle timeout，如果经过 pacer 队列
-					// 排队，在队列积压时会失去实时保活意义，导致 nginx/ALB 断连。
 					if event.Type == bamboo.EventPing {
 						select {
 						case out <- frame:
@@ -302,7 +299,7 @@ func RelayStream(
 			return
 		}
 		if flushData != nil {
-			frames := splitSSEFrames(flushData)
+			frames := SplitSSEFrames(flushData)
 			for _, frame := range frames {
 				if pacer != nil {
 					pacer.Push(frame)
@@ -392,7 +389,7 @@ func toBambooError(err error) error {
 	return pkgErrors.NewBambooError("下游", err.Error(), 0)
 }
 
-// splitSSEFrames 按 SSE 事件边界（\n\n）拆分为独立帧。
+// SplitSSEFrames 按 SSE 事件边界（\n\n）拆分为独立帧。
 //
 // 某些 codec 序列化器（如 OpenAI handleMessageDelta）将多个 SSE 事件
 // 合并为单个 []byte（finish_reason + usage 两个 data 帧连接在一起）。
@@ -400,7 +397,10 @@ func toBambooError(err error) error {
 //
 // 在 SSE 规范中，\n\n 是事件边界，不会出现在单个事件的 data 行内
 // （多行 data 按 \n 拼接，最多产生单个 \n，不会产生 \n\n）。
-func splitSSEFrames(data []byte) [][]byte {
+//
+// 导出供上层业务（如 newapi bridge）在直接调用 codec serializer 时使用，
+// 确保 marshalChunks 产生的合并帧被正确拆分为独立 SSE 事件。
+func SplitSSEFrames(data []byte) [][]byte {
 	if !bytes.Contains(data, []byte("\n\n")) {
 		return [][]byte{data}
 	}

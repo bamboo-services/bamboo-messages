@@ -347,12 +347,12 @@ func indexOf(s, substr string) int {
 }
 
 // ════════════════════════════════════════════════════════════
-// splitSSEFrames 单元测试
+// SplitSSEFrames 单元测试
 // ════════════════════════════════════════════════════════════
 
 func TestSplitSSEFrames_SingleFrame(t *testing.T) {
 	data := []byte("data: {\"a\":1}\n\n")
-	frames := splitSSEFrames(data)
+	frames := SplitSSEFrames(data)
 	if len(frames) != 1 {
 		t.Fatalf("期望 1 帧，实际 %d", len(frames))
 	}
@@ -363,7 +363,7 @@ func TestSplitSSEFrames_SingleFrame(t *testing.T) {
 
 func TestSplitSSEFrames_TwoFrames(t *testing.T) {
 	data := []byte("data: {\"finish_reason\":\"stop\"}\n\ndata: {\"usage\":{\"total\":100}}\n\n")
-	frames := splitSSEFrames(data)
+	frames := SplitSSEFrames(data)
 	if len(frames) != 2 {
 		t.Fatalf("期望 2 帧，实际 %d", len(frames))
 	}
@@ -377,7 +377,7 @@ func TestSplitSSEFrames_TwoFrames(t *testing.T) {
 
 func TestSplitSSEFrames_CommentFrame(t *testing.T) {
 	data := []byte(": keep-alive\n\n")
-	frames := splitSSEFrames(data)
+	frames := SplitSSEFrames(data)
 	if len(frames) != 1 {
 		t.Fatalf("期望 1 帧，实际 %d", len(frames))
 	}
@@ -388,7 +388,7 @@ func TestSplitSSEFrames_CommentFrame(t *testing.T) {
 
 func TestSplitSSEFrames_DoneSentinel(t *testing.T) {
 	data := []byte("data: [DONE]\n\n")
-	frames := splitSSEFrames(data)
+	frames := SplitSSEFrames(data)
 	if len(frames) != 1 {
 		t.Fatalf("期望 1 帧，实际 %d", len(frames))
 	}
@@ -399,7 +399,7 @@ func TestSplitSSEFrames_DoneSentinel(t *testing.T) {
 
 func TestSplitSSEFrames_NoTrailingNewline(t *testing.T) {
 	data := []byte("data: {\"a\":1}")
-	frames := splitSSEFrames(data)
+	frames := SplitSSEFrames(data)
 	if len(frames) != 1 {
 		t.Fatalf("期望 1 帧（无 \\n\\n 不拆分），实际 %d", len(frames))
 	}
