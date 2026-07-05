@@ -77,8 +77,8 @@ type TokenRates struct {
 
 // RateSample 速率采样点 — 记录某一时刻的 token/s 速率。
 //
-// 仅在启用 SmoothBuffer 时由 SmoothPacer 产生，
-// 每次输出 tick 产生一条采样，记录该 tick 的瞬时速率和对应的流式经过秒数。
+// 由上层业务通过 RecordRateSample 方法填充，
+// 每次采样记录瞬时速率和对应的流式经过秒数。
 type RateSample struct {
 	// ElapsedSec 从流开始到本采样点的经过秒数。
 	ElapsedSec float64
@@ -180,7 +180,7 @@ const minReliableDuration = time.Millisecond
 //	}
 //	stats := collector.Stats()
 //	rates := collector.Rates()
-//	series := collector.RateSeries() // 仅 SmoothBuffer 启用时非 nil
+//	series := collector.RateSeries() // 由上层业务通过 RecordRateSample 填充
 type TimingCollector struct {
 	// 时间戳
 	startTime     time.Time // StreamTypeStart 时刻
@@ -206,7 +206,7 @@ type TimingCollector struct {
 	// Token 用量（来自 UsageDelta，可选）
 	usage *UsageData
 
-	// 速率采样序列（来自 SmoothPacer 回调）
+	// 速率采样序列（由上层业务通过 RecordRateSample 填充）
 	rateSamples []RateSample
 }
 
@@ -348,8 +348,7 @@ func (tc *TimingCollector) handleDelta(delta StreamDelta[any], now time.Time) {
 
 // RecordRateSample 记录一个速率采样点。
 //
-// 由 SmoothPacer 的速率回调（relay.WithRateSampleCallback）调用，
-// 将平滑缓冲器每次 tick 的瞬时速率追加到采样序列。
+// 由上层业务调用，将瞬时速率追加到采样序列。
 // elapsedSec 和 tokensPerSec 会被四舍五入到 .2f 精度。
 func (tc *TimingCollector) RecordRateSample(elapsedSec, tokensPerSec float64, kind RateSampleKind) {
 	tc.rateSamples = append(tc.rateSamples, RateSample{
@@ -475,9 +474,8 @@ func (tc *TimingCollector) computeRate(tokens int64, duration time.Duration) flo
 
 // RateSeries 返回速率采样序列。
 //
-// 仅在启用 SmoothBuffer 并设置了 relay.WithRateSampleCallback 时有值。
 // 返回的是切片副本，修改不影响内部状态。
-// 未启用时返回 nil。
+// 未调用 RecordRateSample 时返回 nil。
 func (tc *TimingCollector) RateSeries() []RateSample {
 	if len(tc.rateSamples) == 0 {
 		return nil

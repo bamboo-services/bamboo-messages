@@ -76,7 +76,7 @@ bamboo-messages/
 │   ├── content.go                 # ContentBlock 构造函数 + WithCache 变体 + RegisterBlockType + ContentBlocks 反序列化
 │   ├── errors.go                  # BambooError 类型别名（= pkgErrors.BambooError）+ NewBambooError 变量别名
 │   ├── codec/                     # N-to-N 协议编解码层（anthropic/openai/responses/gemini 格式）
-│   ├── relay/                     # 跨协议中继层 (Relay / RelayStream + SmoothPacer 平滑缓冲 + 速率采样 + Debug)
+│   ├── relay/                     # 跨协议中继层 (Relay / RelayStream + 纯透传 + Debug)
 │   └── *_test.go                  # 单元测试 + 集成测试
 │
 ├── pkg/                            # 通用组件工具包 — 可复用的工具函数和类型
@@ -125,7 +125,7 @@ bamboo-messages/
 | 理解 Prompt Caching | `provider/type.go` + `bamboo/option.go` + `bamboo/content.go` | CacheControl / SystemCacheControl / PromptCacheKey / WithCache 构造函数 |
 | 查看使用示例 | `example/main.go` | 完整示例代码 |
 | 理解 N-to-N 协议互转 | `bamboo/codec/` + `bamboo/relay/` | codec 编解码 + relay 中继 |
-| 理解流式平滑缓冲 | `bamboo/relay/smooth*.go` | SmoothPacer EMA 自适应 + CJK 切分 + 三阶段模式 + 速率采样 |
+| 理解流式纯透传 | `bamboo/relay/relay.go` | RelayStream 直接透传上游 SSE 帧到输出 channel |
 | 理解内部错误类型 | `internal/xerr/error.go` | 最小错误包装，替代外部依赖 |
 | 使用通用 Options 模式 | `pkg/option/option.go` | WithAPIKey/WithBaseURL/WithHeader + ApplyOptions |
 | 使用通用工具函数 | `pkg/helpers/helpers.go` | PtrFloat64/PtrBool/PtrInt64/PtrString + GetExtra* 安全取值 |
@@ -237,21 +237,10 @@ bamboo-messages/
 |------|------|------|------|
 | `Relay` | 函数 | relay.go | 非流式协议互转（含 SerializeError 错误格式化） |
 | `RelayStream` | 函数 | relay.go | 流式协议互转（含速率采样集成） |
-| `Config` | 结构体 | config.go | relay 运行时配置 (OnUsage/OnError/Smooth/OnRateSample/EstimateOnMissingUsage) |
+| `Config` | 结构体 | config.go | relay 运行时配置 (OnUsage/OnError/EstimateOnMissingUsage) |
 | `Option` | 函数类型 | config.go | Functional Options 配置 |
 | `WithUsageCallback` | 函数 | config.go | 设置 Token 用量回调 |
 | `WithErrorCallback` | 函数 | config.go | 设置错误回调 |
-| `WithRateSampleCallback` | 函数 | config.go | 设置速率采样回调（仅 SmoothBuffer 启用时生效） |
-| `WithSmoothBuffer` | 函数 | smooth.go | 启用流式平滑缓冲（预设档位: gentle/smooth/typewriter） |
-| `WithSmoothBufferCustom` | 函数 | smooth.go | 启用流式平滑缓冲（自定义参数） |
-| `SmoothLevel` | 类型 | smooth.go | 平滑档位标识 (off/gentle/smooth/typewriter/custom) |
-| `SmoothParams` | 结构体 | smooth.go | 平滑参数 (TokensPerFrame/MinInterval/MaxInterval/EMAAlpha/DrainTier*) |
-| `SmoothConfig` | 结构体 | smooth.go | 平滑配置 (Level + Params) |
-| `SmoothPacer` | 结构体 | smooth_pacer.go | 流式平滑缓冲器核心（EMA 自适应 + 三阶段模式 + 速率采样） |
-| `SmoothPacer.SetRateSampleCallback` | 方法 | smooth_pacer.go | 设置速率采样回调 |
-| `SmoothPacer.Close` | 方法 | smooth_pacer.go | 语义清理别名（等同 Wait） |
-| `FrameParser` | 结构体 | smooth_parser.go | SSE 帧解析器（提取 data 行） |
-| `TokenSplitter` | 结构体 | smooth_parser.go | CJK/Latin 文本切分器 |
 | `FormatRelayInput/FormatRelayParsed` | 函数 | debug.go | 返回格式化 debug 字符串（不受开关限制） |
 | `FormatRelayResponse` | 函数 | debug.go | 返回非流式响应的格式化 debug 字符串 |
 
@@ -354,25 +343,21 @@ bamboo-messages/
 23. **ToolName/ToolCallID 分离** — `ToolResultBlock` 和 `provider.Message` 同时保存 `ToolName`（函数名）和 `ToolCallID`（调用 ID），Gemini `FunctionResponse` 需要两者同时存在
 24. **StreamConverter 类型安全** — `handleDelta` 中对 `delta.Data` 的断言使用 `ok` 模式，避免自定义 Provider 触发 panic
 25. **未知角色降级** — `messagesToProvider` 对 `system` 角色显式 warning 并降级为 `RoleUser`
-26. **流式平滑缓冲可选** — relay 层通过 `WithSmoothBuffer(level)` 或 `WithSmoothBufferCustom(params)` 启用；不设置时 `Config.Smooth` 为 nil，走原始流式路径
-27. **SmoothPacer 三阶段模式** — NORMAL（EMA 自适应间隔）→ DRAIN（尾部加速阶梯递减）→ FLUSH（错误冲刷立即排空）；上游结束后自动切换到 DRAIN
-28. **CJK 文本切分** — `TokenSplitter` 按 rune 切分：CJK 独立 token、Latin 连续合并、标点附着前 token、空格前缀附着后 token；跨帧残余保留在 `pendingTail`
-29. **积压感知缩减** — NORMAL 模式下队列积压增长时，有效间隔从 `baseInterval` 线性缩减到 `minIntervalFloor`（2ms），避免过度积压
-30. **请求拦截器链** — `RequestInterceptor` 在 HTTP Transport 层对已序列化的请求 body 进行任意修改；nil 拦截器防御性跳过；空切片零开销原样返回
-31. **拦截器 Transport 零包装** — `NewInterceptorHTTPClient` 无拦截器时返回 nil，Provider 保留标准库默认 client
-32. **公共 Options 嵌入模式** — `provider.Options` 通过匿名嵌入为各 Provider 提供统一的拦截器注册能力
-33. **TimingCollector 零侵入** — 用户代码主动创建并调用 `Observe(event)`；非并发安全，单 goroutine 使用
-34. **Token 估算规则标准化** — TimingCollector: CJK 1:1, Latin 4:1, Other 2:1（与 TokenSplitter 互补）
-35. **优先级 FinishReason** — `recordFinishReason` 优先级策略：tool_use(2) > max_tokens(1) > end_turn(0)
-36. **Error 自动 flush** — `handleError` 在流式错误时自动补发 stop 事件（Vercel AI SDK flush 模式）
-37. **跨类型 Block 自动切换** — `stopForNewBlock` 在 text→thinking / thinking→text 过渡时自动关闭前一个 block
-38. **Block 类型注册表** — `RegisterBlockType` + `ContentBlocks.UnmarshalJSON` 实现 JSON 多态反序列化
-39. **Chat 首事件 peek 模式** — `Chat` 同步 peek 首个 provider 事件，若为 Error 立即返回 `(nil, error)`
-40. **速率采样回调** — `Config.OnRateSample` 在 SmoothPacer 输出 tick 时触发，区分 thinking/output 阶段；仅 SmoothBuffer 启用时生效
-41. **Relay 失败返回协议格式错误** — `Relay` 在 provider 失败时调用 `outCodec.SerializeError(err)` 返回协议格式化错误
-42. **Adapter 本地 DTO 不暴露外部类型** — 适配器内部使用本地 `types.go` 定义的请求/响应结构，禁止在公共 API 或返回类型中暴露任何外部 SDK 类型
-43. **错误透传简化** — `BambooError` 简化为 `Category + Message + StatusCode` 三字段（移除 `Type`/`Code`/`ProviderType`）；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError` 直接透传，避免重复包装；非 BambooError 降级为 `NewBambooError("SDK", err.Error(), 0)`
-44. **RelayStream 流式帧 debug 已移除** — `RelayStream` 不再通过 `debugRelayResponseFrame` 输出逐帧 debug 日志；上层业务可通过自身中间层从输出 channel 捕获完整流内容
+26. **流式纯透传** — relay 层 `RelayStream` 直接将上游 provider 产生的 SSE 帧经 codec 序列化后写入输出 channel，无中间缓冲、无调速、无 token 切分
+27. **请求拦截器链** — `RequestInterceptor` 在 HTTP Transport 层对已序列化的请求 body 进行任意修改；nil 拦截器防御性跳过；空切片零开销原样返回
+28. **拦截器 Transport 零包装** — `NewInterceptorHTTPClient` 无拦截器时返回 nil，Provider 保留标准库默认 client
+29. **公共 Options 嵌入模式** — `provider.Options` 通过匿名嵌入为各 Provider 提供统一的拦截器注册能力
+30. **TimingCollector 零侵入** — 用户代码主动创建并调用 `Observe(event)`；非并发安全，单 goroutine 使用
+31. **Token 估算规则标准化** — TimingCollector: CJK 1:1, Latin 4:1, Other 2:1
+32. **优先级 FinishReason** — `recordFinishReason` 优先级策略：tool_use(2) > max_tokens(1) > end_turn(0)
+33. **Error 自动 flush** — `handleError` 在流式错误时自动补发 stop 事件（Vercel AI SDK flush 模式）
+34. **跨类型 Block 自动切换** — `stopForNewBlock` 在 text→thinking / thinking→text 过渡时自动关闭前一个 block
+35. **Block 类型注册表** — `RegisterBlockType` + `ContentBlocks.UnmarshalJSON` 实现 JSON 多态反序列化
+36. **Chat 首事件 peek 模式** — `Chat` 同步 peek 首个 provider 事件，若为 Error 立即返回 `(nil, error)`
+37. **Relay 失败返回协议格式错误** — `Relay` 在 provider 失败时调用 `outCodec.SerializeError(err)` 返回协议格式化错误
+38. **Adapter 本地 DTO 不暴露外部类型** — 适配器内部使用本地 `types.go` 定义的请求/响应结构，禁止在公共 API 或返回类型中暴露任何外部 SDK 类型
+39. **错误透传简化** — `BambooError` 简化为 `Category + Message + StatusCode` 三字段（移除 `Type`/`Code`/`ProviderType`）；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError` 直接透传，避免重复包装；非 BambooError 降级为 `NewBambooError("SDK", err.Error(), 0)`
+40. **RelayStream 流式帧 debug 已移除** — `RelayStream` 不再通过 `debugRelayResponseFrame` 输出逐帧 debug 日志；上层业务可通过自身中间层从输出 channel 捕获完整流内容
 
 ## 反模式
 
@@ -405,10 +390,7 @@ bamboo-messages/
 - Usage 缓存字段全链路透传 — `UsageData.CacheCreationInputTokens` / `CacheReadInputTokens` 从 Provider 适配器 → `convert.go` → `codec` 序列化，完整传递到上层
 - Thinking 内容全链路保留 — `BambooMessage.ThinkingBlock` ↔ `provider.Message.ThinkingContent/ThinkingSignature/ReasoningID` ↔ `provider.CompletionResult.Thinking/ThinkingSignature/ResponseID` ↔ `bamboo.Response.ThinkingBlock` 双向透传
 - FinishReason 流式透传 — 适配器在 `StreamTypeStop` 事件中填充 `FinishReason`，`StreamConverter` 使用实际停止原因而非硬编码；`recordFinishReason` 使用优先级策略防止覆盖
-- 流式平滑缓冲可选 — relay 层通过 `WithSmoothBuffer(level)` 或 `WithSmoothBufferCustom(params)` 启用；不设置时 `Config.Smooth` 为 nil，走原始流式路径
-- SmoothPacer 三阶段模式 — NORMAL（EMA 自适应间隔）→ DRAIN（尾部加速阶梯递减）→ FLUSH（错误冲刷立即排空）
-- CJK 文本切分 — `TokenSplitter` 按 rune 切分：CJK 独立 token、Latin 连续合并、标点附着前 token、空格前缀附着后 token；跨帧残余保留在 `pendingTail`
-- 积压感知缩减 — NORMAL 模式下队列积压增长时，有效间隔从 `baseInterval` 线性缩减到 `minIntervalFloor`（2ms）
+- 流式纯透传 — relay 层 `RelayStream` 直接将上游 provider 产生的 SSE 帧经 codec 序列化后写入输出 channel，无中间缓冲、无调速、无 token 切分
 - 请求拦截器链 — `RequestInterceptor` + `ApplyInterceptors` + `interceptorTransport` 构成完整的 HTTP 层请求改写机制，正交扩展点
 - TimingCollector 零侵入可观测性 — pull 模式（非 push），用户代码主动创建并在事件循环中调用 `Observe`；4 阶段状态机驱动耗时计算；耗时低于 1ms 的阶段速率用负值标记不可靠
 - Block 类型注册表 — `RegisterBlockType` + `ContentBlocks.UnmarshalJSON` 实现 JSON 多态反序列化，6 种标准类型 `init()` 自动注册
@@ -453,12 +435,12 @@ BAMBOO_DEBUG=true go test ./provider/anthropic/...
 - Debug 日志的长文本截断字段：`content` / `text` / `system` / `thinking` / `reasoning_content` / `arguments`，截断阈值 `MaxDebugBodyLen` = 500 字符
 - Gemini 适配器使用独立的 `params.go` 文件（`buildContentConfig`），与其他适配器的 `buildParams` 命名不同但职责一致
 - `CacheCreationInputTokens` 在跨协议到 OpenAI/Responses/Gemini 时无原生字段，当前按目标协议最佳实践透传或记录限制
-- relay 层新增流式平滑缓冲支持：`SmoothPacer` 实现 EMA 自适应间隔 + 三阶段模式（NORMAL/DRAIN/FLUSH）；`TokenSplitter` 支持 CJK/Latin 混合文本切分；预设档位 gentle/smooth/typewriter 可选
+- relay 层流式路径为纯透传：`RelayStream` 直接将上游 provider 产生的 SSE 帧经 codec 序列化后写入输出 channel，无中间缓冲、无调速、无 token 切分
 - `pkg/` 包提供通用组件工具：`option/` 包含通用 Functional Options 模式，`helpers/` 包含指针辅助函数和 ProviderExtra 安全取值，`errors/` 包含通用错误类型
 - 新增适配器时，建议优先使用 `pkg/option` 包的通用配置模式，减少重复代码
 - `pkg/helpers` 包的 GetExtra* 函数与 `provider.GetExtra*` 功能相同，但 `pkg/helpers` 包不依赖 `provider` 包，可独立使用
 - 请求拦截器（`RequestInterceptor`）为 SDK 用户提供正交的 HTTP 层请求改写能力，无需 fork Provider 实现
-- `TimingCollector` 是 pull 模式的可观测性工具，不是 push 模式的配置；与 `SmoothPacer` 通过 `WithRateSampleCallback` 联动
+- `TimingCollector` 是 pull 模式的可观测性工具，不是 push 模式的配置；用户代码主动创建并在事件循环中调用 `Observe`
 - Responses codec 的流式序列化器完全重写为 `responsesStreamSerializer` 状态机，支持 `sequence_number` 自动递增、`response_id` 注入、双轨 reasoning（raw + summary）、`encrypted_content` 透传
 - 错误透传简化：`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError` 直接透传，避免重复包装；非 BambooError 降级为 `NewBambooError("SDK", err.Error(), 0)`；`BambooError` 字段为 `Category` + `Message` + `StatusCode`
 

@@ -231,7 +231,7 @@ func TestTimingCollector_RatesWithNoThinking(t *testing.T) {
 func TestTimingCollector_RateSeries(t *testing.T) {
 	tc := NewTimingCollector()
 
-	// 模拟 SmoothPacer 回调
+	// 模拟速率采样回调
 	tc.RecordRateSample(1.0, 15.50, RateSampleKindThinking)
 	tc.RecordRateSample(2.0, 22.30, RateSampleKindThinking)
 	tc.RecordRateSample(3.0, 18.00, RateSampleKindOutput)

@@ -156,10 +156,10 @@ provider/
 | `TimingCollector` | 结构体 | timing.go | 流式请求耗时收集器（零侵入 Observe 模式） |
 | `NewTimingCollector` | 函数 | timing.go | 创建耗时收集器实例 |
 | `(*TimingCollector).Observe` | 方法 | timing.go | 观察一个 StreamEvent，更新内部计时状态（驱动 4 阶段状态机） |
-| `(*TimingCollector).RecordRateSample` | 方法 | timing.go | 记录速率采样点（由 SmoothPacer 回调触发） |
+| `(*TimingCollector).RecordRateSample` | 方法 | timing.go | 记录速率采样点（由上层业务回调触发） |
 | `(*TimingCollector).Stats` | 方法 | timing.go | 返回 TimingStats（取消场景使用 lastEventTime 回退） |
 | `(*TimingCollector).Rates` | 方法 | timing.go | 返回 TokenRates（CJK 1 tok/char, Latin 4 chars/tok, Other 2 chars/tok） |
-| `(*TimingCollector).RateSeries` | 方法 | timing.go | 返回速率采样序列副本（仅 SmoothBuffer 启用时非 nil） |
+| `(*TimingCollector).RateSeries` | 方法 | timing.go | 返回速率采样序列副本（由上层业务通过 RecordRateSample 填充） |
 | `(*TimingCollector).Usage` | 方法 | timing.go | 返回最后收到的 UsageDelta 数据 |
 
 ### Debug 与版本
@@ -201,7 +201,7 @@ provider/
 - **统一 SSE 解析** — 所有适配器流式响应使用 `provider.SSEScanner` 解析，内置 json.Valid 校验与 GLM 截断容错
 - **TimingCollector 零侵入** — 用户代码主动创建 `TimingCollector` 并在事件循环中调用 `Observe(event)`，不修改 StreamEvent 结构；非并发安全（单 goroutine 使用）
 - **TimingCollector 阶段状态机** — 内部 `collectorPhase` (init → thinking → content → tool) 驱动耗时计算，tool 阶段从首个 tool BlockStart/ToolCall 到 Stop
-- **Token 估算规则标准化** — CJK 1:1, Latin 4:1, Other 2:1（与 `SmoothPacer.TokenSplitter` 的 CJK 切分规则互补）
+- **Token 估算规则标准化** — CJK 1:1, Latin 4:1, Other 2:1
 - **不可靠速率标记** — 阶段耗时低于 `minReliableDuration` (1ms) 时，`Rates()` 返回负值标记不可靠；绝对值为基于阈值估算的参考值（如 -6000 表示不可靠的 6000 tok/s）；零值表示阶段未发生
 - **带索引工具调用** — `IndexedToolCallDeltaData` + `ToolCallData.HasIndex/Index` 支持 OpenAI 并行工具调用的原生索引
 - **HTTPClient.Do 统一入口** — 所有适配器通过 `httpClient.Do(ctx, method, path, body)` 发起请求，path 为相对路径（如 `/v1/messages`），由 `buildURL` 拼接 BaseURL；debug 模式下改用 `DoWithDebug`，两者共享 URL 拼接和 header 注入逻辑
