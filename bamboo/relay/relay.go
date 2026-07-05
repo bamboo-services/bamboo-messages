@@ -189,32 +189,13 @@ func RelayStream(
 		usageTriggered := false
 		var accumulatedOutput strings.Builder
 
-		// ── 平滑缓冲器（可选）──
-		var pacer *SmoothPacer
-		if cfg.Smooth != nil && cfg.Smooth.Level != SmoothLevelOff {
-			pacer = NewSmoothPacer(outFormat, cfg.Smooth.Params, out, ctx)
-			if cfg.OnRateSample != nil {
-				pacer.SetRateSampleCallback(cfg.OnRateSample)
-			}
-		}
-
-		// defer LIFO 顺序: panicRecovery → close(out) → pacerCleanup → usageFallback
-		// pacerCleanup 必须在 close(out) 之前执行（LIFO 中后注册先执行）
+		// defer LIFO 顺序: panicRecovery → close(out) → usageFallback
 		defer func() {
 			if r := recover(); r != nil {
 				cfg.triggerError(pkgErrors.NewBambooError("下游", fmt.Sprintf("goroutine panic: %v", r), 0))
-				if pacer != nil {
-					pacer.SignalEnd()
-				}
 			}
 		}()
 		defer close(out)
-		defer func() {
-			if pacer != nil {
-				pacer.SignalEnd()
-				pacer.Wait()
-			}
-		}()
 		defer func() {
 			if !usageTriggered {
 				if lastUsage != nil {
@@ -267,20 +248,10 @@ func RelayStream(
 				// 拆分后逐帧发送，确保上游调用方每个 []byte 收到的是单个 SSE 事件。
 				frames := SplitSSEFrames(data)
 				for _, frame := range frames {
-					if event.Type == bamboo.EventPing {
-						select {
-						case out <- frame:
-						case <-ctx.Done():
-							return
-						}
-					} else if pacer != nil {
-						pacer.Push(frame)
-					} else {
-						select {
-						case out <- frame:
-						case <-ctx.Done():
-							return
-						}
+					select {
+					case out <- frame:
+					case <-ctx.Done():
+						return
 					}
 				}
 			}
@@ -301,17 +272,13 @@ func RelayStream(
 		if flushData != nil {
 			frames := SplitSSEFrames(flushData)
 			for _, frame := range frames {
-				if pacer != nil {
-					pacer.Push(frame)
-				} else {
-					select {
-					case out <- frame:
-					case <-ctx.Done():
-					}
+				select {
+				case out <- frame:
+				case <-ctx.Done():
+					return
 				}
 			}
 		}
-		// pacer.SignalEnd + pacer.Wait 由 defer 统一处理
 	}()
 
 	return out, nil
