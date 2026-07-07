@@ -85,7 +85,7 @@ func (p *Provider) appendMessage(result []map[string]any, msg provider.Message) 
 					}
 				}
 			}
-			applyMsgCacheControl(blocks, msg.CacheControl)
+			applyMsgCacheControl(blocks, msg.CacheControl, msg.CacheControlBlockType)
 			result = append(result, map[string]any{
 				"role":    "user",
 				"content": blocks,
@@ -147,7 +147,7 @@ func (p *Provider) appendMessage(result []map[string]any, msg provider.Message) 
 			blocks = append(blocks, map[string]any{"type": "text", "text": ""})
 		}
 
-		applyMsgCacheControl(blocks, msg.CacheControl)
+		applyMsgCacheControl(blocks, msg.CacheControl, msg.CacheControlBlockType)
 		result = append(result, map[string]any{
 			"role":    "assistant",
 			"content": blocks,
@@ -156,14 +156,28 @@ func (p *Provider) appendMessage(result []map[string]any, msg provider.Message) 
 	return result
 }
 
-// applyMsgCacheControl 将消息级别的 CacheControl 标记应用到最后一个 content block。
+// applyMsgCacheControl 将消息级别的 CacheControl 标记应用到 content block 上。
 //
-// Anthropic 的 cache_control 是块级断点，provider.Message.CacheControl 表示
-// "这条消息的最后一个块需要缓存"，因此将标记设置到最后一个 block 上。
-func applyMsgCacheControl(blocks []map[string]any, cc *provider.CacheControl) {
+// Anthropic 的 cache_control 是块级断点。provider.Message.CacheControl 表示
+// "这条消息的某个块需要缓存"。
+//
+// blockType 参数指定 cache_control 原始所在 block 的类型（如 "thinking"/"text"/"tool_use"）。
+// 优先将 cache_control 设置到该类型的最后一个 block 上，确保缓存断点位置正确。
+// 如果未找到对应类型的 block 或 blockType 为空，回退到最后一个 block（向后兼容）。
+func applyMsgCacheControl(blocks []map[string]any, cc *provider.CacheControl, blockType string) {
 	if cc == nil || len(blocks) == 0 {
 		return
 	}
+	// 优先：根据 blockType 找到对应类型的最后一个 block
+	if blockType != "" {
+		for i := len(blocks) - 1; i >= 0; i-- {
+			if t, ok := blocks[i]["type"].(string); ok && t == blockType {
+				blocks[i]["cache_control"] = buildCacheControl(cc)
+				return
+			}
+		}
+	}
+	// 回退：应用到最后一个 block
 	blocks[len(blocks)-1]["cache_control"] = buildCacheControl(cc)
 }
 

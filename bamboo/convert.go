@@ -34,6 +34,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		var toolResults []provider.Message
 		var contentBlocks []provider.ContentBlock
 		var msgCacheControl *provider.CacheControl
+		var cacheControlBlockType string
 		var ccCount int
 		var thinkingContent string
 		var thinkingSignature string
@@ -48,6 +49,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 				if b.CacheControl != nil {
 					ccCount++
 					msgCacheControl = b.CacheControl
+					cacheControlBlockType = "text"
 				}
 			case *ThinkingBlock:
 				// 保留思考过程到 provider.Message 的 ThinkingContent/ThinkingSignature 字段，
@@ -60,6 +62,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 				if b.CacheControl != nil {
 					ccCount++
 					msgCacheControl = b.CacheControl
+					cacheControlBlockType = "thinking"
 				}
 			case *RedactedThinkingBlock:
 				redactedThinkingData = b.Data
@@ -75,14 +78,16 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 				if b.CacheControl != nil {
 					ccCount++
 					msgCacheControl = b.CacheControl
+					cacheControlBlockType = "tool_use"
 				}
 			case *ToolResultBlock:
 				toolResults = append(toolResults, provider.Message{
-					Role:         provider.RoleTool,
-					Content:      b.Content,
-					ToolCallID:   b.ToolUseID,
-					ToolName:     b.ToolName,
-					CacheControl: b.CacheControl,
+					Role:                  provider.RoleTool,
+					Content:               b.Content,
+					ToolCallID:            b.ToolUseID,
+					ToolName:              b.ToolName,
+					CacheControl:          b.CacheControl,
+					CacheControlBlockType: "tool_result",
 				})
 			case *ImageBlock:
 				// 仅用户消息支持图片内容块
@@ -95,10 +100,11 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 							URL:       b.Source.URL,
 						},
 					})
-				}
-				if b.CacheControl != nil {
-					ccCount++
-					msgCacheControl = b.CacheControl
+					if b.CacheControl != nil {
+						ccCount++
+						msgCacheControl = b.CacheControl
+						cacheControlBlockType = "image"
+					}
 				}
 			case *DocumentBlock:
 				// 仅用户消息支持文档内容块
@@ -111,10 +117,11 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 							URL:       b.Source.URL,
 						},
 					})
-				}
-				if b.CacheControl != nil {
-					ccCount++
-					msgCacheControl = b.CacheControl
+					if b.CacheControl != nil {
+						ccCount++
+						msgCacheControl = b.CacheControl
+						cacheControlBlockType = "document"
+					}
 				}
 			default:
 				// 未知的 ContentBlock 类型，记录详细信息以便排查
@@ -134,16 +141,21 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 			if msg.Role == RoleAssistant && content == "" && len(toolCalls) == 0 && len(contentBlocks) == 0 && thinkingContent == "" && redactedThinkingData == "" {
 				content = "-"
 			}
+			if msgCacheControl != nil && !hasContent && len(msg.Content) > 0 {
+				xLog.WithName("bamboo").SugarWarn(context.Background(),
+					"warning: message has CacheControl but no content blocks were produced, cache_control will be lost")
+			}
 			result = append(result, provider.Message{
-				Role:                 providerRole(msg.Role),
-				Content:              content,
-				ContentBlocks:        contentBlocks,
-				ThinkingContent:      thinkingContent,
-				ThinkingSignature:    thinkingSignature,
-				RedactedThinkingData: redactedThinkingData,
-				ReasoningID:          msg.ReasoningID,
-				ToolCalls:            toolCalls,
-				CacheControl:         msgCacheControl,
+				Role:                  providerRole(msg.Role),
+				Content:               content,
+				ContentBlocks:         contentBlocks,
+				ThinkingContent:       thinkingContent,
+				ThinkingSignature:     thinkingSignature,
+				RedactedThinkingData:  redactedThinkingData,
+				ReasoningID:           msg.ReasoningID,
+				ToolCalls:             toolCalls,
+				CacheControl:          msgCacheControl,
+				CacheControlBlockType: cacheControlBlockType,
 			})
 		}
 		result = append(result, toolResults...)

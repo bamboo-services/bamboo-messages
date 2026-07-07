@@ -378,3 +378,129 @@ func TestBuildMessages_AssistantWithThinkingAndRedactedThinking(t *testing.T) {
 		t.Errorf("block[2] type = %v, want 'text'", content[2]["type"])
 	}
 }
+
+// ---- applyMsgCacheControl blockType 定位测试 ----
+
+func TestApplyMsgCacheControl_ThinkingBlockType(t *testing.T) {
+	blocks := []map[string]any{
+		{"type": "thinking", "thinking": "...", "signature": "sig"},
+		{"type": "text", "text": "response"},
+	}
+	cc := provider.NewEphemeralCacheControl()
+	applyMsgCacheControl(blocks, cc, "thinking")
+
+	if _, ok := blocks[0]["cache_control"]; !ok {
+		t.Error("expected cache_control on thinking block (index 0)")
+	}
+	if _, ok := blocks[1]["cache_control"]; ok {
+		t.Error("expected NO cache_control on text block (index 1)")
+	}
+}
+
+func TestApplyMsgCacheControl_TextBlockType(t *testing.T) {
+	blocks := []map[string]any{
+		{"type": "text", "text": "hello"},
+		{"type": "image", "source": map[string]any{"type": "url"}},
+	}
+	cc := provider.NewEphemeralCacheControl()
+	applyMsgCacheControl(blocks, cc, "text")
+
+	if _, ok := blocks[0]["cache_control"]; !ok {
+		t.Error("expected cache_control on text block (index 0)")
+	}
+	if _, ok := blocks[1]["cache_control"]; ok {
+		t.Error("expected NO cache_control on image block (index 1)")
+	}
+}
+
+func TestApplyMsgCacheControl_ToolUseBlockType(t *testing.T) {
+	blocks := []map[string]any{
+		{"type": "thinking", "thinking": "...", "signature": "sig"},
+		{"type": "text", "text": "response"},
+		{"type": "tool_use", "id": "call_1", "name": "get_weather"},
+		{"type": "tool_use", "id": "call_2", "name": "get_time"},
+	}
+	cc := provider.NewEphemeralCacheControl()
+	applyMsgCacheControl(blocks, cc, "tool_use")
+
+	if _, ok := blocks[0]["cache_control"]; ok {
+		t.Error("expected NO cache_control on thinking block")
+	}
+	if _, ok := blocks[1]["cache_control"]; ok {
+		t.Error("expected NO cache_control on text block")
+	}
+	if _, ok := blocks[2]["cache_control"]; ok {
+		t.Error("expected NO cache_control on first tool_use block")
+	}
+	if _, ok := blocks[3]["cache_control"]; !ok {
+		t.Error("expected cache_control on last tool_use block (index 3)")
+	}
+}
+
+func TestApplyMsgCacheControl_FallbackToLastBlock(t *testing.T) {
+	blocks := []map[string]any{
+		{"type": "text", "text": "hello"},
+		{"type": "image", "source": map[string]any{"type": "url"}},
+	}
+	cc := provider.NewEphemeralCacheControl()
+
+	// blockType 为空 → 回退到最后一个 block
+	applyMsgCacheControl(blocks, cc, "")
+
+	if _, ok := blocks[1]["cache_control"]; !ok {
+		t.Error("expected cache_control on last block (fallback)")
+	}
+}
+
+func TestApplyMsgCacheControl_BlockTypeNotFound_Fallback(t *testing.T) {
+	blocks := []map[string]any{
+		{"type": "text", "text": "hello"},
+		{"type": "text", "text": "world"},
+	}
+	cc := provider.NewEphemeralCacheControl()
+
+	// blockType="thinking" 但没有 thinking block → 回退到最后一个
+	applyMsgCacheControl(blocks, cc, "thinking")
+
+	if _, ok := blocks[1]["cache_control"]; !ok {
+		t.Error("expected cache_control on last block (fallback when blockType not found)")
+	}
+}
+
+func TestBuildMessages_AssistantCacheControlOnThinking(t *testing.T) {
+	p := &Provider{}
+	msgs := []provider.Message{
+		{
+			Role:                 provider.RoleAssistant,
+			Content:              "response",
+			ThinkingContent:      "long thinking",
+			ThinkingSignature:    "sig123",
+			CacheControl:         provider.NewEphemeralCacheControl(),
+			CacheControlBlockType: "thinking",
+		},
+	}
+
+	result := p.buildMessages(msgs)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	content, ok := result[0]["content"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected content to be []map[string]any")
+	}
+	if len(content) != 2 {
+		t.Fatalf("expected 2 blocks, got %d", len(content))
+	}
+	if content[0]["type"] != "thinking" {
+		t.Errorf("block[0] type = %v, want 'thinking'", content[0]["type"])
+	}
+	if _, ok := content[0]["cache_control"]; !ok {
+		t.Error("expected cache_control on thinking block")
+	}
+	if content[1]["type"] != "text" {
+		t.Errorf("block[1] type = %v, want 'text'", content[1]["type"])
+	}
+	if _, ok := content[1]["cache_control"]; ok {
+		t.Error("expected NO cache_control on text block")
+	}
+}

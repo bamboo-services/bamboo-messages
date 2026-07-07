@@ -114,6 +114,7 @@ type Message struct {
 	ToolName             string         `json:"tool_name,omitempty"`              // 工具响应的函数名（Gemini FunctionResponse 需要）
 	IsError              bool           `json:"is_error,omitempty"`               // 工具响应是否为错误
 	CacheControl         *CacheControl  `json:"cache_control,omitempty"`          // 缓存控制标记（Anthropic prompt caching）
+	CacheControlBlockType string        `json:"cache_control_block_type,omitempty"` // cache_control 原始所在 block 类型（如 "text"/"thinking"/"tool_use"/"image"/"document"），用于 Anthropic 块级断点定位
 }
 
 // ToolCall 工具调用。

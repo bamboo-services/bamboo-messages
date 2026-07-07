@@ -2223,3 +2223,221 @@ func TestStreamConverter_ThinkingBlock_FullLifecycle(t *testing.T) {
 		t.Errorf("events[0].Index = %d, want %d", events[0].Index, idx)
 	}
 }
+
+// ---- CacheControlBlockType 测试 ----
+
+func TestConvertCacheControlBlockType_ThinkingBlock(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewThinkingBlock("long thinking", "sig"),
+			NewTextBlock("response"),
+		),
+	}
+	msgs[0].Content[0] = NewThinkingBlockWithCache("long thinking", "sig", provider.NewEphemeralCacheControl())
+
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].CacheControl == nil {
+		t.Fatal("expected CacheControl to be set")
+	}
+	if result[0].CacheControlBlockType != "thinking" {
+		t.Errorf("CacheControlBlockType = %q, want %q", result[0].CacheControlBlockType, "thinking")
+	}
+}
+
+func TestConvertCacheControlBlockType_TextBlock(t *testing.T) {
+	msgs := []BambooMessage{
+		NewUserMessageBlocks(
+			NewTextBlockWithCache("hello", provider.NewEphemeralCacheControl()),
+			NewImageBlock(ContentSource{Type: "url", URL: "https://example.com/img.png"}),
+		),
+	}
+
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].CacheControl == nil {
+		t.Fatal("expected CacheControl to be set")
+	}
+	if result[0].CacheControlBlockType != "text" {
+		t.Errorf("CacheControlBlockType = %q, want %q", result[0].CacheControlBlockType, "text")
+	}
+}
+
+func TestConvertCacheControlBlockType_ToolUseBlock(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewTextBlock("response"),
+			NewToolUseBlockWithCache("call_1", "get_weather", map[string]any{"city": "Tokyo"}, provider.NewEphemeralCacheControl()),
+		),
+	}
+
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].CacheControl == nil {
+		t.Fatal("expected CacheControl to be set")
+	}
+	if result[0].CacheControlBlockType != "tool_use" {
+		t.Errorf("CacheControlBlockType = %q, want %q", result[0].CacheControlBlockType, "tool_use")
+	}
+}
+
+func TestConvertCacheControlBlockType_NoCacheControl(t *testing.T) {
+	msgs := []BambooMessage{
+		NewUserMessage("hello"),
+	}
+
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].CacheControl != nil {
+		t.Error("expected CacheControl to be nil")
+	}
+	if result[0].CacheControlBlockType != "" {
+		t.Errorf("CacheControlBlockType = %q, want empty", result[0].CacheControlBlockType)
+	}
+}
+
+func TestConvertCacheControlBlockType_ImageBlock(t *testing.T) {
+	msgs := []BambooMessage{
+		NewUserMessageBlocks(
+			NewTextBlock("describe this"),
+			NewImageBlockWithCache(
+				ContentSource{Type: "url", URL: "https://example.com/img.png"},
+				provider.NewEphemeralCacheControl(),
+			),
+		),
+	}
+
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].CacheControl == nil {
+		t.Fatal("expected CacheControl to be set")
+	}
+	if result[0].CacheControlBlockType != "image" {
+		t.Errorf("CacheControlBlockType = %q, want %q", result[0].CacheControlBlockType, "image")
+	}
+}
+
+func TestConvertCacheControlBlockType_DocumentBlock(t *testing.T) {
+	msgs := []BambooMessage{
+		NewUserMessageBlocks(
+			NewDocumentBlockWithCache(
+				ContentSource{Type: "url", URL: "https://example.com/doc.pdf"},
+				provider.NewEphemeralCacheControl(),
+			),
+		),
+	}
+
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].CacheControl == nil {
+		t.Fatal("expected CacheControl to be set")
+	}
+	if result[0].CacheControlBlockType != "document" {
+		t.Errorf("CacheControlBlockType = %q, want %q", result[0].CacheControlBlockType, "document")
+	}
+}
+
+func TestConvertCacheControlBlockType_ImageBlockDroppedForAssistant(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewTextBlock("response"),
+			NewImageBlockWithCache(
+				ContentSource{Type: "url", URL: "https://example.com/img.png"},
+				provider.NewEphemeralCacheControl(),
+			),
+		),
+	}
+
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].CacheControl != nil {
+		t.Error("expected CacheControl to be nil — image block dropped for assistant role should not record cache")
+	}
+	if result[0].CacheControlBlockType != "" {
+		t.Errorf("CacheControlBlockType = %q, want empty (image dropped)", result[0].CacheControlBlockType)
+	}
+}
+
+func TestConvertCacheControlBlockType_ImageBlockNilSource(t *testing.T) {
+	msgs := []BambooMessage{
+		NewUserMessageBlocks(
+			NewTextBlock("hello"),
+			&ImageBlock{
+				Type:         ContentBlockImage,
+				Source:       nil,
+				CacheControl: provider.NewEphemeralCacheControl(),
+			},
+		),
+	}
+
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].CacheControl != nil {
+		t.Error("expected CacheControl to be nil — image with nil source dropped, cache should not be recorded")
+	}
+}
+
+func TestConvertCacheControlBlockType_ToolResultBlock(t *testing.T) {
+	msgs := []BambooMessage{
+		NewUserMessageBlocks(
+			NewToolResultBlockWithCache("call_1", "result content", false, provider.NewEphemeralCacheControl()),
+		),
+	}
+
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(result))
+	}
+	if result[0].Role != provider.RoleTool {
+		t.Errorf("Role = %q, want %q", result[0].Role, provider.RoleTool)
+	}
+	if result[0].CacheControl == nil {
+		t.Fatal("expected CacheControl to be set")
+	}
+	if result[0].CacheControlBlockType != "tool_result" {
+		t.Errorf("CacheControlBlockType = %q, want %q", result[0].CacheControlBlockType, "tool_result")
+	}
+}
