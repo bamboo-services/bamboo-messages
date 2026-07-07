@@ -131,3 +131,69 @@ func TestAudit_ResponseFormat_Mapping(t *testing.T) {
 		})
 	}
 }
+
+func TestAudit_PromptCacheKey_NonLegacy(t *testing.T) {
+	p := NewCompletionsProvider("test-key")
+	config := &provider.ChatConfig{
+		Model:           "gpt-4o",
+		MaxTokens:       1024,
+		PromptCacheKey:  "session-abc",
+	}
+	params := p.buildParams("", nil, config)
+	if v, ok := params["prompt_cache_key"].(string); !ok || v != "session-abc" {
+		t.Errorf("prompt_cache_key = %v, want %q", params["prompt_cache_key"], "session-abc")
+	}
+}
+
+func TestAudit_PromptCacheKey_LegacyDefault_Skipped(t *testing.T) {
+	p := NewCompletionsProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat())
+	config := &provider.ChatConfig{
+		Model:          "gpt-4o",
+		MaxTokens:      1024,
+		PromptCacheKey: "session-abc",
+	}
+	params := p.buildParams("", nil, config)
+	if _, ok := params["prompt_cache_key"]; ok {
+		t.Error("prompt_cache_key should NOT be sent in Legacy mode without WithLegacyCacheKey")
+	}
+}
+
+func TestAudit_PromptCacheKey_LegacyWithCacheKey_Enabled(t *testing.T) {
+	p := NewCompletionsProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat(), WithLegacyCacheKey(true))
+	config := &provider.ChatConfig{
+		Model:          "gpt-4o",
+		MaxTokens:      1024,
+		PromptCacheKey: "session-abc",
+	}
+	params := p.buildParams("", nil, config)
+	if v, ok := params["prompt_cache_key"].(string); !ok || v != "session-abc" {
+		t.Errorf("prompt_cache_key = %v, want %q", params["prompt_cache_key"], "session-abc")
+	}
+}
+
+func TestAudit_PromptCacheKey_LegacyProviderExtra(t *testing.T) {
+	p := NewCompletionsProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat(), WithLegacyCacheKey(true))
+	config := &provider.ChatConfig{
+		Model:         "gpt-4o",
+		MaxTokens:     1024,
+		ProviderExtra: map[string]any{"prompt_cache_key": "extra-key"},
+	}
+	params := p.buildParams("", nil, config)
+	if v, ok := params["prompt_cache_key"].(string); !ok || v != "extra-key" {
+		t.Errorf("prompt_cache_key = %v, want %q", params["prompt_cache_key"], "extra-key")
+	}
+}
+
+func TestAudit_PromptCacheKey_LegacyExplicitOverridesProviderExtra(t *testing.T) {
+	p := NewCompletionsProviderWithOptions(WithAPIKey("test-key"), WithLegacyCompat(), WithLegacyCacheKey(true))
+	config := &provider.ChatConfig{
+		Model:          "gpt-4o",
+		MaxTokens:      1024,
+		PromptCacheKey: "explicit-key",
+		ProviderExtra:  map[string]any{"prompt_cache_key": "extra-key"},
+	}
+	params := p.buildParams("", nil, config)
+	if v, ok := params["prompt_cache_key"].(string); !ok || v != "explicit-key" {
+		t.Errorf("prompt_cache_key = %v, want %q (explicit should override extra)", params["prompt_cache_key"], "explicit-key")
+	}
+}

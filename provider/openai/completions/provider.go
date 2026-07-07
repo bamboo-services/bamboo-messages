@@ -10,10 +10,11 @@ import (
 // 而是统一持有 *provider.HTTPClient 进行 HTTP 通信。
 // legacyCompat 标志控制旧版端点兼容行为。
 type CompletionsProvider struct {
-	httpClient     *provider.HTTPClient
-	legacyCompat   bool
-	includeUsage   bool
-	degradedReason provider.DegradedReasonStrategy
+	httpClient      *provider.HTTPClient
+	legacyCompat    bool
+	includeUsage    bool
+	degradedReason  provider.DegradedReasonStrategy
+	legacyCacheKey  bool
 }
 
 // ============================================
@@ -36,6 +37,7 @@ type config struct {
 	includeUsage   bool
 	interceptors   []provider.RequestInterceptor
 	degradedReason provider.DegradedReasonStrategy
+	legacyCacheKey bool
 }
 
 // WithAPIKey 设置 API 密钥。
@@ -109,6 +111,16 @@ func WithDegradedReason(strategy provider.DegradedReasonStrategy) Option {
 	return func(c *config) { c.degradedReason = strategy }
 }
 
+// WithLegacyCacheKey 在 Legacy 模式下启用 prompt_cache_key 发送。
+//
+// 默认情况下 Legacy 模式跳过 prompt_cache_key（GLM 等端点不支持）。
+// 但 Kimi (Moonshot) 等端点官方支持 prompt_cache_key，开启此选项可提升缓存命中率。
+//
+// 仅在 legacyCompat=true 时生效；非 Legacy 模式始终发送 prompt_cache_key。
+func WithLegacyCacheKey(enabled bool) Option {
+	return func(c *config) { c.legacyCacheKey = enabled }
+}
+
 // ============================================
 // 构造函数
 // ============================================
@@ -148,6 +160,7 @@ func NewCompletionsProviderWithOptions(opts ...Option) *CompletionsProvider {
 		legacyCompat:   cfg.legacyCompat,
 		includeUsage:   cfg.includeUsage,
 		degradedReason: cfg.degradedReason,
+		legacyCacheKey: cfg.legacyCacheKey,
 	}
 }
 

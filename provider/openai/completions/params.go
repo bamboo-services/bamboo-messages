@@ -96,12 +96,14 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 		params["user"] = config.UserID
 	}
 
-	// PromptCacheKey — OpenAI prompt cache 路由粘性键。
-	// Legacy 模式跳过 prompt_cache_key（第三方端点可能不支持）。
-	// 非 Legacy 模式：显式 PromptCacheKey 优先；其次回退到 ProviderExtra；
+	// PromptCacheKey — OpenAI/Kimi prompt cache 路由粘性键。
+	// 非 Legacy 模式：始终发送（OpenAI 官方支持）。
+	// Legacy 模式：仅当 p.legacyCacheKey=true 时发送（Kimi 支持，GLM 不支持）。
+	// 显式 PromptCacheKey 优先；其次回退到 ProviderExtra；
 	// SystemCacheControl（Anthropic 语义）在 OpenAI 中无原生对应字段，
-	// OpenAI 会自动处理 prompt 缓存，此处仅记录 debug 提示。
-	if !p.legacyCompat {
+	// 若未命中上述任何来源，且非 Legacy 或 legacyCacheKey 启用时，记录 debug 提示。
+	sendCacheKey := !p.legacyCompat || p.legacyCacheKey
+	if sendCacheKey {
 		if config.PromptCacheKey != "" {
 			params["prompt_cache_key"] = config.PromptCacheKey
 		} else if key, ok := provider.GetExtraString(config.ProviderExtra, "prompt_cache_key"); ok && key != "" {
