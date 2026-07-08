@@ -218,3 +218,34 @@ func TestAudit_Metadata_StoredInProviderExtra(t *testing.T) {
 
 	t.Logf("FIXED: metadata now correctly stored in config.Metadata for all-string values")
 }
+
+func TestAudit_Responses_PromptCacheKey(t *testing.T) {
+	body := `{
+		"model": "gpt-4o",
+		"input": "hello",
+		"prompt_cache_key": "session-abc"
+	}`
+
+	req, err := parseRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("parseRequest failed: %v", err)
+	}
+	if req.Config.PromptCacheKey != "session-abc" {
+		t.Errorf("PromptCacheKey = %q, want %q", req.Config.PromptCacheKey, "session-abc")
+	}
+}
+
+func TestAudit_Responses_PromptCacheKey_Empty(t *testing.T) {
+	body := `{
+		"model": "gpt-4o",
+		"input": "hello"
+	}`
+
+	req, err := parseRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("parseRequest failed: %v", err)
+	}
+	if req.Config.PromptCacheKey != "" {
+		t.Errorf("PromptCacheKey = %q, want empty", req.Config.PromptCacheKey)
+	}
+}

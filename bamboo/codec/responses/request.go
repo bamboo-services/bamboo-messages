@@ -33,6 +33,7 @@ type responsesRequest struct {
 	Store              *bool           `json:"store,omitempty"`
 	Truncation         string          `json:"truncation,omitempty"`
 	User               string          `json:"user,omitempty"`
+	PromptCacheKey     string          `json:"prompt_cache_key,omitempty"`
 	Metadata           json.RawMessage `json:"metadata,omitempty"`
 	Text               *textConfig     `json:"text,omitempty"`
 }
@@ -153,6 +154,10 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 
 	if req.User != "" {
 		config.UserID = req.User
+	}
+
+	if req.PromptCacheKey != "" {
+		config.PromptCacheKey = req.PromptCacheKey
 	}
 
 	// ProviderExtra：instructions / previous_response_id / store / truncation
