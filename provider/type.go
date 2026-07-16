@@ -14,6 +14,7 @@ const (
 	ProviderAnthropic         ProviderType = "anthropic"          // Anthropic Messages 协议
 	ProviderOpenAIResponses   ProviderType = "openai-responses"   // OpenAI Responses 协议
 	ProviderOpenAICompletions ProviderType = "openai-completions" // OpenAI Chat Completions 协议
+	ProviderBamboo            ProviderType = "bamboo"             // bamboo 原生协议
 )
 
 // MessageRole 消息角色。

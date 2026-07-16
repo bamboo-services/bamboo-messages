@@ -37,6 +37,16 @@ bamboo/codec/
     ├── request_test.go / response_test.go
     ├── request_audit_test.go  # N-to-N 转换安全性审计测试（含 thinkingConfig、model、IsStream 测试）
     └── safety_settings_audit_test.go  # safety_settings 类型转换审计测试
+└── bamboo/                 # bamboo 原生协议编解码（identity transform）
+    ├── codec.go            # 全局 Codec 实例 + init() 注册
+    ├── request.go          # ParseRequest: bamboo 信封 → RelayRequest
+    ├── response.go         # SerializeResponse: json.Marshal(*bamboo.Response)
+    ├── stream.go           # StreamSerializer: 直接 json.Marshal(StreamEvent) + Anthropic SSE 帧
+    ├── error.go            # SerializeError: 提取 *bamboo.BambooError 字段
+    ├── request_test.go     # 请求解析单元测试
+    ├── response_test.go    # 响应序列化单元测试
+    ├── stream_test.go      # 流式序列化单元测试
+    └── error_test.go       # 错误序列化单元测试
 ```
 
 ## 导航指南
@@ -52,6 +62,7 @@ bamboo/codec/
 | 修改 OpenAI 编解码 | `openai/` | 结构与 `anthropic/` 完全一致 |
 | 修改 Responses 编解码 | `responses/` | 结构与 `anthropic/` 完全一致 |
 | 修改 Gemini 编解码 | `gemini/` | 结构与 `anthropic/` 完全一致 |
+| 修改 bamboo 原生编解码 | `bamboo/` | identity transform：`request.go`（解析） / `response.go`（序列化） / `stream.go`（流式） / `error.go`（错误） |
 | 测试 OpenAI 流式序列化 | `openai/stream_test.go` | SSE 帧生成的单元测试 |
 | 查看安全性审计测试 | `*/request_audit_test.go` | N-to-N 转换安全性审计（P1/P2 级问题回归测试） |
 | 查看 Gemini safety_settings 审计 | `gemini/safety_settings_audit_test.go` | safety_settings 类型转换验证 |
@@ -63,6 +74,8 @@ bamboo/codec/
 - **RelayRequest 中间表示** — 所有外部协议的请求体先解析为 `RelayRequest`（包含 `Messages`/`System`/`Config`/`IsStream`），再由 relay 层交给 Provider 处理
 - **错误处理统一** — Codec 层不再单独定义 `CodecError` / `ErrorType`，统一使用 `pkg/errors.BambooError`；每个子包的 `SerializeError` 负责将错误映射为对应协议的错误响应格式
 - **子包结构一致** — 四个格式子包（anthropic / openai / responses / gemini）内部文件分工完全一致：`codec.go` + `request.go` + `response.go` + `stream.go` + `error.go`
+- **bamboo 原生 codec 是恒等变换** — `bamboo/codec/bamboo` 的 `ParseRequest` 直接 `json.Unmarshal` 原生 `BambooMessage` / `RequestConfig` 到 `RelayRequest`，`SerializeResponse` 直接 `json.Marshal(*bamboo.Response)`，`Serialize` 直接 `json.Marshal(StreamEvent)` 并封装为 Anthropic 风格 SSE 帧（`event: ...\ndata: ...\n\n`），不引入任何中间 DTO
+- **bamboo 子包必须 import 别名** — 由于包名 `bamboo` 与门面层 `bamboo` 包名冲突，子包中 `github.com/bamboo-services/bamboo-messages/bamboo` 使用别名 `bmbamboo`，`bamboo/codec` 使用别名 `bmcodec`
 - **cache_creation_input_tokens 已知限制** — OpenAI / Responses / Gemini 协议无原生 `cache_creation_input_tokens` 字段，仅映射 `CacheReadInputTokens`；`CacheCreationInputTokens` 在跨协议转换（Anthropic→其他）中会丢失，此为已知限制
 - **DeltaSignature 跨协议丢弃** — `signature_delta` 为 Anthropic Extended Thinking 特有的签名增量，OpenAI / Responses / Gemini 协议无对应字段，在流式序列化中静默丢弃（返回 nil）
 - **ToolResultBlock 不应出现在响应中** — 所有协议的 `serializeResponse` 对 assistant 响应中的 `ToolResultBlock` 记录警告并跳过；同理 `ImageBlock` / `DocumentBlock` 在不支持的协议响应中也记录警告并跳过
@@ -108,7 +121,10 @@ bamboo/codec/
 14. Responses 流式事件缺失 → 检查 `responsesStreamSerializer` 是否正确追踪 output_item 状态（added/done）；检查 `sequence_number` 是否自动递增
 15. Responses reasoning 双轨不完整 → 检查 raw `reasoning_text.*` 和 summary `reasoning_summary_text.*` 是否并行发射
 16. Responses encrypted_content 丢失 → 检查 `response.output_item.done` 事件是否携带 `encrypted_content` 字段
+17. bamboo 请求解析失败 → 检查 `bamboo/request.go` 的 `parseRequest` 是否正确解析 `{messages,system,config,stream}` 信封，确认 `config` 缺失时是否填充零值
+18. bamboo SSE 帧格式异常 → 检查 `bamboo/stream.go` 的输出是否为 `event: {type}\ndata: {json}\n\n`（无 `[DONE]` 标记）
+19. bamboo 错误响应格式不对 → 检查 `bamboo/error.go` 是否输出 `{"type":"error","error":{"category":"...","message":"...","status_code":...}}`
 
 ## 引用
 
-无子级 AGENTS.md
+- [bamboo 原生编解码](./bamboo/AGENTS.md) — bamboo 原生协议恒等变换编解码知识库

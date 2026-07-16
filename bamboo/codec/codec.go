@@ -17,6 +17,9 @@ const (
 
 	// FormatGemini Google Gemini 协议格式。
 	FormatGemini FormatType = "gemini"
+
+	// FormatBamboo bamboo 原生协议格式。
+	FormatBamboo FormatType = "bamboo"
 )
 
 // Codec 一种外部协议格式的完整编解码能力。

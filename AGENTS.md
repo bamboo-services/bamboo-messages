@@ -60,11 +60,24 @@ bamboo-messages/
 │   └── gemini/                    # Google Gemini 协议适配器
 │       ├── types.go               # Gemini 协议原生请求/响应 DTO（本地定义）
 │       ├── mock_test.go           # httptest mock server 测试辅助工具
-│       ├── audit_test.go          # 流事件审计测试
-│       ├── params_audit_test.go   # 参数映射审计测试
-│       └── stream_test.go         # 流式事件单元测试
-│
-├── bamboo/                        # 公共 SDK 层 — 面向上层业务的统一 API
+   │       ├── audit_test.go          # 流事件审计测试
+   │       ├── params_audit_test.go   # 参数映射审计测试
+   │       └── stream_test.go         # 流式事件单元测试
+   │   └── bamboo/                    # bamboo 原生协议适配器
+   │       ├── provider.go            # Provider 构造函数 + Options 模式
+   │       ├── complete.go            # 非流式对话
+   │       ├── chat.go                # 流式对话
+   │       ├── stream.go              # SSE 事件 → StreamEvent 转换
+   │       ├── message.go             # 消息格式转换
+   │       ├── params.go              # 共享参数构建
+   │       ├── models.go              # 模型列表
+   │       ├── types.go               # 本地 wire DTO
+   │       ├── provider_test.go       # 集成测试
+   │       ├── complete_test.go       # 非流式测试
+   │       ├── stream_test.go         # 流式测试
+   │       └── mock_test.go           # httptest 测试辅助
+   │
+   ├── bamboo/                        # 公共 SDK 层 — 面向上层业务的统一 API
 │   ├── bamboo.go                  # BambooClient 接口 + Chat/Complete 实现 + NewClientWithOptions
 │   ├── message.go                 # BambooMessage (含 ReasoningID) + ContentBlock 消息模型 + UnmarshalJSON
 │   ├── response.go                # Response (含 ResponseID) / Usage 非流式响应类型 + UnmarshalJSON
@@ -75,8 +88,15 @@ bamboo-messages/
 │   ├── convert.go                 # 类型转换 (provider ↔ bamboo) + StreamConverter (优先级 FinishReason + Error 自动 flush + 双键工具 Block)
 │   ├── content.go                 # ContentBlock 构造函数 + WithCache 变体 + RegisterBlockType + ContentBlocks 反序列化
 │   ├── errors.go                  # BambooError 类型别名（= pkgErrors.BambooError）+ NewBambooError 变量别名
-│   ├── codec/                     # N-to-N 协议编解码层（anthropic/openai/responses/gemini 格式）
-│   ├── relay/                     # 跨协议中继层 (Relay / RelayStream + 纯透传 + Debug)
+   │   ├── codec/                     # N-to-N 协议编解码层（anthropic/openai/responses/gemini/bamboo 格式）
+   │   │   └── bamboo/                # bamboo 原生协议编解码（identity transform）
+   │   │       ├── codec.go           # Codec 实例 + init() 注册到 registry.go
+   │   │       ├── request.go         # 解析 bamboo 原生请求信封
+   │   │       ├── response.go        # 序列化为 bamboo 原生响应 JSON
+   │   │       ├── stream.go          # 流式序列化器
+   │   │       ├── error.go           # 序列化 bamboo 原生错误响应
+   │   │       └── *_test.go          # 单元测试
+   │   ├── relay/                     # 跨协议中继层 (Relay / RelayStream + 纯透传 + Debug)
 │   └── *_test.go                  # 单元测试 + 集成测试
 │
 ├── pkg/                            # 通用组件工具包 — 可复用的工具函数和类型
@@ -130,6 +150,8 @@ bamboo-messages/
 | 使用通用 Options 模式 | `pkg/option/option.go` | WithAPIKey/WithBaseURL/WithHeader + ApplyOptions |
 | 使用通用工具函数 | `pkg/helpers/helpers.go` | PtrFloat64/PtrBool/PtrInt64/PtrString + GetExtra* 安全取值 |
 | 使用通用错误类型 | `pkg/errors/errors.go` | BambooError 统一错误类型 |
+| 理解 bamboo 原生协议编解码 | `bamboo/codec/bamboo/codec.go` | 恒等变换：直接使用 `bamboo.BambooMessage` / `RequestConfig` / `Response` |
+| 理解 bamboo 原生 Provider 适配器 | `provider/bamboo/provider.go` | 面向 bamboo 原生端点（`/v1/bamboo`）的 Provider 实现 |
 
 ## 代码地图
 
@@ -192,6 +214,26 @@ bamboo-messages/
 | OpenAI Completions | `provider/openai/completions` | `*provider.HTTPClient` (Authorization Bearer) | `CompletionsProvider` |
 | OpenAI Responses | `provider/openai/responses` | `*provider.HTTPClient` (Authorization Bearer) | `ResponsesProvider` |
 | Google Gemini | `provider/gemini` | `*provider.HTTPClient` (x-goog-api-key) | `Provider` |
+| bamboo 原生 | `provider/bamboo` | `*provider.HTTPClient` (Authorization Bearer) | `Provider` |
+
+### bamboo 原生适配器 (`provider/bamboo/`)
+
+| 符号 | 类型 | 文件 | 作用 |
+|------|------|------|------|
+| `Provider` | 结构体 | `provider.go` | 持有 `*provider.HTTPClient` 的 bamboo 原生协议适配器 |
+| `Option` | 函数类型 | `provider.go` | `func(*config)` — Provider 配置选项 |
+| `NewProvider` | 函数 | `provider.go` | 最简构造函数 |
+| `NewProviderWithOptions` | 函数 | `provider.go` | Options 构造函数（APIKey/BaseURL/Headers/Interceptor） |
+| `WithAPIKey` / `WithBaseURL` / `WithHeader` / `WithInterceptor` | 函数 | `provider.go` | 配置选项 |
+| `GetProviderType` | 方法 | `provider.go` | 返回 `provider.ProviderBamboo` |
+| `GetAvailableModels` | 方法 | `models.go` | 返回空列表（开放端点无固定模型白名单） |
+| `CompleteWithSystem` | 方法 | `complete.go` | 带系统提示的非流式对话 |
+| `ChatWithSystem` | 方法 | `chat.go` | 带系统提示的流式对话 |
+| `handleStreamEvent` | 方法 | `stream.go` | SSE 事件分发（message_start/delta/stop/ping/error） |
+| `mapBambooFinishReason` | 函数 | `stream.go` | 7 值停止原因映射（end_turn/max_tokens/tool_use/stop_sequence/pause_turn/refusal/server_tool_use） |
+| `buildMessages` | 函数 | `message.go` | `provider.Message` → `wireMessage` |
+| `buildParams` | 函数 | `params.go` | Chat/Complete 共享参数构建入口 |
+| `buildTools` | 函数 | `params.go` | `provider.Tool` → `wireTool` |
 
 ### 公共 SDK 层 (`bamboo/`)
 
@@ -226,10 +268,17 @@ bamboo-messages/
 |------|------|------|------|
 | `Codec` | 接口 | codec.go | 协议编解码接口 (Format/ParseRequest/SerializeResponse/SerializeError/NewSerializer) |
 | `StreamSerializer` | 接口 | codec.go | 流式序列化器 (Serialize/Flush) |
-| `FormatType` | 类型 | codec.go | 协议格式标识 (openai/anthropic/responses/gemini) |
+| `FormatType` | 类型 | codec.go | 协议格式标识 (openai/anthropic/responses/gemini/bamboo) |
 | `RelayRequest` | 结构体 | types.go | 解析后的统一请求中间表示 (Messages/System/Config/IsStream) |
 | `Get` | 函数 | registry.go | 根据格式标识查找已注册的 Codec |
 | `CodecError` | 结构体 | errors.go | Codec 层统一错误类型 (Type/Message/Cause) |
+| `bambooCodec` | 结构体 | `bamboo/codec/bamboo/codec.go` | bamboo 原生协议 Codec 实现（恒等变换） |
+| `Codec` | 变量 | `bamboo/codec/bamboo/codec.go` | 全局 `bmcodec.Codec` 实例（包内注册到 `bmcodec.Bamboo`） |
+| `parseRequest` | 函数 | `bamboo/codec/bamboo/request.go` | `json.Unmarshal` 原生信封 → `RelayRequest` |
+| `serializeResponse` | 函数 | `bamboo/codec/bamboo/response.go` | `json.Marshal(*bamboo.Response)` 恒等输出 |
+| `serializeError` | 函数 | `bamboo/codec/bamboo/error.go` | 提取 `*bamboo.BambooError` 字段输出原生错误 JSON |
+| `bambooStreamSerializer` | 结构体 | `bamboo/codec/bamboo/stream.go` | 流式 `json.Marshal(StreamEvent)` + Anthropic SSE 帧 |
+| `newStreamSerializer` | 函数 | `bamboo/codec/bamboo/stream.go` | 创建新的流式序列化器 |
 
 ### 中继层 (`bamboo/relay/`)
 
@@ -287,7 +336,12 @@ bamboo-messages/
          │              ┌────────▼─────────┐
          │              │  bamboo/codec    │
          │              │  N-to-N 编解码   │
-         │              │  4 种格式子包    │
+         │              │  5 种格式子包    │
+         │              │  (anthropic/     │
+         │              │  openai/         │
+         │              │  responses/      │
+         │              │  gemini/         │
+         │              │  bamboo)         │
          │              └────────┬─────────┘
          │                       │
          ▼                       ▼
@@ -300,12 +354,12 @@ bamboo-messages/
 └──────────┬──────────────────────────────┘
            │
     ┌──────┼──────┬──────────────┬─────────────┐
-    ▼      ▼      ▼              ▼             ▼
-┌────────┐┌────────┐┌──────────────┐┌───────────┐
-│anthropic││openai/ ││openai/       ││  gemini   │
-│ +Cache ││complet.││responses     ││ +params.go│
-│ +Intercept││+Intercept││+Intercept  ││+Intercept │
-└────────┘└────────┘└──────────────┘└───────────┘
+     ▼      ▼      ▼              ▼             ▼      ▼
+┌────────┐┌────────┐┌──────────────┐┌───────────┐┌─────────┐
+│anthropic││openai/ ││openai/       ││  gemini   ││ bamboo  │
+│ +Cache ││complet.││responses     ││ +params.go││ +wire   │
+│ +Intercept││+Intercept││+Intercept  ││+Intercept ││ +Intercept│
+└────────┘└────────┘└──────────────┘└───────────┘└─────────┘
          │
          ▼
 ┌─────────────────────────────────────────┐
@@ -357,7 +411,7 @@ bamboo-messages/
 37. **Relay 失败返回协议格式错误** — `Relay` 在 provider 失败时调用 `outCodec.SerializeError(err)` 返回协议格式化错误
 38. **Adapter 本地 DTO 不暴露外部类型** — 适配器内部使用本地 `types.go` 定义的请求/响应结构，禁止在公共 API 或返回类型中暴露任何外部 SDK 类型
 39. **错误透传简化** — `BambooError` 简化为 `Category + Message + StatusCode` 三字段（移除 `Type`/`Code`/`ProviderType`）；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError` 直接透传，避免重复包装；非 BambooError 降级为 `NewBambooError("SDK", err.Error(), 0)`
-40. **RelayStream 流式帧 debug 已移除** — `RelayStream` 不再通过 `debugRelayResponseFrame` 输出逐帧 debug 日志；上层业务可通过自身中间层从输出 channel 捕获完整流内容
+41. **bamboo 原生格式 = 恒等变换 codec + 镜像 DTO provider** — `bamboo/codec/bamboo` 直接复用 `bamboo.BambooMessage` / `RequestConfig` / `Response` 做 identity transform；`provider/bamboo` 使用本地 wire DTO 镜像 facade JSON 形状，不 import 上层 facade 包，避免循环依赖
 
 ## 反模式
 
@@ -383,7 +437,7 @@ bamboo-messages/
 - `ProviderExtra map[string]any` + string key 常量模式，扩展新参数只需添加常量和 WithXxx 函数
 - `GetUserAgent()` 动态读取版本号 — 通过 `runtime/debug.ReadBuildInfo()` 在运行时读取，避免硬编码版本
 - `StreamConverter` 防御性自动补发 — 若 Provider 未发送 BlockStart，自动合成，兼容不完整的 Provider 实现
-- N-to-N Codec 架构 — `codec` 层提供 4 种格式子包，`relay` 层提供函数式互转 API，实现任意协议间的请求-响应转换
+- N-to-N Codec 架构 — `codec` 层提供 5 种格式子包（anthropic / openai / responses / gemini / bamboo），`relay` 层提供函数式互转 API，实现任意协议间的请求-响应转换
 - `internal/xerr.Error` 最小错误类型 — 替代外部 bamboo-base-go 依赖，使 SDK 内部错误处理自包含
 - Debug 环境变量唯一入口 — `provider/debug.go`（适配器层，打印请求参数）+ `bamboo/relay/debug.go`（relay 层，打印原始 body 和解析后的 RelayRequest），两者通过同一环境变量 `BAMBOO_DEBUG` 联动；RelayStream 流式逐帧 debug 已移除，上层可通过输出 channel 自行捕获
 - Prompt Caching 统一抽象 — `CacheControl` 结构体 + `NewEphemeralCacheControl()` 工厂函数，跨 Provider 表达缓存语义
@@ -454,3 +508,4 @@ BAMBOO_DEBUG=true go test ./provider/anthropic/...
 - [provider/openai/completions](./provider/openai/completions/AGENTS.md) — OpenAI Chat Completions 协议适配器知识库
 - [provider/openai/responses](./provider/openai/responses/AGENTS.md) — OpenAI Responses 协议适配器知识库
 - [provider/gemini](./provider/gemini/AGENTS.md) — Google Gemini 协议适配器知识库
+- [provider/bamboo](./provider/bamboo/AGENTS.md) — bamboo 原生协议适配器知识库

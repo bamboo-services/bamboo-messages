@@ -18,6 +18,9 @@ var (
 
 	// Gemini Google Gemini 协议的 Codec 实例。
 	Gemini Codec
+
+	// Bamboo bamboo 原生协议的 Codec 实例。
+	Bamboo Codec
 )
 
 // Get 根据格式标识获取已注册的 Codec 实例。
@@ -34,6 +37,8 @@ func Get(format FormatType) (Codec, error) {
 		return Responses, nil
 	case FormatGemini:
 		return Gemini, nil
+	case FormatBamboo:
+		return Bamboo, nil
 	default:
 		return nil, fmt.Errorf("codec: unsupported format %q", format)
 	}

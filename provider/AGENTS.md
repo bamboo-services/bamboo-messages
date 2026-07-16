@@ -35,7 +35,8 @@ provider/
 ├── openai/
 │   ├── completions/         # OpenAI Chat Completions 协议适配器
 │   └── responses/           # OpenAI Responses 协议适配器
-└── gemini/                  # Google Gemini 协议适配器
+├── gemini/                  # Google Gemini 协议适配器
+└── bamboo/                  # bamboo 原生协议适配器
 ```
 
 ## 导航指南
@@ -59,6 +60,7 @@ provider/
 | 理解 ToolName 字段 | `type.go` | `Message.ToolName` — Gemini FunctionResponse 需要函数名与 ToolCallID 分离 |
 | 理解带索引工具调用 | `stream.go` | `IndexedToolCallDeltaData` + `NewToolCallDeltaWithIndex` / `NewToolCallDeltaDataWithIndex` — OpenAI 并行工具调用 |
 | 理解 ReasoningID | `type.go` | `Message.ReasoningID` — OpenAI Responses reasoning item ID（如 `"rs_xxx"`） |
+| 理解 bamboo 原生适配器 | `bamboo/` | 面向 bamboo 原生协议端点 `/v1/bamboo` 的 Provider 实现（Authorization Bearer） |
 
 ## 代码地图
 
@@ -206,6 +208,7 @@ provider/
 - **带索引工具调用** — `IndexedToolCallDeltaData` + `ToolCallData.HasIndex/Index` 支持 OpenAI 并行工具调用的原生索引
 - **HTTPClient.Do 统一入口** — 所有适配器通过 `httpClient.Do(ctx, method, path, body)` 发起请求，path 为相对路径（如 `/v1/messages`），由 `buildURL` 拼接 BaseURL；debug 模式下改用 `DoWithDebug`，两者共享 URL 拼接和 header 注入逻辑
 - **HTTP 错误结构化委托** — `HTTPClient.Do` 仅返回 `*http.Response`，不包装错误；适配器 `complete.go` 负责检查 `resp.StatusCode >= 400` 并使用 `pkgErrors` 的结构化错误包装，使状态码作为结构化字段贯穿错误链路
+- **bamboo 原生适配器使用本地镜像 DTOs** — `provider/bamboo` 不 import 上层 `bamboo` facade 包，而是通过 `types.go` 定义与 facade JSON 形状一致的 wire DTO，避免循环依赖
 
 ## 反模式
 
@@ -238,3 +241,4 @@ provider/
 - [completions](./openai/completions/AGENTS.md) — OpenAI Chat Completions 协议适配器
 - [responses](./openai/responses/AGENTS.md) — OpenAI Responses 协议适配器
 - [gemini](./gemini/AGENTS.md) — Google Gemini 协议适配器
+- [bamboo](./bamboo/AGENTS.md) — bamboo 原生协议适配器
