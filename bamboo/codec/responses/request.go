@@ -63,23 +63,27 @@ type responsesTool struct {
 }
 
 // inputItem input 数组元素，通过 type 字段区分不同类型。
+//
+// Arguments / Output / Summary 使用 json.RawMessage 而非具体类型，
+// 兼容客户端将 arguments 序列化为 JSON object（而非标准 JSON string）、
+// output 序列化为 object、summary 序列化为 string 等非标准格式。
 type inputItem struct {
 	Type    string          `json:"type"`
 	Role    string          `json:"role,omitempty"`
 	Content json.RawMessage `json:"content,omitempty"`
 	ID      string          `json:"id,omitempty"`
 	Name    string          `json:"name,omitempty"`
-	// reasoning 专用
-	Summary []outputReasoningSummary `json:"summary,omitempty"`
+	// reasoning 专用（标准: []outputReasoningSummary，容错: string）
+	Summary json.RawMessage `json:"summary,omitempty"`
 	// EncryptedContent 服务端加密的推理内容（客户端多轮回传时原样携带）。
 	// 解析为 ThinkingBlock.Signature，使 relay 转发给上游 Responses Provider
 	// 时能保留加密推理链；relay 自身不解密、不伪造该值。
 	EncryptedContent string `json:"encrypted_content,omitempty"`
-	// function_call 专用
-	CallID    string `json:"call_id,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
-	// function_call_output 专用
-	Output string `json:"output,omitempty"`
+	// function_call 专用（标准: JSON string，容错: raw object）
+	CallID    string          `json:"call_id,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	// function_call_output 专用（标准: string，容错: object）
+	Output json.RawMessage `json:"output,omitempty"`
 }
 
 // inputContent input message 的 content 元素。
@@ -225,7 +229,14 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 	// 尝试 array
 	var items []inputItem
 	if err := json.Unmarshal(raw, &items); err != nil {
-		return nil, "", pkgErrors.NewBambooError("下游", "failed to parse input field", 0)
+		// 容错：部分客户端将 input 发送为单个 object 而非 array
+		var single inputItem
+		if err2 := json.Unmarshal(raw, &single); err2 == nil {
+			items = []inputItem{single}
+		} else {
+			return nil, "", pkgErrors.NewBambooError("下游",
+				fmt.Sprintf("failed to parse input field: %v", err), 0)
+		}
 	}
 
 	var messages []bamboo.BambooMessage
@@ -269,12 +280,7 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 			}
 		case "function_call":
 			// assistant 工具调用并入当前轮次（并行工具调用同属一条消息）
-			var input json.RawMessage
-			if item.Arguments != "" {
-				input = json.RawMessage(item.Arguments)
-			} else {
-				input = json.RawMessage(`{}`)
-			}
+			input := normalizeArguments(item.Arguments)
 			assistantBlocks = append(assistantBlocks, &bamboo.ToolUseBlock{
 				Type:  bamboo.ContentBlockToolUse,
 				ID:    item.CallID,
@@ -285,7 +291,7 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 			// 用户侧工具结果：结束当前 assistant 轮次
 			flushAssistant()
 			messages = append(messages, bamboo.NewUserMessageBlocks(
-				bamboo.NewToolResultBlock(item.CallID, item.Output, false),
+				bamboo.NewToolResultBlock(item.CallID, normalizeOutputString(item.Output), false),
 			))
 		case "reasoning":
 			// 优先取 content 的 reasoning_text 原始思考全文，缺失时回退到
@@ -293,7 +299,7 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 			// 透传为 Signature，保证多轮对话的加密推理链不断裂。
 			text := extractReasoningText(item.Content)
 			if text == "" {
-				text = extractSummaryText(item.Summary)
+				text = extractSummaryText(normalizeSummary(item.Summary))
 			}
 			if text != "" || item.EncryptedContent != "" {
 				assistantBlocks = append(assistantBlocks,
@@ -410,6 +416,69 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 		}
 		return bamboo.NewUserMessageBlocks(blocks...), ""
 	}
+}
+
+// ── 字段规范化 helpers ──
+
+// normalizeArguments 将 function_call 的 arguments 规范化为 json.RawMessage。
+//
+// 兼容两种客户端序列化格式：
+//   - 标准 JSON string: "{"city":"SF"}" → 提取内部 JSON
+//   - 非标准 raw object: {"city":"SF"} → 直接使用
+func normalizeArguments(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	// 尝试解析为 JSON string（标准 Responses 格式）
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		if s == "" {
+			return json.RawMessage(`{}`)
+		}
+		return json.RawMessage(s)
+	}
+	// 已经是 raw object/array（非标准但合法的 JSON），直接使用
+	return raw
+}
+
+// normalizeOutputString 将 function_call_output 的 output 规范化为 string。
+//
+// 兼容两种客户端序列化格式：
+//   - 标准 JSON string: "Sunny, 72F" → 提取内部字符串
+//   - 非标准 raw object: {"result":"ok"} → 序列化为 JSON 字符串
+func normalizeOutputString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	// 尝试解析为 JSON string（标准格式）
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	// 非 string 类型（object/array/number），原样序列化为字符串
+	return string(raw)
+}
+
+// normalizeSummary 将 reasoning item 的 summary 规范化为 []outputReasoningSummary。
+//
+// 兼容两种客户端序列化格式：
+//   - 标准 array: [{"type":"summary_text","text":"..."}]
+//   - 非标准 string: "some summary text" → 包装为单条 summary_text
+func normalizeSummary(raw json.RawMessage) []outputReasoningSummary {
+	if len(raw) == 0 {
+		return nil
+	}
+	// 尝试标准 array 格式
+	var arr []outputReasoningSummary
+	if json.Unmarshal(raw, &arr) == nil {
+		return arr
+	}
+	// 容错：string 格式视为单条摘要
+	var s string
+	if json.Unmarshal(raw, &s) == nil && s != "" {
+		return []outputReasoningSummary{{Type: "summary_text", Text: s}}
+	}
+	return nil
 }
 
 // extractReasoningText 从 reasoning item 的 content 中提取推理文本。

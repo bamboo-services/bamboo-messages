@@ -3,6 +3,7 @@ package responses
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
@@ -511,5 +512,300 @@ func TestParseRequest_InvalidJSON(t *testing.T) {
 	}
 	if bambooErr.StatusCode != 0 {
 		t.Errorf("StatusCode = %d, want 0", bambooErr.StatusCode)
+	}
+}
+
+// ── 非标准字段类型容错测试 ──
+
+// TestParseRequest_FunctionCallArgumentsAsObject 验证 arguments 为 JSON object
+// （非标准格式，部分客户端如 Codex 截图工具链会这样序列化）时正常解析。
+func TestParseRequest_FunctionCallArgumentsAsObject(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [
+			{"type": "function_call", "call_id": "call_1", "name": "screenshot", "arguments": {"action": "capture", "region": "full"}}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("Messages len = %d, want 1", len(req.Messages))
+	}
+	msg := req.Messages[0]
+	if msg.Role != bamboo.RoleAssistant {
+		t.Errorf("Role = %q, want assistant", msg.Role)
+	}
+	toolUse, ok := msg.Content[0].(*bamboo.ToolUseBlock)
+	if !ok {
+		t.Fatalf("expected *ToolUseBlock, got %T", msg.Content[0])
+	}
+	if toolUse.ID != "call_1" {
+		t.Errorf("ID = %q, want call_1", toolUse.ID)
+	}
+	if toolUse.Name != "screenshot" {
+		t.Errorf("Name = %q, want screenshot", toolUse.Name)
+	}
+	// arguments object 应原样保留为 Input
+	var args map[string]any
+	if err := json.Unmarshal(toolUse.Input, &args); err != nil {
+		t.Fatalf("Input 不是合法 JSON: %v", err)
+	}
+	if args["action"] != "capture" {
+		t.Errorf("args[action] = %v, want capture", args["action"])
+	}
+}
+
+// TestParseRequest_FunctionCallArgumentsAsString 验证标准 JSON string 格式仍然正常。
+func TestParseRequest_FunctionCallArgumentsAsString(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [
+			{"type": "function_call", "call_id": "call_1", "name": "get_weather", "arguments": "{\"city\":\"SF\"}"}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	toolUse, ok := req.Messages[0].Content[0].(*bamboo.ToolUseBlock)
+	if !ok {
+		t.Fatalf("expected *ToolUseBlock, got %T", req.Messages[0].Content[0])
+	}
+	var args map[string]any
+	if err := json.Unmarshal(toolUse.Input, &args); err != nil {
+		t.Fatalf("Input 不是合法 JSON: %v", err)
+	}
+	if args["city"] != "SF" {
+		t.Errorf("args[city] = %v, want SF", args["city"])
+	}
+}
+
+// TestParseRequest_FunctionCallOutputAsObject 验证 output 为 JSON object 时
+// 序列化为 JSON 字符串存入 ToolResultBlock.Content。
+func TestParseRequest_FunctionCallOutputAsObject(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [
+			{"type": "function_call_output", "call_id": "call_1", "output": {"result": "screenshot saved", "path": "/tmp/shot.png"}}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("Messages len = %d, want 1", len(req.Messages))
+	}
+	msg := req.Messages[0]
+	if msg.Role != bamboo.RoleUser {
+		t.Errorf("Role = %q, want user", msg.Role)
+	}
+	trBlock, ok := msg.Content[0].(*bamboo.ToolResultBlock)
+	if !ok {
+		t.Fatalf("expected *ToolResultBlock, got %T", msg.Content[0])
+	}
+	if trBlock.ToolUseID != "call_1" {
+		t.Errorf("ToolUseID = %q, want call_1", trBlock.ToolUseID)
+	}
+	// object 应序列化为 JSON 字符串
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(trBlock.Content), &parsed); err != nil {
+		t.Fatalf("Content 不是合法 JSON 字符串: %v (content=%q)", err, trBlock.Content)
+	}
+	if parsed["result"] != "screenshot saved" {
+		t.Errorf("parsed[result] = %v", parsed["result"])
+	}
+}
+
+// TestParseRequest_FunctionCallOutputAsString 验证标准 string 格式仍然正常。
+func TestParseRequest_FunctionCallOutputAsString(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [
+			{"type": "function_call_output", "call_id": "call_1", "output": "Sunny, 72F"}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	trBlock, ok := req.Messages[0].Content[0].(*bamboo.ToolResultBlock)
+	if !ok {
+		t.Fatalf("expected *ToolResultBlock, got %T", req.Messages[0].Content[0])
+	}
+	if trBlock.Content != "Sunny, 72F" {
+		t.Errorf("Content = %q, want %q", trBlock.Content, "Sunny, 72F")
+	}
+}
+
+// TestParseRequest_ReasoningSummaryAsString 验证 summary 为 string（非标准）
+// 时正常解析为 ThinkingBlock。
+func TestParseRequest_ReasoningSummaryAsString(t *testing.T) {
+	body := []byte(`{
+		"model": "o3",
+		"input": [
+			{"type": "reasoning", "summary": "I need to analyze the screenshot carefully."}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("Messages len = %d, want 1", len(req.Messages))
+	}
+	thinking, ok := req.Messages[0].Content[0].(*bamboo.ThinkingBlock)
+	if !ok {
+		t.Fatalf("expected *ThinkingBlock, got %T", req.Messages[0].Content[0])
+	}
+	if thinking.Thinking != "I need to analyze the screenshot carefully." {
+		t.Errorf("Thinking = %q", thinking.Thinking)
+	}
+}
+
+// TestParseRequest_InputAsSingleObject 验证 input 为单个 object（非标准）
+// 时自动包装为数组正常解析。
+func TestParseRequest_InputAsSingleObject(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Hello"}]}
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("Messages len = %d, want 1", len(req.Messages))
+	}
+	if req.Messages[0].Role != bamboo.RoleUser {
+		t.Errorf("Role = %q, want user", req.Messages[0].Role)
+	}
+	tb, ok := req.Messages[0].Content[0].(*bamboo.TextBlock)
+	if !ok {
+		t.Fatalf("expected *TextBlock, got %T", req.Messages[0].Content[0])
+	}
+	if tb.Text != "Hello" {
+		t.Errorf("Text = %q, want Hello", tb.Text)
+	}
+}
+
+// TestParseRequest_MultiTurnScreenshotFlow 模拟 Codex 截图完整链路：
+// user 提问 → function_call(screenshot, arguments=object) →
+// function_call_output(截图结果) → user 带图片追问。
+func TestParseRequest_MultiTurnScreenshotFlow(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [
+			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "帮我看看屏幕"}]},
+			{"type": "reasoning", "id": "rs_1", "summary": "需要截取屏幕截图"},
+			{"type": "function_call", "call_id": "call_shot", "name": "computer_screenshot", "arguments": {"display": 0, "format": "png"}},
+			{"type": "function_call_output", "call_id": "call_shot", "output": {"image_data": "iVBORw0KGgo=", "width": 1920, "height": 1080}},
+			{"type": "message", "role": "user", "content": [
+				{"type": "input_text", "text": "这个界面上有什么？"},
+				{"type": "input_image", "image_url": "data:image/png;base64,iVBORw0KGgo="}
+			]}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+
+	// 期望：user, assistant(reasoning+tool_use), user(tool_result), user(image) — 共 4 条
+	if len(req.Messages) != 4 {
+		t.Fatalf("Messages len = %d, want 4", len(req.Messages))
+	}
+
+	// [0] user 提问
+	if req.Messages[0].Role != bamboo.RoleUser {
+		t.Errorf("Messages[0].Role = %q, want user", req.Messages[0].Role)
+	}
+
+	// [1] assistant 合并轮：thinking + tool_use
+	turn := req.Messages[1]
+	if turn.Role != bamboo.RoleAssistant {
+		t.Fatalf("Messages[1].Role = %q, want assistant", turn.Role)
+	}
+	if len(turn.Content) != 2 {
+		t.Fatalf("assistant blocks = %d, want 2 (thinking + tool_use)", len(turn.Content))
+	}
+	if _, ok := turn.Content[0].(*bamboo.ThinkingBlock); !ok {
+		t.Errorf("block[0] = %T, want *ThinkingBlock", turn.Content[0])
+	}
+	toolUse, ok := turn.Content[1].(*bamboo.ToolUseBlock)
+	if !ok {
+		t.Fatalf("block[1] = %T, want *ToolUseBlock", turn.Content[1])
+	}
+	if toolUse.Name != "computer_screenshot" {
+		t.Errorf("toolUse.Name = %q", toolUse.Name)
+	}
+	// arguments object 应正确解析
+	var args map[string]any
+	if err := json.Unmarshal(toolUse.Input, &args); err != nil {
+		t.Fatalf("toolUse.Input 不是合法 JSON: %v", err)
+	}
+	if args["format"] != "png" {
+		t.Errorf("args[format] = %v, want png", args["format"])
+	}
+	if turn.ReasoningID != "rs_1" {
+		t.Errorf("ReasoningID = %q, want rs_1", turn.ReasoningID)
+	}
+
+	// [2] user tool_result（output 为 object → JSON 字符串）
+	if req.Messages[2].Role != bamboo.RoleUser {
+		t.Errorf("Messages[2].Role = %q, want user", req.Messages[2].Role)
+	}
+	trBlock, ok := req.Messages[2].Content[0].(*bamboo.ToolResultBlock)
+	if !ok {
+		t.Fatalf("Messages[2].Content[0] = %T, want *ToolResultBlock", req.Messages[2].Content[0])
+	}
+	if trBlock.ToolUseID != "call_shot" {
+		t.Errorf("ToolUseID = %q, want call_shot", trBlock.ToolUseID)
+	}
+
+	// [3] user 带图片追问
+	imgMsg := req.Messages[3]
+	if imgMsg.Role != bamboo.RoleUser {
+		t.Errorf("Messages[3].Role = %q, want user", imgMsg.Role)
+	}
+	if len(imgMsg.Content) != 2 {
+		t.Fatalf("image message blocks = %d, want 2 (text + image)", len(imgMsg.Content))
+	}
+	if _, ok := imgMsg.Content[0].(*bamboo.TextBlock); !ok {
+		t.Errorf("block[0] = %T, want *TextBlock", imgMsg.Content[0])
+	}
+	if _, ok := imgMsg.Content[1].(*bamboo.ImageBlock); !ok {
+		t.Errorf("block[1] = %T, want *ImageBlock", imgMsg.Content[1])
+	}
+}
+
+// TestParseRequest_ErrorMessageIncludesDetail 验证解析失败时错误信息包含原始错误详情。
+func TestParseRequest_ErrorMessageIncludesDetail(t *testing.T) {
+	// 构造一个真正无法解析的 input（array 内含 number 元素）
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [123, "invalid"]
+	}`)
+
+	_, err := parseRequest(body)
+	if err == nil {
+		t.Fatal("expected error for invalid input")
+	}
+	var bambooErr *pkgErrors.BambooError
+	if !errors.As(err, &bambooErr) {
+		t.Fatalf("expected *pkgErrors.BambooError, got %T", err)
+	}
+	// 错误信息应包含原始解析错误详情
+	if !strings.Contains(bambooErr.Message, "failed to parse input field") {
+		t.Errorf("Message = %q, should contain 'failed to parse input field'", bambooErr.Message)
 	}
 }
