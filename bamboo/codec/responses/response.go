@@ -83,13 +83,16 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 			textParts = append(textParts, b.Text)
 
 		case *bamboo.ThinkingBlock:
+			// reasoning item 三槽位分工（与官方 schema 对齐）：
+			//   content           — 原始思考全文（reasoning_text 轨道）
+			//   summary           — 启发式提取的摘要，提取不出则为空数组
+			//   encrypted_content — 透传上游签名/加密内容，不伪造
 			reasoningItems = append(reasoningItems, outputItem{
-				Type:    "reasoning",
-				ID:      "rs_" + b.Signature,
-				Content: []outputContent{},
-				Summary: []outputReasoningSummary{
-					{Type: "summary_text", Text: b.Thinking},
-				},
+				Type:             "reasoning",
+				ID:               "rs_" + b.Signature,
+				Content:          buildReasoningContent(b.Thinking),
+				Summary:          buildReasoningSummary(b.Thinking),
+				EncryptedContent: b.Signature,
 			})
 
 		case *bamboo.ToolUseBlock:

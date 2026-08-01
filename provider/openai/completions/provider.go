@@ -10,11 +10,12 @@ import (
 // 而是统一持有 *provider.HTTPClient 进行 HTTP 通信。
 // legacyCompat 标志控制旧版端点兼容行为。
 type CompletionsProvider struct {
-	httpClient      *provider.HTTPClient
-	legacyCompat    bool
-	includeUsage    bool
-	degradedReason  provider.DegradedReasonStrategy
-	legacyCacheKey  bool
+	httpClient     *provider.HTTPClient
+	legacyCompat   bool
+	includeUsage   bool
+	degradedReason provider.DegradedReasonStrategy
+	legacyCacheKey bool
+	stripThinkTags bool
 }
 
 // ============================================
@@ -38,6 +39,7 @@ type config struct {
 	interceptors   []provider.RequestInterceptor
 	degradedReason provider.DegradedReasonStrategy
 	legacyCacheKey bool
+	stripThinkTags bool
 }
 
 // WithAPIKey 设置 API 密钥。
@@ -121,6 +123,24 @@ func WithLegacyCacheKey(enabled bool) Option {
 	return func(c *config) { c.legacyCacheKey = enabled }
 }
 
+// WithStripThinkTags 启用内联 think 标签剥离。
+//
+// 部分 OpenAI 兼容端点（DeepSeek-R1 早期格式、GLM、QwQ 及部分代理转换层）
+// 将推理内容以 XML 风格标签包裹后混入 content 字段，而非使用标准的
+// reasoning_content 字段。未处理时这些标签会作为正文透传到下游客户端，
+// 显示为可见的字面标签文本。
+//
+// 开启后：
+//   - 流式：content 增量经状态机扫描，配对标签之间的内容转为 thinking 事件，
+//     孤立闭标签（reasoning_content 泄漏残余）被静默移除
+//   - 非流式：配对标签之间的内容合并到 CompletionResult.Thinking
+//
+// 默认关闭。仅在确认上游端点存在内联标签行为时启用，避免改写
+// 模型有意输出的标签文本。
+func WithStripThinkTags() Option {
+	return func(c *config) { c.stripThinkTags = true }
+}
+
 // ============================================
 // 构造函数
 // ============================================
@@ -161,6 +181,7 @@ func NewCompletionsProviderWithOptions(opts ...Option) *CompletionsProvider {
 		includeUsage:   cfg.includeUsage,
 		degradedReason: cfg.degradedReason,
 		legacyCacheKey: cfg.legacyCacheKey,
+		stripThinkTags: cfg.stripThinkTags,
 	}
 }
 

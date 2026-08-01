@@ -242,7 +242,17 @@ func TestResponsesStream_ReasoningOutputItemContent(t *testing.T) {
 		if item.Type != "reasoning" {
 			t.Errorf("item.type = %q, want %q", item.Type, "reasoning")
 		}
-		// thinking 内容在 summary 中（明文），content 为空
+		// content 承载原始思考全文（reasoning_text 轨道）
+		if len(item.Content) != 1 {
+			t.Fatalf("item.content len = %d, want 1", len(item.Content))
+		}
+		if item.Content[0].Type != "reasoning_text" {
+			t.Errorf("content[0].type = %q, want %q", item.Content[0].Type, "reasoning_text")
+		}
+		if item.Content[0].Text != "Hello World" {
+			t.Errorf("content[0].text = %q, want %q", item.Content[0].Text, "Hello World")
+		}
+		// summary 承载启发式摘要（短文本提取结果与原文一致）
 		if len(item.Summary) != 1 {
 			t.Fatalf("item.summary len = %d, want 1", len(item.Summary))
 		}

@@ -9,7 +9,8 @@ import (
 // handleChunk 处理单个 chatCompletionChunk，提取 delta 数据转换为统一事件。
 //
 // 使用 types.go 中定义的 DTO 结构体，不依赖 openai-go SDK。
-func (p *CompletionsProvider) handleChunk(chunk chatCompletionChunk, textBlockStarted *bool, thinkingBlockStarted *bool, stopSent *bool) []provider.StreamEvent {
+// stripper 非 nil 时，content 增量先经内联 think 标签剥离（见 WithStripThinkTags）。
+func (p *CompletionsProvider) handleChunk(chunk chatCompletionChunk, textBlockStarted *bool, thinkingBlockStarted *bool, stopSent *bool, stripper *thinkTagStripper) []provider.StreamEvent {
 	var events []provider.StreamEvent
 
 	// Usage 提取：任一非零字段即触发（兼容 TotalTokens=0 但 PromptTokens>0 的场景）
@@ -31,7 +32,7 @@ func (p *CompletionsProvider) handleChunk(chunk chatCompletionChunk, textBlockSt
 	}
 
 	for _, choice := range chunk.Choices {
-		events = append(events, p.handleChoice(choice, textBlockStarted, thinkingBlockStarted, stopSent)...)
+		events = append(events, p.handleChoice(choice, textBlockStarted, thinkingBlockStarted, stopSent, stripper)...)
 	}
 
 	return events
@@ -41,7 +42,7 @@ func (p *CompletionsProvider) handleChunk(chunk chatCompletionChunk, textBlockSt
 //
 // 提取顺序：reasoning_content → content → tool_calls → finish_reason。
 // textBlockStarted / thinkingBlockStarted 独立追踪，互不干扰。
-func (p *CompletionsProvider) handleChoice(choice chatCompletionChunkChoice, textBlockStarted *bool, thinkingBlockStarted *bool, stopSent *bool) []provider.StreamEvent {
+func (p *CompletionsProvider) handleChoice(choice chatCompletionChunkChoice, textBlockStarted *bool, thinkingBlockStarted *bool, stopSent *bool, stripper *thinkTagStripper) []provider.StreamEvent {
 	delta := choice.Delta
 	var events []provider.StreamEvent
 
@@ -66,17 +67,24 @@ func (p *CompletionsProvider) handleChoice(choice chatCompletionChunkChoice, tex
 	}
 
 	if delta.Content != "" {
-		if !*textBlockStarted {
+		if stripper != nil {
+			// 内联 think 标签剥离模式：content 经状态机扫描后可能产生
+			// thinking / text 混合事件序列，BlockStart 契约由 syncBlockState 维护
+			stripped := stripper.process(delta.Content)
+			events = append(events, syncBlockState(stripped, textBlockStarted, thinkingBlockStarted)...)
+		} else {
+			if !*textBlockStarted {
+				events = append(events, provider.StreamEvent{
+					Type:  provider.StreamTypeDelta,
+					Delta: provider.NewBlockStartDelta("text"),
+				})
+				*textBlockStarted = true
+			}
 			events = append(events, provider.StreamEvent{
 				Type:  provider.StreamTypeDelta,
-				Delta: provider.NewBlockStartDelta("text"),
+				Delta: provider.NewTextDelta(delta.Content),
 			})
-			*textBlockStarted = true
 		}
-		events = append(events, provider.StreamEvent{
-			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewTextDelta(delta.Content),
-		})
 	}
 
 	for _, tc := range delta.ToolCalls {
@@ -91,6 +99,34 @@ func (p *CompletionsProvider) handleChoice(choice chatCompletionChunkChoice, tex
 		})
 	}
 
+	return events
+}
+
+// syncBlockState 将剥离器产生的事件序列与适配器 BlockStart 状态同步。
+//
+// 剥离器自身仅发出 BlockStart(thinking)，不发出 BlockStart(text)。
+// 此函数负责：
+//   - 剥离器发出 BlockStart(thinking) 时同步 thinkingBlockStarted 标志，
+//     避免后续 reasoning_content 增量重复合成块开始事件
+//   - 首个 text_output 增量前合成 BlockStart(text)，保持与常规路径一致的
+//     BlockStart 契约（所有适配器在首个文本增量前必须发出 BlockStart）
+func syncBlockState(stripped []provider.StreamEvent, textBlockStarted *bool, thinkingBlockStarted *bool) []provider.StreamEvent {
+	var events []provider.StreamEvent
+	for _, e := range stripped {
+		switch e.Delta.Type {
+		case provider.StreamDeltaTypeBlockStart:
+			*thinkingBlockStarted = true
+		case provider.StreamDeltaTypeTextOutput:
+			if !*textBlockStarted {
+				events = append(events, provider.StreamEvent{
+					Type:  provider.StreamTypeDelta,
+					Delta: provider.NewBlockStartDelta("text"),
+				})
+				*textBlockStarted = true
+			}
+		}
+		events = append(events, e)
+	}
 	return events
 }
 

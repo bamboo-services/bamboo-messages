@@ -217,6 +217,56 @@ func TestParseRequest_Reasoning(t *testing.T) {
 	}
 }
 
+// TestParseRequest_ReasoningContentPreferred 验证 content（原始思考全文）
+// 优先于 summary（有损摘要）被解析。
+func TestParseRequest_ReasoningContentPreferred(t *testing.T) {
+	body := []byte(`{
+		"model": "o3",
+		"input": [
+			{"type": "reasoning", "summary": [{"type": "summary_text", "text": "摘要"}], "content": [{"type": "reasoning_text", "text": "完整原始思考"}]}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	thinking, ok := req.Messages[0].Content[0].(*bamboo.ThinkingBlock)
+	if !ok {
+		t.Fatalf("expected *ThinkingBlock, got %T", req.Messages[0].Content[0])
+	}
+	if thinking.Thinking != "完整原始思考" {
+		t.Errorf("Thinking = %q, want content text (preferred over summary)", thinking.Thinking)
+	}
+}
+
+// TestParseRequest_ReasoningEncryptedContent 验证 encrypted_content 透传为
+// ThinkingBlock.Signature，且无明文文本时仍生成消息（保留加密推理链）。
+func TestParseRequest_ReasoningEncryptedContent(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-5",
+		"input": [
+			{"type": "reasoning", "summary": [], "encrypted_content": "gAAAAAB_encrypted"},
+			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "continue"}]}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	thinking, ok := req.Messages[0].Content[0].(*bamboo.ThinkingBlock)
+	if !ok {
+		t.Fatalf("expected *ThinkingBlock, got %T", req.Messages[0].Content[0])
+	}
+	if thinking.Thinking != "" {
+		t.Errorf("Thinking = %q, want empty", thinking.Thinking)
+	}
+	if thinking.Signature != "gAAAAAB_encrypted" {
+		t.Errorf("Signature = %q, want encrypted_content passthrough", thinking.Signature)
+	}
+}
+
 func TestParseRequest_Tools(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4o",

@@ -216,7 +216,17 @@ func TestSerializeResponse_Reasoning(t *testing.T) {
 	if reasoningItem == nil {
 		t.Fatal("no reasoning item in output")
 	}
-	// thinking 内容应在 summary 中（明文），content 为空
+	// content 承载原始思考全文（reasoning_text 轨道）
+	if len(reasoningItem.Content) != 1 {
+		t.Fatalf("reasoning Content len = %d, want 1", len(reasoningItem.Content))
+	}
+	if reasoningItem.Content[0].Type != "reasoning_text" {
+		t.Errorf("reasoning Content Type = %q, want %q", reasoningItem.Content[0].Type, "reasoning_text")
+	}
+	if reasoningItem.Content[0].Text != "Let me think..." {
+		t.Errorf("reasoning Content Text = %q, want %q", reasoningItem.Content[0].Text, "Let me think...")
+	}
+	// summary 承载启发式提取的摘要（短文本提取结果与原文一致）
 	if len(reasoningItem.Summary) != 1 {
 		t.Fatalf("reasoning Summary len = %d, want 1", len(reasoningItem.Summary))
 	}
@@ -226,8 +236,9 @@ func TestSerializeResponse_Reasoning(t *testing.T) {
 	if reasoningItem.Summary[0].Text != "Let me think..." {
 		t.Errorf("reasoning Summary Text = %q, want %q", reasoningItem.Summary[0].Text, "Let me think...")
 	}
-	if len(reasoningItem.Content) != 0 {
-		t.Errorf("reasoning Content should be empty, len = %d", len(reasoningItem.Content))
+	// encrypted_content 透传 ThinkingBlock.Signature
+	if reasoningItem.EncryptedContent != "sig_abc" {
+		t.Errorf("reasoning EncryptedContent = %q, want %q", reasoningItem.EncryptedContent, "sig_abc")
 	}
 
 	if msgItem == nil {

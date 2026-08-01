@@ -405,11 +405,14 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 			return nil, err
 		}
 		item := outputItem{
-			Type:             "reasoning",
-			ID:               block.itemID,
-			Status:           "completed",
-			Content:          []outputContent{},
-			Summary:          []outputReasoningSummary{{Type: "summary_text", Text: text}},
+			Type:   "reasoning",
+			ID:     block.itemID,
+			Status: "completed",
+			// content 承载原始思考全文（reasoning_text 轨道），summary 承载
+			// 启发式提取的摘要（提取不出则为空数组）；流式 done 事件中的
+			// reasoning_summary_text.done 保持原始全文作为实时展示轨道。
+			Content:          buildReasoningContent(text),
+			Summary:          buildReasoningSummary(text),
 			EncryptedContent: block.encryptedContent,
 		}
 		s.completedOutput = append(s.completedOutput, item)

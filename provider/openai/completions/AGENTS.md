@@ -13,7 +13,9 @@ provider/openai/completions/
 ├── chat.go                  # 流式对话实现
 ├── complete.go              # 非流式对话实现 — 含 reasoning_content 提取
 ├── stream.go                # SSE → StreamEvent 转换 + FinishReason 携带
+├── think_tag.go             # 内联 think 标签剥离器（流式状态机 + 非流式全量剥离）
 ├── stream_test.go           # 流式事件单元测试
+├── think_tag_test.go        # think 标签剥离单元测试（标签字面量一律用常量拼接）
 ├── message.go               # 消息格式双向转换 — 空 tool_calls 防御 + 文档块警告
 ├── models.go                # 模型常量 + GetAvailableModels
 ├── option.go                # OpenaiCompletionsOption + WithFrequencyPenalty/WithPresencePenalty/WithSeed/WithPrediction
@@ -41,6 +43,7 @@ provider/openai/completions/
 | 添加支持的模型 | `models.go` | 使用 `openai.ChatModel*` 常量 |
 | 修改工具定义转换 | `tools.go` | `buildTools` 和 `buildStop` 函数 |
 | 配置特有参数 | `option.go` | `WithFrequencyPenalty` / `WithPresencePenalty` / `WithSeed` / `WithPrediction` |
+| 剥离内联 think 标签 | `think_tag.go` + `provider.go` | `WithStripThinkTags()` 启用；`thinkTagStripper` 流式状态机 + `stripThinkTagsFromContent` 非流式剥离 |
 | 测试 Legacy 兼容 | `legacy_compat_test.go` | max_tokens / parallel_tool_calls / reasoning_effort 差异测试 |
 | 启用 debug 日志 | `provider.go` | 环境变量 `BAMBOO_DEBUG=1/true/on` |
 
@@ -57,6 +60,10 @@ provider/openai/completions/
 | `buildParams` | 方法 | params.go | Chat/Complete 共享参数构建（含 Prediction JSON 回退） |
 | `buildAssistantMessage` | 方法 | message.go | provider.Message → OpenAI Assistant 消息（空 tool_calls 防御） |
 | `handleChoice` | 方法 | stream.go | 处理单个 choice 的 delta + FinishReason |
+| `syncBlockState` | 函数 | stream.go | 剥离器事件序列与 BlockStart 状态同步（注入 BlockStart(text)、同步 thinkingBlockStarted） |
+| `thinkTagStripper` | 结构体 | think_tag.go | 内联 think 标签流式剥离状态机（`process`/`flush`，跨 chunk 缓冲 + KMP 回退再候选 + 孤立闭标签吞除） |
+| `stripThinkTagsFromContent` | 函数 | think_tag.go | 非流式完整 content 的配对标签剥离，推理内容合并到 Thinking |
+| `WithStripThinkTags` | 函数 | provider.go | Option: 启用内联 think 标签剥离（默认关闭） |
 | `mapFinishReason` | 函数 | stream.go | OpenAI finish_reason → provider.FinishReason 映射 |
 
 ## 约定
@@ -78,6 +85,7 @@ provider/openai/completions/
 - **Debug 日志** — 通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client
 - **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewBambooError(category, message, statusCode)` 包装错误，使状态码作为结构化字段贯穿错误链路；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError`，直接透传避免重复包装
+- **内联 think 标签剥离（Opt-in）** — `WithStripThinkTags()` 启用后，流式 content 增量经 `thinkTagStripper` 状态机扫描：配对标签之间的内容转为 thinking 事件（BlockStart 契约由 `syncBlockState` 维护），文本模式下的孤立闭标签（`reasoning_content` 泄漏残余）静默吞除，跨 chunk 切断的标签通过缓冲区 + KMP 风格后缀回退识别；非流式经 `stripThinkTagsFromContent` 剥离并合并到 `CompletionResult.Thinking`。默认关闭，避免改写模型有意输出的标签文本。标签字面量在源码中一律以 `thinkOpenTag`/`thinkCloseTag` 常量拼接，禁止书写完整字面量（会被 AI 工具链误解析截断）
 
 ## 反模式
 
@@ -101,6 +109,7 @@ provider/openai/completions/
 9. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成工具定义（`[]map[string]any`）
 10. Usage 统计缺失 → 确认 `StreamOptions.IncludeUsage` 已设置
 11. 请求参数不确定 → 设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
+12. 下游显示字面 think 标签 → 确认上游端点是否将推理内容内联到 content（GLM/DeepSeek-R1 旧格式）；启用 `WithStripThinkTags()`；检查 `thinkTagStripper` 的缓冲/模式状态
 
 ## BaseURL 配置说明
 

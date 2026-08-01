@@ -45,7 +45,7 @@ func TestHandleChoice_ReasoningContent(t *testing.T) {
 	textBlockStarted := false
 	thinkingBlockStarted := false
 	stopSent := false
-	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
+	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent, nil)
 
 	if len(events) != 2 {
 		t.Fatalf("expected 2 events, got %d", len(events))
@@ -75,7 +75,7 @@ func TestHandleChoice_ReasoningContentNull(t *testing.T) {
 	textBlockStarted := false
 	thinkingBlockStarted := false
 	stopSent := false
-	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
+	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent, nil)
 
 	// null 值解析为字符串 "null"，非空但语义无效 — parseReasoningRaw 会返回 "null"
 	// 这里验证 null 不会产生有效推理增量
@@ -100,7 +100,7 @@ func TestHandleChoice_ReasoningContentEmpty(t *testing.T) {
 	textBlockStarted := false
 	thinkingBlockStarted := false
 	stopSent := false
-	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
+	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent, nil)
 
 	// 空字符串: 解析后 reasoning == ""，应跳过
 	if len(events) != 0 {
@@ -125,7 +125,7 @@ func TestHandleChoice_ReasoningBeforeText(t *testing.T) {
 	textBlockStarted := false
 	thinkingBlockStarted := false
 	stopSent := false
-	events1 := p.handleChoice(reasoningChoice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
+	events1 := p.handleChoice(reasoningChoice, &textBlockStarted, &thinkingBlockStarted, &stopSent, nil)
 
 	if len(events1) != 2 {
 		t.Fatalf("first call: expected 2 events, got %d", len(events1))
@@ -149,7 +149,7 @@ func TestHandleChoice_ReasoningBeforeText(t *testing.T) {
 		},
 	}
 
-	events2 := p.handleChoice(textChoice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
+	events2 := p.handleChoice(textChoice, &textBlockStarted, &thinkingBlockStarted, &stopSent, nil)
 
 	if len(events2) != 2 {
 		t.Fatalf("second call: expected 2 events, got %d", len(events2))
@@ -176,7 +176,7 @@ func TestHandleChoice_OnlyReasoning(t *testing.T) {
 	textBlockStarted := false
 	thinkingBlockStarted := false
 	stopSent := false
-	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent)
+	events := p.handleChoice(choice, &textBlockStarted, &thinkingBlockStarted, &stopSent, nil)
 
 	// 应产生 BlockStart("thinking") + ThinkingDelta，不崩溃
 	if len(events) != 2 {
@@ -212,7 +212,7 @@ func TestHandleChunk_RelaxedUsageCondition(t *testing.T) {
 	textBlockStarted := false
 	thinkingBlockStarted := false
 	stopSent := false
-	events := p.handleChunk(chunk, &textBlockStarted, &thinkingBlockStarted, &stopSent)
+	events := p.handleChunk(chunk, &textBlockStarted, &thinkingBlockStarted, &stopSent, nil)
 
 	found := false
 	for _, e := range events {
@@ -247,7 +247,7 @@ func TestHandleChoice_AllowsFinishReasonUpgradeAfterStop(t *testing.T) {
 	stopReason := "stop"
 	stopEvents := p.handleChoice(chatCompletionChunkChoice{
 		FinishReason: &stopReason,
-	}, &textBlockStarted, &thinkingBlockStarted, &stopSent)
+	}, &textBlockStarted, &thinkingBlockStarted, &stopSent, nil)
 	if len(stopEvents) != 1 {
 		t.Fatalf("stop choice events = %d, want 1", len(stopEvents))
 	}
@@ -258,7 +258,7 @@ func TestHandleChoice_AllowsFinishReasonUpgradeAfterStop(t *testing.T) {
 	toolReason := "tool_calls"
 	toolEvents := p.handleChoice(chatCompletionChunkChoice{
 		FinishReason: &toolReason,
-	}, &textBlockStarted, &thinkingBlockStarted, &stopSent)
+	}, &textBlockStarted, &thinkingBlockStarted, &stopSent, nil)
 	if len(toolEvents) != 1 {
 		t.Fatalf("tool_calls choice events = %d, want 1; stopSent must not swallow finish reason upgrades", len(toolEvents))
 	}

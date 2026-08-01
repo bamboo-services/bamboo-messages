@@ -94,6 +94,13 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 		startSent := false
 		stopSent := false
 
+		// 内联 think 标签剥离器：仅在启用 WithStripThinkTags 时创建，
+		// 与 SSE 事件循环共享 textBlockStarted/thinkingBlockStarted 状态。
+		var stripper *thinkTagStripper
+		if p.stripThinkTags {
+			stripper = newThinkTagStripper()
+		}
+
 		// SSE 事件循环
 		for {
 			eventType, data, done, scanErr := scanner.Next()
@@ -144,9 +151,20 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 			}
 
 			// 处理 chunk → 事件
-			events := p.handleChunk(chunk, &textBlockStarted, &thinkingBlockStarted, &stopSent)
+			events := p.handleChunk(chunk, &textBlockStarted, &thinkingBlockStarted, &stopSent, stripper)
 
 			for _, e := range events {
+				select {
+				case eventCh <- e:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+
+		// 释放剥离器缓冲区残余（如正文末尾不完整的 "<" 候选），保证内容不丢失
+		if stripper != nil {
+			for _, e := range syncBlockState(stripper.flush(), &textBlockStarted, &thinkingBlockStarted) {
 				select {
 				case eventCh <- e:
 				case <-ctx.Done():

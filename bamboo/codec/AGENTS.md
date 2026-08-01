@@ -92,6 +92,8 @@ bamboo/codec/
 - **Gemini ToolResultBlock.ToolName** — 解析 `functionResponse` 时将 `Name` 写入 `ToolResultBlock.ToolName`
 - **Responses 流式序列器重大重写** — `responses/stream.go` 完全重写为 `responsesStreamSerializer` 状态机模型，追踪 output_item 生命周期（added/done）、自动注入 `sequence_number` 和 `response_id`、双轨 reasoning（raw `reasoning_text.*` + summary `reasoning_summary_text.*` 并行发射）、支持 `encrypted_content` 透传、完整覆盖 `response.created/output_item.added/content_part.added/output_text.delta/output_text.done/content_part.done/reasoning_text.delta/reasoning_summary_text.delta/reasoning_text.done/reasoning_summary_text.done/function_call_arguments.delta/function_call_arguments.done/output_item.done/response.completed/response.failed` 事件
 - **Responses SerializeResponse 签名变更** — `serializeResponse` 返回值从 `[]byte` 变为 `([]byte, error)`，与 Codec 接口保持一致；新增 `EncryptedContent` 和 `StopSequence` 字段支持
+- **Responses reasoning item 三槽位语义** — 序列化 ThinkingBlock 时按官方 schema 分工：`content: [{type: "reasoning_text"}]` 承载原始思考全文；`summary: [{type: "summary_text"}]` 承载 `summarizeThinking`（`responses/summary.go`）启发式提取的摘要（首行/首句 + Markdown 剥离 + 超长截断），提取不出则为空数组；`encrypted_content` 仅透传上游签名/加密值（ThinkingBlock.Signature），绝不伪造明文。流式 done 事件（`reasoning_text.done` / `reasoning_summary_text.done`）保持原始全文作为实时展示轨道，最终 item 才做槽位分流
+- **Responses reasoning 请求解析优先级** — `parseInput` 的 reasoning 分支优先取 `content`（reasoning_text 原始全文），缺失时回退 `summary`（有损摘要）；`encrypted_content` 解析为 `ThinkingBlock.Signature` 透传，保证 Codex 等客户端多轮回传的加密推理链不断裂
 
 ## 反模式
 
@@ -102,6 +104,7 @@ bamboo/codec/
 - **禁止** 在 Gemini codec 中将 safety_settings 存为原始 JSON 结构 — 必须转换为 `[]*genai.SafetySetting`，否则 relay→provider 路径类型断言失败导致静默丢弃
 - **禁止** 在非 Anthropic 协议中输出 DeltaSignature — 应返回 nil 静默丢弃，避免生成协议不支持的 SSE 帧
 - **禁止** 在响应序列化中遗漏 ToolResultBlock/ImageBlock/DocumentBlock 的警告日志 — 不支持的 block 类型必须记录 warning 后跳过，不得静默丢弃
+- **禁止** 在 Responses reasoning item 的 `encrypted_content` 中填证明文 — 该字段是服务端加密的不透明 token（官方契约：原样回传、不可伪造），明文会导致真实 OpenAI 上游解密失败；无上游真值时留空
 
 ## 调试路径
 

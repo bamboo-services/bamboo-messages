@@ -82,6 +82,13 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 		Content: choice.Message.Content,
 	}
 
+	// 内联 think 标签剥离（见 WithStripThinkTags）：配对标签包裹的推理内容
+	// 先行提取，随后与 reasoning_content 一并合并到 Thinking
+	var inlineThinking string
+	if p.stripThinkTags {
+		result.Content = stripThinkTagsFromContent(result.Content, &inlineThinking)
+	}
+
 	// FinishReason 映射
 	if choice.FinishReason != nil {
 		result.FinishReason = mapFinishReason(*choice.FinishReason)
@@ -103,6 +110,15 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 	// 推理内容提取：兼容 reasoning_content 和 reasoning 两种字段名
 	if reasoningStr := parseReasoningRaw(choice.Message.ReasoningContent); reasoningStr != "" {
 		result.Thinking = reasoningStr
+	}
+
+	// 合并内联 think 推理内容：reasoning_content 优先，内联内容追加
+	if inlineThinking != "" {
+		if result.Thinking != "" {
+			result.Thinking += "\n" + inlineThinking
+		} else {
+			result.Thinking = inlineThinking
+		}
 	}
 
 	// 解析工具调用

@@ -71,6 +71,10 @@ type inputItem struct {
 	Name    string          `json:"name,omitempty"`
 	// reasoning 专用
 	Summary []outputReasoningSummary `json:"summary,omitempty"`
+	// EncryptedContent 服务端加密的推理内容（客户端多轮回传时原样携带）。
+	// 解析为 ThinkingBlock.Signature，使 relay 转发给上游 Responses Provider
+	// 时能保留加密推理链；relay 自身不解密、不伪造该值。
+	EncryptedContent string `json:"encrypted_content,omitempty"`
 	// function_call 专用
 	CallID    string `json:"call_id,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
@@ -256,13 +260,16 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 				bamboo.NewToolResultBlock(item.CallID, item.Output, false),
 			))
 		case "reasoning":
-			text := extractSummaryText(item.Summary)
+			// 优先取 content 的 reasoning_text 原始思考全文，缺失时回退到
+			// summary（摘要为有损内容，仅作兜底）。encrypted_content 原样
+			// 透传为 Signature，保证多轮对话的加密推理链不断裂。
+			text := extractReasoningText(item.Content)
 			if text == "" {
-				text = extractReasoningText(item.Content)
+				text = extractSummaryText(item.Summary)
 			}
-			if text != "" {
+			if text != "" || item.EncryptedContent != "" {
 				messages = append(messages, bamboo.NewAssistantMessageBlocks(
-					bamboo.NewThinkingBlock(text, ""),
+					bamboo.NewThinkingBlock(text, item.EncryptedContent),
 				))
 			}
 		default:
