@@ -88,11 +88,12 @@ type inputItem struct {
 
 // inputContent input message 的 content 元素。
 type inputContent struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	ImageURL string `json:"image_url,omitempty"` // input_image 专用
-	FileID   string `json:"file_id,omitempty"`   // input_file 专用（file ID 引用）
-	FileData string `json:"file_data,omitempty"` // input_file 专用（base64 数据）
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	ImageURL json.RawMessage `json:"image_url,omitempty"` // input_image 专用（string 或 {"url": "..."}）
+	FileID   string          `json:"file_id,omitempty"`   // input_file 专用（file ID 引用）
+	FileData string          `json:"file_data,omitempty"` // input_file 专用（base64 数据）
+	MimeType string          `json:"mime_type,omitempty"` // input_file 专用（如 "image/png"）
 }
 
 // parseRequest 将 OpenAI Responses 请求体解析为 RelayRequest。
@@ -262,6 +263,20 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 		assistantReasoningID = ""
 	}
 
+	// 工具结果中提取的截图图片缓冲：Chat Completions 语义下 tool 消息必须
+	// 连续紧跟 assistant(tool_calls) 消息，图片作为独立 user 消息只能在
+	// 所有 tool 消息之后补发，否则并行工具调用会被 user 消息截断。
+	var pendingImages []bamboo.ContentBlock
+	flushPendingImages := func() {
+		if len(pendingImages) == 0 {
+			return
+		}
+		for _, img := range pendingImages {
+			messages = append(messages, bamboo.NewUserMessageBlocks(img))
+		}
+		pendingImages = nil
+	}
+
 	for _, item := range items {
 		switch item.Type {
 		case "message":
@@ -273,6 +288,7 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 			}
 			msg, sys := parseInputMessage(item)
 			flushAssistant()
+			flushPendingImages()
 			if sys != "" {
 				systemParts = append(systemParts, sys)
 			} else if len(msg.Content) > 0 {
@@ -290,9 +306,17 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 		case "function_call_output":
 			// 用户侧工具结果：结束当前 assistant 轮次
 			flushAssistant()
+			// 提取 output 中内嵌的截图图片（Codex 截图工具链将 base64 写入
+			// image_data 字段或 data URI），避免超大 base64 以文本形式计入
+			// Chat Completions 上游的输入长度限制；图片缓冲为独立 user 消息，
+			// 使上游视觉模型能正常识别截图。
+			text, img := splitOutputTextAndImage(item.Output)
 			messages = append(messages, bamboo.NewUserMessageBlocks(
-				bamboo.NewToolResultBlock(item.CallID, normalizeOutputString(item.Output), false),
+				bamboo.NewToolResultBlock(item.CallID, text, false),
 			))
+			if img != nil {
+				pendingImages = append(pendingImages, img)
+			}
 		case "reasoning":
 			// 优先取 content 的 reasoning_text 原始思考全文，缺失时回退到
 			// summary（摘要为有损内容，仅作兜底）。encrypted_content 原样
@@ -315,6 +339,7 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 		}
 	}
 	flushAssistant()
+	flushPendingImages()
 
 	return messages, strings.Join(systemParts, "\n\n"), nil
 }
@@ -353,10 +378,10 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 		for _, p := range parts {
 			switch p.Type {
 			case "input_image":
-				if p.ImageURL != "" {
+				if url, ok := normalizeImageURL(p.ImageURL); ok {
 					blocks = append(blocks, bamboo.NewImageBlock(bamboo.ContentSource{
 						Type: "url",
-						URL:  p.ImageURL,
+						URL:  url,
 					}))
 				}
 			case "input_file":
@@ -366,10 +391,21 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 						URL:  p.FileID,
 					}))
 				} else if p.FileData != "" {
-					blocks = append(blocks, bamboo.NewDocumentBlock(bamboo.ContentSource{
-						Type: "base64",
-						Data: p.FileData,
-					}))
+					// 图片类型的内联文件（file_data + mime_type: image/*）
+					// 转为 ImageBlock，Chat Completions 上游才能以 image_url
+					// 识别；文档类型保持 DocumentBlock。
+					if strings.HasPrefix(p.MimeType, "image/") {
+						blocks = append(blocks, bamboo.NewImageBlock(bamboo.ContentSource{
+							Type:      "base64",
+							MediaType: p.MimeType,
+							Data:      p.FileData,
+						}))
+					} else {
+						blocks = append(blocks, bamboo.NewDocumentBlock(bamboo.ContentSource{
+							Type: "base64",
+							Data: p.FileData,
+						}))
+					}
 				}
 			default:
 				if p.Text != "" {
@@ -387,10 +423,10 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 		for _, p := range parts {
 			switch p.Type {
 			case "input_image":
-				if p.ImageURL != "" {
+				if url, ok := normalizeImageURL(p.ImageURL); ok {
 					blocks = append(blocks, bamboo.NewImageBlock(bamboo.ContentSource{
 						Type: "url",
-						URL:  p.ImageURL,
+						URL:  url,
 					}))
 				}
 			case "input_file":
@@ -400,10 +436,21 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 						URL:  p.FileID,
 					}))
 				} else if p.FileData != "" {
-					blocks = append(blocks, bamboo.NewDocumentBlock(bamboo.ContentSource{
-						Type: "base64",
-						Data: p.FileData,
-					}))
+					// 图片类型的内联文件（file_data + mime_type: image/*）
+					// 转为 ImageBlock，Chat Completions 上游才能以 image_url
+					// 识别；文档类型保持 DocumentBlock。
+					if strings.HasPrefix(p.MimeType, "image/") {
+						blocks = append(blocks, bamboo.NewImageBlock(bamboo.ContentSource{
+							Type:      "base64",
+							MediaType: p.MimeType,
+							Data:      p.FileData,
+						}))
+					} else {
+						blocks = append(blocks, bamboo.NewDocumentBlock(bamboo.ContentSource{
+							Type: "base64",
+							Data: p.FileData,
+						}))
+					}
 				}
 			default:
 				if p.Text != "" {
@@ -457,6 +504,129 @@ func normalizeOutputString(raw json.RawMessage) string {
 	}
 	// 非 string 类型（object/array/number），原样序列化为字符串
 	return string(raw)
+}
+
+// splitOutputTextAndImage 将 function_call_output 的 output 拆分为
+// 工具结果文本与内嵌的截图图片。
+//
+// Codex 截图工具链等客户端将截图 base64 直接写入 output：
+//   - object 格式: {"image_data": "<base64>", "width": 1920, "height": 1080}
+//   - string 格式: "data:image/png;base64,..."
+//
+// 若整段以文本形式转发给 Chat Completions 上游，超大 base64 会被计入输入
+// 长度限制（如 GLM 的 "Range of input length should be [1, 983616]"）导致
+// 请求被拒，且截图无法被上游视觉模型识别。此处将图片提取为 ImageBlock，
+// 其余字段（尺寸等元数据）保留为工具结果文本。
+func splitOutputTextAndImage(raw json.RawMessage) (string, *bamboo.ImageBlock) {
+	if len(raw) == 0 {
+		return "", nil
+	}
+
+	// 标准 string 格式：data URI 识别为图片，其余保留为文本
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		if img := imageFromDataURI(s); img != nil {
+			return "", img
+		}
+		return s, nil
+	}
+
+	// object 格式：优先提取 image_data（base64 截图），其次 image_url
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(raw, &obj) == nil {
+		if dataRaw, ok := obj["image_data"]; ok {
+			var data string
+			if json.Unmarshal(dataRaw, &data) == nil && data != "" {
+				delete(obj, "image_data")
+				return compactObjectText(obj), &bamboo.ImageBlock{
+					Type: bamboo.ContentBlockImage,
+					Source: &bamboo.ContentSource{
+						Type:      "base64",
+						MediaType: "image/png",
+						Data:      data,
+					},
+				}
+			}
+		}
+		if urlRaw, ok := obj["image_url"]; ok {
+			if url, ok2 := normalizeImageURL(urlRaw); ok2 {
+				delete(obj, "image_url")
+				if img := imageFromDataURI(url); img != nil {
+					return compactObjectText(obj), img
+				}
+				return compactObjectText(obj), &bamboo.ImageBlock{
+					Type: bamboo.ContentBlockImage,
+					Source: &bamboo.ContentSource{
+						Type: "url",
+						URL:  url,
+					},
+				}
+			}
+		}
+	}
+
+	// 未识别到图片：保持现有行为，原样序列化为文本
+	return string(raw), nil
+}
+
+// compactObjectText 将 map 序列化为紧凑 JSON 字符串（工具结果文本）。
+func compactObjectText(obj map[string]json.RawMessage) string {
+	if len(obj) == 0 {
+		return "{}"
+	}
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+// imageFromDataURI 解析 data URI 形式的图片地址。
+//
+// 支持格式: data:image/png;base64,iVBOR... → 提取 MIME 类型与 base64 数据。
+// 非图片 data URI 或普通 URL 返回 nil。
+func imageFromDataURI(s string) *bamboo.ImageBlock {
+	const dataImagePrefix = "data:image/"
+	const base64Marker = ";base64,"
+	if !strings.HasPrefix(s, dataImagePrefix) {
+		return nil
+	}
+	idx := strings.Index(s, base64Marker)
+	if idx < 0 {
+		return nil
+	}
+	data := s[idx+len(base64Marker):]
+	if data == "" {
+		return nil
+	}
+	return &bamboo.ImageBlock{
+		Type: bamboo.ContentBlockImage,
+		Source: &bamboo.ContentSource{
+			Type:      "base64",
+			MediaType: strings.TrimPrefix(s[:idx], "data:"),
+			Data:      data,
+		},
+	}
+}
+
+// normalizeImageURL 兼容 input_image.image_url 的两种序列化格式：
+//   - 标准 string: "https://..." 或 "data:image/png;base64,..."
+//   - 非标准 object: {"url": "..."}（Chat Completions 风格）
+func normalizeImageURL(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 {
+		return "", false
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s, true
+	}
+	var obj struct {
+		URL string `json:"url"`
+	}
+	if json.Unmarshal(raw, &obj) == nil && obj.URL != "" {
+		return obj.URL, true
+	}
+	return "", false
 }
 
 // normalizeSummary 将 reasoning item 的 summary 规范化为 []outputReasoningSummary。

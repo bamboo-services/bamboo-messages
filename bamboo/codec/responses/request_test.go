@@ -699,7 +699,7 @@ func TestParseRequest_InputAsSingleObject(t *testing.T) {
 
 // TestParseRequest_MultiTurnScreenshotFlow 模拟 Codex 截图完整链路：
 // user 提问 → function_call(screenshot, arguments=object) →
-// function_call_output(截图结果) → user 带图片追问。
+// function_call_output(截图结果含 image_data) → user 带图片追问。
 func TestParseRequest_MultiTurnScreenshotFlow(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4o",
@@ -720,9 +720,10 @@ func TestParseRequest_MultiTurnScreenshotFlow(t *testing.T) {
 		t.Fatalf("parseRequest() error = %v", err)
 	}
 
-	// 期望：user, assistant(reasoning+tool_use), user(tool_result), user(image) — 共 4 条
-	if len(req.Messages) != 4 {
-		t.Fatalf("Messages len = %d, want 4", len(req.Messages))
+	// 期望：user, assistant(reasoning+tool_use), user(tool_result),
+	// user(提取的截图图片), user(文本+图片追问) — 共 5 条
+	if len(req.Messages) != 5 {
+		t.Fatalf("Messages len = %d, want 5", len(req.Messages))
 	}
 
 	// [0] user 提问
@@ -760,7 +761,7 @@ func TestParseRequest_MultiTurnScreenshotFlow(t *testing.T) {
 		t.Errorf("ReasoningID = %q, want rs_1", turn.ReasoningID)
 	}
 
-	// [2] user tool_result（output 为 object → JSON 字符串）
+	// [2] user tool_result：image_data 已提取为图片，仅保留尺寸元数据文本
 	if req.Messages[2].Role != bamboo.RoleUser {
 		t.Errorf("Messages[2].Role = %q, want user", req.Messages[2].Role)
 	}
@@ -771,11 +772,40 @@ func TestParseRequest_MultiTurnScreenshotFlow(t *testing.T) {
 	if trBlock.ToolUseID != "call_shot" {
 		t.Errorf("ToolUseID = %q, want call_shot", trBlock.ToolUseID)
 	}
+	if strings.Contains(trBlock.Content, "iVBORw0KGgo") {
+		t.Errorf("ToolResultBlock.Content 不应包含 base64 截图数据: %q", trBlock.Content)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(trBlock.Content), &meta); err != nil {
+		t.Fatalf("ToolResultBlock.Content 不是合法 JSON: %v (content=%q)", err, trBlock.Content)
+	}
+	if meta["width"] != float64(1920) || meta["height"] != float64(1080) {
+		t.Errorf("尺寸元数据缺失: %v", meta)
+	}
 
-	// [3] user 带图片追问
-	imgMsg := req.Messages[3]
+	// [3] user 独立截图图片消息（从 output.image_data 提取）
+	extracted := req.Messages[3]
+	if extracted.Role != bamboo.RoleUser {
+		t.Errorf("Messages[3].Role = %q, want user", extracted.Role)
+	}
+	if len(extracted.Content) != 1 {
+		t.Fatalf("extracted image blocks = %d, want 1", len(extracted.Content))
+	}
+	imgBlock, ok := extracted.Content[0].(*bamboo.ImageBlock)
+	if !ok {
+		t.Fatalf("Messages[3].Content[0] = %T, want *ImageBlock", extracted.Content[0])
+	}
+	if imgBlock.Source == nil || imgBlock.Source.Type != "base64" {
+		t.Errorf("提取图片 Source.Type = %v, want base64", imgBlock.Source)
+	}
+	if imgBlock.Source.Data != "iVBORw0KGgo=" {
+		t.Errorf("提取图片 Data = %q, want iVBORw0KGgo=", imgBlock.Source.Data)
+	}
+
+	// [4] user 带图片追问
+	imgMsg := req.Messages[4]
 	if imgMsg.Role != bamboo.RoleUser {
-		t.Errorf("Messages[3].Role = %q, want user", imgMsg.Role)
+		t.Errorf("Messages[4].Role = %q, want user", imgMsg.Role)
 	}
 	if len(imgMsg.Content) != 2 {
 		t.Fatalf("image message blocks = %d, want 2 (text + image)", len(imgMsg.Content))
@@ -807,5 +837,244 @@ func TestParseRequest_ErrorMessageIncludesDetail(t *testing.T) {
 	// 错误信息应包含原始解析错误详情
 	if !strings.Contains(bambooErr.Message, "failed to parse input field") {
 		t.Errorf("Message = %q, should contain 'failed to parse input field'", bambooErr.Message)
+	}
+}
+
+// TestParseRequest_FunctionCallOutputWithImageData 验证 output object 内嵌
+// image_data（base64 截图）时提取为独立图片消息，超大 base64 不再作为
+// 工具结果文本（避免 Chat Completions 上游输入长度超限）。
+func TestParseRequest_FunctionCallOutputWithImageData(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [
+			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "截屏"}]},
+			{"type": "function_call", "call_id": "call_shot", "name": "computer_screenshot", "arguments": {"format": "png"}},
+			{"type": "function_call_output", "call_id": "call_shot", "output": {"image_data": "iVBORw0KGgoAAAANSUhEUg==", "width": 1920, "height": 1080}}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	// 期望：user, assistant(tool_use), user(tool_result), user(图片) — 共 4 条
+	if len(req.Messages) != 4 {
+		t.Fatalf("Messages len = %d, want 4", len(req.Messages))
+	}
+
+	// [2] tool_result 文本仅保留尺寸元数据，不含 base64
+	trBlock, ok := req.Messages[2].Content[0].(*bamboo.ToolResultBlock)
+	if !ok {
+		t.Fatalf("Messages[2].Content[0] = %T, want *ToolResultBlock", req.Messages[2].Content[0])
+	}
+	if trBlock.ToolUseID != "call_shot" {
+		t.Errorf("ToolUseID = %q, want call_shot", trBlock.ToolUseID)
+	}
+	if strings.Contains(trBlock.Content, "iVBORw0KGgo") {
+		t.Errorf("tool_result 不应包含 base64 截图: %q", trBlock.Content)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(trBlock.Content), &meta); err != nil {
+		t.Fatalf("tool_result 不是合法 JSON: %v (content=%q)", err, trBlock.Content)
+	}
+	if meta["width"] != float64(1920) || meta["height"] != float64(1080) {
+		t.Errorf("尺寸元数据缺失: %v", meta)
+	}
+
+	// [3] 独立 user 图片消息
+	if req.Messages[3].Role != bamboo.RoleUser {
+		t.Errorf("Messages[3].Role = %q, want user", req.Messages[3].Role)
+	}
+	imgBlock, ok := req.Messages[3].Content[0].(*bamboo.ImageBlock)
+	if !ok {
+		t.Fatalf("Messages[3].Content[0] = %T, want *ImageBlock", req.Messages[3].Content[0])
+	}
+	if imgBlock.Source == nil || imgBlock.Source.Type != "base64" {
+		t.Fatalf("图片 Source = %+v, want base64", imgBlock.Source)
+	}
+	if imgBlock.Source.Data != "iVBORw0KGgoAAAANSUhEUg==" {
+		t.Errorf("图片 Data = %q", imgBlock.Source.Data)
+	}
+	if imgBlock.Source.MediaType != "image/png" {
+		t.Errorf("MediaType = %q, want image/png（image_data 无 MIME 信息时的默认值）", imgBlock.Source.MediaType)
+	}
+}
+
+// TestParseRequest_FunctionCallOutputWithDataURI 验证 output 为 data URI 字符串
+// 时识别为图片，不作为文本发送。
+func TestParseRequest_FunctionCallOutputWithDataURI(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [
+			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "截屏"}]},
+			{"type": "function_call", "call_id": "call_shot", "name": "computer_screenshot", "arguments": {}},
+			{"type": "function_call_output", "call_id": "call_shot", "output": "data:image/jpeg;base64,/9j/4AAQSkZJRg=="}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if len(req.Messages) != 4 {
+		t.Fatalf("Messages len = %d, want 4", len(req.Messages))
+	}
+	// tool_result 文本为空（图片已提取）
+	trBlock, ok := req.Messages[2].Content[0].(*bamboo.ToolResultBlock)
+	if !ok {
+		t.Fatalf("Messages[2].Content[0] = %T, want *ToolResultBlock", req.Messages[2].Content[0])
+	}
+	if trBlock.Content != "" {
+		t.Errorf("tool_result Content = %q, want empty（data URI 已提取为图片）", trBlock.Content)
+	}
+	// 图片消息：jpeg MIME 类型正确提取
+	imgBlock, ok := req.Messages[3].Content[0].(*bamboo.ImageBlock)
+	if !ok {
+		t.Fatalf("Messages[3].Content[0] = %T, want *ImageBlock", req.Messages[3].Content[0])
+	}
+	if imgBlock.Source == nil || imgBlock.Source.Type != "base64" {
+		t.Fatalf("图片 Source = %+v, want base64", imgBlock.Source)
+	}
+	if imgBlock.Source.MediaType != "image/jpeg" {
+		t.Errorf("MediaType = %q, want image/jpeg", imgBlock.Source.MediaType)
+	}
+	if imgBlock.Source.Data != "/9j/4AAQSkZJRg==" {
+		t.Errorf("Data = %q", imgBlock.Source.Data)
+	}
+}
+
+// TestParseRequest_InputImageURLAsObject 验证 input_image.image_url 为
+// object 格式（Chat Completions 风格，非标准 Responses）时正常解析。
+func TestParseRequest_InputImageURLAsObject(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [
+			{"type": "message", "role": "user", "content": [
+				{"type": "input_text", "text": "这个图片里是什么？"},
+				{"type": "input_image", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo=", "detail": "auto"}}
+			]}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("Messages len = %d, want 1", len(req.Messages))
+	}
+	if req.Messages[0].Role != bamboo.RoleUser {
+		t.Errorf("Role = %q, want user", req.Messages[0].Role)
+	}
+	if len(req.Messages[0].Content) != 2 {
+		t.Fatalf("blocks = %d, want 2 (text + image)", len(req.Messages[0].Content))
+	}
+	imgBlock, ok := req.Messages[0].Content[1].(*bamboo.ImageBlock)
+	if !ok {
+		t.Fatalf("block[1] = %T, want *ImageBlock", req.Messages[0].Content[1])
+	}
+	if imgBlock.Source == nil || imgBlock.Source.Type != "url" {
+		t.Fatalf("图片 Source = %+v, want url", imgBlock.Source)
+	}
+	if imgBlock.Source.URL != "data:image/png;base64,iVBORw0KGgo=" {
+		t.Errorf("URL = %q", imgBlock.Source.URL)
+	}
+}
+
+// TestParseRequest_ParallelToolsWithImages 验证并行工具调用 + 截图图片场景：
+// 图片消息必须缓冲在所有 tool_result 消息之后补发，
+// 保持 Chat Completions 语义下 tool 消息连续紧跟 assistant(tool_calls)。
+func TestParseRequest_ParallelToolsWithImages(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [
+			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "查看两个屏幕"}]},
+			{"type": "function_call", "call_id": "call_1", "name": "computer_screenshot", "arguments": {"display": 0}},
+			{"type": "function_call", "call_id": "call_2", "name": "computer_screenshot", "arguments": {"display": 1}},
+			{"type": "function_call_output", "call_id": "call_1", "output": {"image_data": "iVBORw0KGgo="}},
+			{"type": "function_call_output", "call_id": "call_2", "output": {"image_data": "iVBORw0KGgoAAAAN"}},
+			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "分析这两个截图"}]}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	// 期望：user, assistant(2 tool_use), tool_result, tool_result, image, image, user — 共 7 条
+	if len(req.Messages) != 7 {
+		t.Fatalf("Messages len = %d, want 7", len(req.Messages))
+	}
+	if len(req.Messages[1].Content) != 2 {
+		t.Fatalf("assistant tool_calls = %d, want 2", len(req.Messages[1].Content))
+	}
+	// [2]/[3] 两个 tool_result 连续（无 user 图片消息插入）
+	for i := 2; i <= 3; i++ {
+		if _, ok := req.Messages[i].Content[0].(*bamboo.ToolResultBlock); !ok {
+			t.Errorf("Messages[%d].Content[0] = %T, want *ToolResultBlock（tool 消息必须连续）", i, req.Messages[i].Content[0])
+		}
+	}
+	// [4]/[5] 两个图片消息在所有 tool_result 之后补发
+	for i := 4; i <= 5; i++ {
+		if _, ok := req.Messages[i].Content[0].(*bamboo.ImageBlock); !ok {
+			t.Errorf("Messages[%d].Content[0] = %T, want *ImageBlock", i, req.Messages[i].Content[0])
+		}
+	}
+	// [6] 用户追问
+	if req.Messages[6].Role != bamboo.RoleUser {
+		t.Errorf("Messages[6].Role = %q, want user", req.Messages[6].Role)
+	}
+	if len(req.Messages[6].Content) != 1 {
+		t.Fatalf("final user blocks = %d, want 1", len(req.Messages[6].Content))
+	}
+}
+
+// TestParseRequest_InputFileImageMimeType 验证 input_file 携带图片类型
+// mime_type 时转为 ImageBlock（而非 DocumentBlock），Chat Completions 上游
+// 才能以 image_url 识别内联图片文件。
+func TestParseRequest_InputFileImageMimeType(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [
+			{"type": "message", "role": "user", "content": [
+				{"type": "input_text", "text": "分析这张图"},
+				{"type": "input_file", "filename": "shot.png", "file_data": "iVBORw0KGgo=", "mime_type": "image/png"},
+				{"type": "input_file", "filename": "doc.pdf", "file_data": "JVBERi0xLjQ=", "mime_type": "application/pdf"}
+			]}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("Messages len = %d, want 1", len(req.Messages))
+	}
+	blocks := req.Messages[0].Content
+	if len(blocks) != 3 {
+		t.Fatalf("blocks = %d, want 3 (text + image + document)", len(blocks))
+	}
+	// image/png → ImageBlock
+	imgBlock, ok := blocks[1].(*bamboo.ImageBlock)
+	if !ok {
+		t.Fatalf("block[1] = %T, want *ImageBlock", blocks[1])
+	}
+	if imgBlock.Source == nil || imgBlock.Source.Type != "base64" {
+		t.Fatalf("图片 Source = %+v, want base64", imgBlock.Source)
+	}
+	if imgBlock.Source.MediaType != "image/png" {
+		t.Errorf("MediaType = %q, want image/png", imgBlock.Source.MediaType)
+	}
+	if imgBlock.Source.Data != "iVBORw0KGgo=" {
+		t.Errorf("Data = %q", imgBlock.Source.Data)
+	}
+	// application/pdf → 保持 DocumentBlock
+	docBlock, ok := blocks[2].(*bamboo.DocumentBlock)
+	if !ok {
+		t.Fatalf("block[2] = %T, want *DocumentBlock", blocks[2])
+	}
+	if docBlock.Source == nil || docBlock.Source.Type != "base64" {
+		t.Fatalf("文档 Source = %+v, want base64", docBlock.Source)
 	}
 }
