@@ -267,6 +267,71 @@ func TestParseRequest_ReasoningEncryptedContent(t *testing.T) {
 	}
 }
 
+// TestParseRequest_AssistantTurnMerging 验证连续 assistant 侧条目
+// （reasoning / message / function_call）合并为单条 assistant 消息。
+//
+// Chat Completions 语义下单轮 assistant 消息同时携带 reasoning_content +
+// content + tool_calls；拆分为多条消息会触发 DeepSeek 等思考模式强校验
+// 上游的 "reasoning_content must be passed back" 错误。
+func TestParseRequest_AssistantTurnMerging(t *testing.T) {
+	body := []byte(`{
+		"model": "deepseek-v4-pro",
+		"input": [
+			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "查看目录"}]},
+			{"type": "reasoning", "id": "rs_1", "summary": [{"type": "summary_text", "text": "需要调用工具"}]},
+			{"type": "message", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "我来看看。"}]},
+			{"type": "function_call", "call_id": "call_1", "name": "shell", "arguments": "{\"cmd\":\"ls\"}"},
+			{"type": "function_call", "call_id": "call_2", "name": "shell", "arguments": "{\"cmd\":\"pwd\"}"},
+			{"type": "function_call_output", "call_id": "call_1", "output": "file1.txt"},
+			{"type": "function_call_output", "call_id": "call_2", "output": "/root"},
+			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "继续"}]}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+
+	// 期望：user, assistant(合并轮), tool, tool, user — 共 5 条
+	if len(req.Messages) != 5 {
+		t.Fatalf("Messages len = %d, want 5", len(req.Messages))
+	}
+
+	// 合并后的 assistant 消息：thinking + text + 2 个 tool_use 同属一条
+	turn := req.Messages[1]
+	if turn.Role != bamboo.RoleAssistant {
+		t.Fatalf("Messages[1].Role = %q, want assistant", turn.Role)
+	}
+	if len(turn.Content) != 4 {
+		t.Fatalf("assistant turn blocks = %d, want 4 (thinking + text + 2 tool_use)", len(turn.Content))
+	}
+	if _, ok := turn.Content[0].(*bamboo.ThinkingBlock); !ok {
+		t.Errorf("block[0] = %T, want *ThinkingBlock", turn.Content[0])
+	}
+	if text, ok := turn.Content[1].(*bamboo.TextBlock); !ok || text.Text != "我来看看。" {
+		t.Errorf("block[1] = %T, want *TextBlock with merged text", turn.Content[1])
+	}
+	if tu, ok := turn.Content[2].(*bamboo.ToolUseBlock); !ok || tu.ID != "call_1" {
+		t.Errorf("block[2] = %T, want *ToolUseBlock(call_1)", turn.Content[2])
+	}
+	if tu, ok := turn.Content[3].(*bamboo.ToolUseBlock); !ok || tu.ID != "call_2" {
+		t.Errorf("block[3] = %T, want *ToolUseBlock(call_2) — 并行工具调用应同属一条消息", turn.Content[3])
+	}
+	// reasoning item 的 id 应保留为 ReasoningID
+	if turn.ReasoningID != "rs_1" {
+		t.Errorf("ReasoningID = %q, want %q", turn.ReasoningID, "rs_1")
+	}
+
+	// function_call_output 结束 assistant 轮次，各自成为 user(tool_result) 消息
+	if req.Messages[2].Role != bamboo.RoleUser || req.Messages[3].Role != bamboo.RoleUser {
+		t.Errorf("tool results roles = %q/%q, want user/user", req.Messages[2].Role, req.Messages[3].Role)
+	}
+	if req.Messages[4].Role != bamboo.RoleUser {
+		t.Errorf("Messages[4].Role = %q, want user", req.Messages[4].Role)
+	}
+}
+
 func TestParseRequest_Tools(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4o",

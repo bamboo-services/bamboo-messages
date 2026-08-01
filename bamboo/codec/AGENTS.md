@@ -94,6 +94,7 @@ bamboo/codec/
 - **Responses SerializeResponse 签名变更** — `serializeResponse` 返回值从 `[]byte` 变为 `([]byte, error)`，与 Codec 接口保持一致；新增 `EncryptedContent` 和 `StopSequence` 字段支持
 - **Responses reasoning item 三槽位语义** — 序列化 ThinkingBlock 时按官方 schema 分工：`content: [{type: "reasoning_text"}]` 承载原始思考全文；`summary: [{type: "summary_text"}]` 承载 `summarizeThinking`（`responses/summary.go`）启发式提取的摘要（首行/首句 + Markdown 剥离 + 超长截断），提取不出则为空数组；`encrypted_content` 仅透传上游签名/加密值（ThinkingBlock.Signature），绝不伪造明文。流式 done 事件（`reasoning_text.done` / `reasoning_summary_text.done`）保持原始全文作为实时展示轨道，最终 item 才做槽位分流
 - **Responses reasoning 请求解析优先级** — `parseInput` 的 reasoning 分支优先取 `content`（reasoning_text 原始全文），缺失时回退 `summary`（有损摘要）；`encrypted_content` 解析为 `ThinkingBlock.Signature` 透传，保证 Codex 等客户端多轮回传的加密推理链不断裂
+- **Responses assistant 轮次合并** — `parseInput` 将连续的 assistant 侧条目（`reasoning` / `message[assistant]` / `function_call`）合并为**单条** assistant 消息（thinking + text + tool_use blocks 同属一条），遇到 user 侧条目（`message[user]` / `function_call_output`）时结束当前轮次。Chat Completions 语义下单轮 assistant 消息同时携带 reasoning_content + content + tool_calls；若拆分为多条 assistant 消息，仅 reasoning 对应的消息携带 reasoning_content，DeepSeek 等思考模式强校验上游会以 "reasoning_content must be passed back" 拒绝请求，并行工具调用也会被错误拆分为多轮。reasoning item 的 `id` 保留为合并消息的 `ReasoningID`
 
 ## 反模式
 

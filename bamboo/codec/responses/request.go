@@ -231,31 +231,59 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 	var messages []bamboo.BambooMessage
 	var systemParts []string
 
+	// Responses 协议中连续的 assistant 侧条目（reasoning / message[assistant] /
+	// function_call）属于同一对话轮次，必须合并为单条 assistant 消息——
+	// Chat Completions 语义下单轮 assistant 消息同时携带 reasoning_content +
+	// content + tool_calls。拆分为多条 assistant 消息后，仅 reasoning 条目对应的
+	// 消息携带 reasoning_content，DeepSeek 等思考模式强校验上游会以
+	// "reasoning_content must be passed back" 拒绝请求；并行工具调用也会被
+	// 错误拆分为多轮。
+	var assistantBlocks []bamboo.ContentBlock
+	var assistantReasoningID string
+	flushAssistant := func() {
+		if len(assistantBlocks) == 0 {
+			return
+		}
+		msg := bamboo.NewAssistantMessageBlocks(assistantBlocks...)
+		msg.ReasoningID = assistantReasoningID
+		messages = append(messages, msg)
+		assistantBlocks = nil
+		assistantReasoningID = ""
+	}
+
 	for _, item := range items {
 		switch item.Type {
 		case "message":
+			if item.Role == "assistant" {
+				// assistant 消息条目并入当前轮次
+				msg, _ := parseInputMessage(item)
+				assistantBlocks = append(assistantBlocks, msg.Content...)
+				continue
+			}
 			msg, sys := parseInputMessage(item)
+			flushAssistant()
 			if sys != "" {
 				systemParts = append(systemParts, sys)
 			} else if len(msg.Content) > 0 {
 				messages = append(messages, msg)
 			}
 		case "function_call":
-			// assistant 工具调用
+			// assistant 工具调用并入当前轮次（并行工具调用同属一条消息）
 			var input json.RawMessage
 			if item.Arguments != "" {
 				input = json.RawMessage(item.Arguments)
 			} else {
 				input = json.RawMessage(`{}`)
 			}
-			messages = append(messages, bamboo.NewAssistantMessageBlocks(&bamboo.ToolUseBlock{
+			assistantBlocks = append(assistantBlocks, &bamboo.ToolUseBlock{
 				Type:  bamboo.ContentBlockToolUse,
 				ID:    item.CallID,
 				Name:  item.Name,
 				Input: input,
-			}))
+			})
 		case "function_call_output":
-			// 用户侧工具结果
+			// 用户侧工具结果：结束当前 assistant 轮次
+			flushAssistant()
 			messages = append(messages, bamboo.NewUserMessageBlocks(
 				bamboo.NewToolResultBlock(item.CallID, item.Output, false),
 			))
@@ -268,15 +296,19 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 				text = extractSummaryText(item.Summary)
 			}
 			if text != "" || item.EncryptedContent != "" {
-				messages = append(messages, bamboo.NewAssistantMessageBlocks(
-					bamboo.NewThinkingBlock(text, item.EncryptedContent),
-				))
+				assistantBlocks = append(assistantBlocks,
+					bamboo.NewThinkingBlock(text, item.EncryptedContent))
+				if assistantReasoningID == "" {
+					assistantReasoningID = item.ID
+				}
 			}
 		default:
+			flushAssistant()
 			xLog.WithName("codec/responses").SugarWarn(context.Background(),
 				fmt.Sprintf("unknown input item type %q, skipped", item.Type))
 		}
 	}
+	flushAssistant()
 
 	return messages, strings.Join(systemParts, "\n\n"), nil
 }
