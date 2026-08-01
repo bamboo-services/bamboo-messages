@@ -57,11 +57,13 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 	}
 
 	// === ReasoningEffort ===
-	// 默认模式和 Legacy 模式都映射 reasoning_effort，直接透传标准值域。
-	// GLM-5.2 等第三方端点原生支持 none/minimal/low/medium/high/xhigh/max 全部值，
-	// 服务端会做兼容映射（xhigh→max、low/medium→high），无需客户端降级。
+	// 默认模式和 Legacy 模式都映射 reasoning_effort，透传前经 NormalizeReasoningEffort
+	// 归一化。GLM-5.2 等第三方端点原生支持 none/minimal/low/medium/high/xhigh/max 全部值，
+	// 服务端会做兼容映射（xhigh→max、low/medium→high）；但 qwen 等上游只接受
+	// none/minimal/low/medium/high/xhigh，拒绝 "max"。归一化 max→xhigh 后
+	// 语义等价（最高推理强度）且对所有上游兼容。
 	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" {
-		params["reasoning_effort"] = config.ThinkingConfig.Effort
+		params["reasoning_effort"] = provider.NormalizeReasoningEffort(config.ThinkingConfig.Effort)
 	}
 
 	// === thinking 透传 — Legacy only ===

@@ -229,7 +229,8 @@ type DocumentSource struct {
 
 // ThinkingConfig 思考/推理配置。
 //
-// Effort 统一控制所有 Provider 的思考/推理强度，支持 none/low/medium/high。
+// Effort 统一控制所有 Provider 的思考/推理强度，标准值域 none/minimal/low/medium/high/xhigh。
+// 第三方扩展值 "max"（Anthropic / GLM-5.2 等）经 NormalizeReasoningEffort 归一化为 xhigh。
 // Display 控制思考内容的显示模式，支持 summarized/omitted。
 // 由各适配器根据 Effort 值映射到 Provider 特有参数：
 //   - Anthropic: effort 值用于 adaptive thinking 模式

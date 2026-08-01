@@ -113,13 +113,16 @@ func (p *ResponsesProvider) buildParams(model string, systemPrompt string, messa
 	}
 
 	// Reasoning — 思考/推理配置（effort + summary 自动推导）
-	// effort 为 "none" 时不输出 reasoning 字段
+	// effort 为 "none" 时不输出 reasoning 字段。
+	// 透传前经 NormalizeReasoningEffort 归一化（max→xhigh），与 Completions 出口保持一致：
+	// qwen 等上游拒绝 "max"，归一化后语义等价（最高推理强度）且兼容所有上游。
 	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" && config.ThinkingConfig.Effort != "none" {
+		effort := provider.NormalizeReasoningEffort(config.ThinkingConfig.Effort)
 		reasoning := map[string]any{
-			"effort": config.ThinkingConfig.Effort,
+			"effort": effort,
 		}
-		// Summary 按 effort 自动推导
-		switch config.ThinkingConfig.Effort {
+		// Summary 按归一化后的 effort 自动推导（max 归一化为 xhigh，落入 detailed 档）
+		switch effort {
 		case "minimal", "low":
 			reasoning["summary"] = "concise"
 		case "medium":

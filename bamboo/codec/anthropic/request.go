@@ -461,7 +461,8 @@ func truncateUserID(uid string) string {
 // 返回归一化后的 effort 字符串，对齐 BambooMessages 标准值域
 // (none/minimal/low/medium/high/xhigh)。无效或缺失时返回空字符串。
 //
-// Anthropic 原生支持 "max"，其语义为最高推理强度，映射到标准值域的 "xhigh"。
+// Anthropic 原生支持 "max"，其语义为最高推理强度，经 provider.NormalizeReasoningEffort
+// 映射到标准值域的 "xhigh"（与 openai completions/responses 出口保持一致）。
 func parseOutputConfigEffort(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -472,10 +473,7 @@ func parseOutputConfigEffort(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return ""
 	}
-	if obj.Effort == "max" {
-		return "xhigh"
-	}
-	return obj.Effort
+	return provider.NormalizeReasoningEffort(obj.Effort)
 }
 
 // 映射规则:

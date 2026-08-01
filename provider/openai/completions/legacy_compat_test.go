@@ -271,7 +271,8 @@ func TestBuildParams_LegacyThinkingFromEffort(t *testing.T) {
 		{"medium", "enabled", "medium"},
 		{"high", "enabled", "high"},
 		{"xhigh", "enabled", "xhigh"},
-		{"max", "enabled", "max"},
+		// max 是第三方扩展值，出口处归一化为 xhigh（见 NormalizeReasoningEffort）
+		{"max", "enabled", "xhigh"},
 	}
 
 	for _, tt := range tests {
@@ -282,7 +283,7 @@ func TestBuildParams_LegacyThinkingFromEffort(t *testing.T) {
 			}
 			params := p.buildParams("", nil, config)
 
-			// 验证 reasoning_effort 直接透传
+			// 验证 reasoning_effort 归一化后透传
 			if v, ok := params["reasoning_effort"]; !ok || v != tt.wantReasoningEffort {
 				t.Errorf("reasoning_effort = %v, want %q", v, tt.wantReasoningEffort)
 			}
@@ -425,5 +426,40 @@ func TestWithLegacyCompat_Flag(t *testing.T) {
 	defaultP := NewCompletionsProvider("test")
 	if defaultP.legacyCompat {
 		t.Error("Provider without WithLegacyCompat(): legacyCompat should be false")
+	}
+}
+
+// TestBuildParams_MaxEffortNormalized 验证 Effort "max" 在 Completions 出口归一化为 xhigh。
+// qwen 等上游只接受 none/minimal/low/medium/high/xhigh，拒绝 "max"。
+func TestBuildParams_MaxEffortNormalized(t *testing.T) {
+	p := newDefaultProvider(t)
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "max"},
+	}
+	params := p.buildParams("", nil, config)
+
+	v, ok := params["reasoning_effort"]
+	if !ok {
+		t.Fatal("reasoning_effort should be set")
+	}
+	if v != "xhigh" {
+		t.Errorf("reasoning_effort = %v, want %q", v, "xhigh")
+	}
+}
+
+// TestBuildParams_NonMaxEffortUnchanged 验证非 max 值不受归一化影响。
+func TestBuildParams_NonMaxEffortUnchanged(t *testing.T) {
+	p := newDefaultProvider(t)
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
+	}
+	params := p.buildParams("", nil, config)
+
+	v, ok := params["reasoning_effort"]
+	if !ok {
+		t.Fatal("reasoning_effort should be set")
+	}
+	if v != "high" {
+		t.Errorf("reasoning_effort = %v, want %q", v, "high")
 	}
 }
