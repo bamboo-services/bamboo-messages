@@ -310,13 +310,11 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 			// image_data 字段或 data URI），避免超大 base64 以文本形式计入
 			// Chat Completions 上游的输入长度限制；图片缓冲为独立 user 消息，
 			// 使上游视觉模型能正常识别截图。
-			text, img := splitOutputTextAndImage(item.Output)
+			text, imgs := splitOutputTextAndImage(item.Output)
 			messages = append(messages, bamboo.NewUserMessageBlocks(
 				bamboo.NewToolResultBlock(item.CallID, text, false),
 			))
-			if img != nil {
-				pendingImages = append(pendingImages, img)
-			}
+			pendingImages = append(pendingImages, imgs...)
 		case "reasoning":
 			// 优先取 content 的 reasoning_text 原始思考全文，缺失时回退到
 			// summary（摘要为有损内容，仅作兜底）。encrypted_content 原样
@@ -510,14 +508,15 @@ func normalizeOutputString(raw json.RawMessage) string {
 // 工具结果文本与内嵌的截图图片。
 //
 // Codex 截图工具链等客户端将截图 base64 直接写入 output：
+//   - 数组格式: [{"detail":"high","image_url":"data:image/png;base64,..."}]
 //   - object 格式: {"image_data": "<base64>", "width": 1920, "height": 1080}
 //   - string 格式: "data:image/png;base64,..."
 //
 // 若整段以文本形式转发给 Chat Completions 上游，超大 base64 会被计入输入
-// 长度限制（如 GLM 的 "Range of input length should be [1, 983616]"）导致
-// 请求被拒，且截图无法被上游视觉模型识别。此处将图片提取为 ImageBlock，
-// 其余字段（尺寸等元数据）保留为工具结果文本。
-func splitOutputTextAndImage(raw json.RawMessage) (string, *bamboo.ImageBlock) {
+// 长度限制（如阿里云百炼的 "Range of input length should be [1, 983616]"）
+// 导致请求被拒，且截图无法被上游视觉模型识别。此处将图片提取为
+// ImageBlock，其余字段（尺寸等元数据）保留为工具结果文本。
+func splitOutputTextAndImage(raw json.RawMessage) (string, []bamboo.ContentBlock) {
 	if len(raw) == 0 {
 		return "", nil
 	}
@@ -526,9 +525,54 @@ func splitOutputTextAndImage(raw json.RawMessage) (string, *bamboo.ImageBlock) {
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
 		if img := imageFromDataURI(s); img != nil {
-			return "", img
+			return "", []bamboo.ContentBlock{img}
 		}
 		return s, nil
+	}
+
+	// 数组格式（Codex 截图工具链）：遍历元素提取 image_url 图片，
+	// 其余元素原样保留为文本；无图片时保持原样序列化。
+	var items []json.RawMessage
+	if json.Unmarshal(raw, &items) == nil {
+		var texts []string
+		var images []bamboo.ContentBlock
+		for _, itemRaw := range items {
+			var itemMap map[string]json.RawMessage
+			if json.Unmarshal(itemRaw, &itemMap) != nil {
+				// 元素不是 object（如纯字符串），保留原文
+				texts = append(texts, string(itemRaw))
+				continue
+			}
+			urlRaw, hasURL := itemMap["image_url"]
+			if !hasURL {
+				texts = append(texts, string(itemRaw))
+				continue
+			}
+			url, ok := normalizeImageURL(urlRaw)
+			if !ok {
+				texts = append(texts, string(itemRaw))
+				continue
+			}
+			delete(itemMap, "image_url")
+			if img := imageFromDataURI(url); img != nil {
+				images = append(images, img)
+			} else {
+				images = append(images, &bamboo.ImageBlock{
+					Type: bamboo.ContentBlockImage,
+					Source: &bamboo.ContentSource{
+						Type: "url",
+						URL:  url,
+					},
+				})
+			}
+			if len(itemMap) > 0 {
+				texts = append(texts, compactObjectText(itemMap))
+			}
+		}
+		if len(images) > 0 {
+			return strings.Join(texts, "\n"), images
+		}
+		return string(raw), nil
 	}
 
 	// object 格式：优先提取 image_data（base64 截图），其次 image_url
@@ -538,29 +582,29 @@ func splitOutputTextAndImage(raw json.RawMessage) (string, *bamboo.ImageBlock) {
 			var data string
 			if json.Unmarshal(dataRaw, &data) == nil && data != "" {
 				delete(obj, "image_data")
-				return compactObjectText(obj), &bamboo.ImageBlock{
+				return compactObjectText(obj), []bamboo.ContentBlock{&bamboo.ImageBlock{
 					Type: bamboo.ContentBlockImage,
 					Source: &bamboo.ContentSource{
 						Type:      "base64",
 						MediaType: "image/png",
 						Data:      data,
 					},
-				}
+				}}
 			}
 		}
 		if urlRaw, ok := obj["image_url"]; ok {
 			if url, ok2 := normalizeImageURL(urlRaw); ok2 {
 				delete(obj, "image_url")
 				if img := imageFromDataURI(url); img != nil {
-					return compactObjectText(obj), img
+					return compactObjectText(obj), []bamboo.ContentBlock{img}
 				}
-				return compactObjectText(obj), &bamboo.ImageBlock{
+				return compactObjectText(obj), []bamboo.ContentBlock{&bamboo.ImageBlock{
 					Type: bamboo.ContentBlockImage,
 					Source: &bamboo.ContentSource{
 						Type: "url",
 						URL:  url,
 					},
-				}
+				}}
 			}
 		}
 	}

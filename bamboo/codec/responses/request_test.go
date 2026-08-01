@@ -943,6 +943,63 @@ func TestParseRequest_FunctionCallOutputWithDataURI(t *testing.T) {
 	}
 }
 
+// TestParseRequest_FunctionCallOutputImageURLArray 验证 Codex 截图工具链的
+// 真实格式：function_call_output.output 为数组
+// [{"detail":"high","image_url":"data:image/png;base64,..."}]，
+// 超大 base64 必须提取为图片，避免作为文本计入 Chat Completions 上游的
+// 输入长度限制（如阿里云百炼 "Range of input length should be [1, 983616]"）。
+func TestParseRequest_FunctionCallOutputImageURLArray(t *testing.T) {
+	// 模拟 1.5MB 截图 base64（Codex 截图工具链真实大小）
+	bigBase64 := strings.Repeat("iVBORw0KGgo=", 100*1024)
+	body := []byte(`{
+		"model": "qwen3.8-max-preview",
+		"input": [
+			{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "截图看看"}]},
+			{"type": "function_call", "call_id": "call_shot", "name": "view_image", "arguments": "{\"path\": \"/tmp/shot.png\"}"},
+			{"type": "function_call_output", "call_id": "call_shot", "output": [{"detail": "high", "image_url": "data:image/png;base64,` + bigBase64 + `"}]}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	// 期望：user, assistant(tool_use), user(tool_result), user(图片) — 共 4 条
+	if len(req.Messages) != 4 {
+		t.Fatalf("Messages len = %d, want 4", len(req.Messages))
+	}
+
+	// [2] tool_result 文本仅保留 detail 元数据，不含 1.5MB base64
+	trBlock, ok := req.Messages[2].Content[0].(*bamboo.ToolResultBlock)
+	if !ok {
+		t.Fatalf("Messages[2].Content[0] = %T, want *ToolResultBlock", req.Messages[2].Content[0])
+	}
+	if strings.Contains(trBlock.Content, "iVBORw0KGgo") {
+		t.Errorf("tool_result 不应包含 base64 截图: %d chars", len(trBlock.Content))
+	}
+	if len(trBlock.Content) > 200 {
+		t.Errorf("tool_result 文本过长: %d chars", len(trBlock.Content))
+	}
+
+	// [3] 独立 user 图片消息（data URI → base64 图片块）
+	if req.Messages[3].Role != bamboo.RoleUser {
+		t.Errorf("Messages[3].Role = %q, want user", req.Messages[3].Role)
+	}
+	imgBlock, ok := req.Messages[3].Content[0].(*bamboo.ImageBlock)
+	if !ok {
+		t.Fatalf("Messages[3].Content[0] = %T, want *ImageBlock", req.Messages[3].Content[0])
+	}
+	if imgBlock.Source == nil || imgBlock.Source.Type != "base64" {
+		t.Fatalf("图片 Source = %+v, want base64", imgBlock.Source)
+	}
+	if imgBlock.Source.Data != bigBase64 {
+		t.Errorf("图片 Data 长度 = %d, want %d", len(imgBlock.Source.Data), len(bigBase64))
+	}
+	if imgBlock.Source.MediaType != "image/png" {
+		t.Errorf("MediaType = %q, want image/png", imgBlock.Source.MediaType)
+	}
+}
+
 // TestParseRequest_InputImageURLAsObject 验证 input_image.image_url 为
 // object 格式（Chat Completions 风格，非标准 Responses）时正常解析。
 func TestParseRequest_InputImageURLAsObject(t *testing.T) {
