@@ -1,7 +1,7 @@
 # 项目知识库
 
-**生成日期:** 2026-07-05
-**提交:** dcb2c97
+**生成日期:** 2026-07-16
+**提交:** bcb1833
 **分支:** master
 
 ## 概述
@@ -57,27 +57,27 @@ bamboo-messages/
 │   │       ├── message_audit_test.go # 消息转换审计测试
 │   │       ├── params_audit_test.go # 参数映射审计测试
 │   │       └── stream_test.go     # 流式事件单元测试
-│   └── gemini/                    # Google Gemini 协议适配器
-│       ├── types.go               # Gemini 协议原生请求/响应 DTO（本地定义）
-│       ├── mock_test.go           # httptest mock server 测试辅助工具
-   │       ├── audit_test.go          # 流事件审计测试
-   │       ├── params_audit_test.go   # 参数映射审计测试
-   │       └── stream_test.go         # 流式事件单元测试
-   │   └── bamboo/                    # bamboo 原生协议适配器
-   │       ├── provider.go            # Provider 构造函数 + Options 模式
-   │       ├── complete.go            # 非流式对话
-   │       ├── chat.go                # 流式对话
-   │       ├── stream.go              # SSE 事件 → StreamEvent 转换
-   │       ├── message.go             # 消息格式转换
-   │       ├── params.go              # 共享参数构建
-   │       ├── models.go              # 模型列表
-   │       ├── types.go               # 本地 wire DTO
-   │       ├── provider_test.go       # 集成测试
-   │       ├── complete_test.go       # 非流式测试
-   │       ├── stream_test.go         # 流式测试
-   │       └── mock_test.go           # httptest 测试辅助
-   │
-   ├── bamboo/                        # 公共 SDK 层 — 面向上层业务的统一 API
+│   ├── gemini/                    # Google Gemini 协议适配器
+│   │   ├── types.go               # Gemini 协议原生请求/响应 DTO（本地定义）
+│   │   ├── mock_test.go           # httptest mock server 测试辅助工具
+│   │   ├── audit_test.go          # 流事件审计测试
+│   │   ├── params_audit_test.go   # 参数映射审计测试
+│   │   └── stream_test.go         # 流式事件单元测试
+│   └── bamboo/                    # bamboo 原生协议适配器
+│       ├── provider.go            # Provider 构造函数 + Options 模式
+│       ├── complete.go            # 非流式对话
+│       ├── chat.go                # 流式对话
+│       ├── stream.go              # SSE 事件 → StreamEvent 转换
+│       ├── message.go             # 消息格式转换
+│       ├── params.go              # 共享参数构建
+│       ├── models.go              # 模型列表
+│       ├── types.go               # 本地 wire DTO
+│       ├── provider_test.go       # 集成测试
+│       ├── complete_test.go       # 非流式测试
+│       ├── stream_test.go         # 流式测试
+│       └── mock_test.go           # httptest 测试辅助
+│
+├── bamboo/                        # 公共 SDK 层 — 面向上层业务的统一 API
 │   ├── bamboo.go                  # BambooClient 接口 + Chat/Complete 实现 + NewClientWithOptions
 │   ├── message.go                 # BambooMessage (含 ReasoningID) + ContentBlock 消息模型 + UnmarshalJSON
 │   ├── response.go                # Response (含 ResponseID) / Usage 非流式响应类型 + UnmarshalJSON
@@ -88,15 +88,15 @@ bamboo-messages/
 │   ├── convert.go                 # 类型转换 (provider ↔ bamboo) + StreamConverter (优先级 FinishReason + Error 自动 flush + 双键工具 Block)
 │   ├── content.go                 # ContentBlock 构造函数 + WithCache 变体 + RegisterBlockType + ContentBlocks 反序列化
 │   ├── errors.go                  # BambooError 类型别名（= pkgErrors.BambooError）+ NewBambooError 变量别名
-   │   ├── codec/                     # N-to-N 协议编解码层（anthropic/openai/responses/gemini/bamboo 格式）
-   │   │   └── bamboo/                # bamboo 原生协议编解码（identity transform）
-   │   │       ├── codec.go           # Codec 实例 + init() 注册到 registry.go
-   │   │       ├── request.go         # 解析 bamboo 原生请求信封
-   │   │       ├── response.go        # 序列化为 bamboo 原生响应 JSON
-   │   │       ├── stream.go          # 流式序列化器
-   │   │       ├── error.go           # 序列化 bamboo 原生错误响应
-   │   │       └── *_test.go          # 单元测试
-   │   ├── relay/                     # 跨协议中继层 (Relay / RelayStream + 纯透传 + Debug)
+│   ├── codec/                     # N-to-N 协议编解码层（anthropic/openai/responses/gemini/bamboo 格式）
+│   │   └── bamboo/                # bamboo 原生协议编解码（identity transform）
+│   │       ├── codec.go           # Codec 实例 + init() 注册到 registry.go
+│   │       ├── request.go         # 解析 bamboo 原生请求信封
+│   │       ├── response.go        # 序列化为 bamboo 原生响应 JSON
+│   │       ├── stream.go          # 流式序列化器
+│   │       ├── error.go           # 序列化 bamboo 原生错误响应
+│   │       └── *_test.go          # 单元测试
+│   ├── relay/                     # 跨协议中继层 (Relay / RelayStream + 纯透传 + Debug)
 │   └── *_test.go                  # 单元测试 + 集成测试
 │
 ├── pkg/                            # 通用组件工具包 — 可复用的工具函数和类型
@@ -110,6 +110,15 @@ bamboo-messages/
 ├── internal/
 │   └── xerr/                      # 内部最小错误类型（替代 bamboo-base-go/common/error）
 │       └── error.go               # xerr.Error — err + Message
+│
+├── develop/                       # 开发期设计文档（本地参考，spec / roadmap / 协议设计）
+│   └── docs/
+│       ├── bamboo-messages-spec.md
+│       ├── message-format.md
+│       ├── overview.md
+│       ├── provider-interface.md
+│       ├── roadmap.md
+│       └── stream-design.md
 │
 ├── example/                       # 使用示例
 │   └── main.go                    # 完整示例代码
@@ -144,6 +153,7 @@ bamboo-messages/
 | 理解 BlockStart 事件 | `provider/stream.go` | BlockStartData + 构造函数 |
 | 理解 Prompt Caching | `provider/type.go` + `bamboo/option.go` + `bamboo/content.go` | CacheControl / SystemCacheControl / PromptCacheKey / WithCache 构造函数 |
 | 查看使用示例 | `example/main.go` | 完整示例代码 |
+| 查阅协议设计文档 | `develop/docs/` | spec / roadmap / message-format / stream-design / provider-interface / overview |
 | 理解 N-to-N 协议互转 | `bamboo/codec/` + `bamboo/relay/` | codec 编解码 + relay 中继 |
 | 理解流式纯透传 | `bamboo/relay/relay.go` | RelayStream 直接透传上游 SSE 帧到输出 channel |
 | 理解内部错误类型 | `internal/xerr/error.go` | 最小错误包装，替代外部依赖 |
@@ -479,6 +489,7 @@ BAMBOO_DEBUG=true go test ./provider/anthropic/...
 
 - 所有适配器统一使用 `User-Agent: BM-SDK/{version}`（见 `provider/version.go`），版本通过 `runtime/debug.ReadBuildInfo()` 动态读取
 - `docs/` 目录包含设计文档（new-api-feasibility.md / new-api-integration.md）
+- `develop/docs/` 目录包含开发期设计参考文档（spec / message-format / overview / provider-interface / roadmap / stream-design），用于协议设计与实现对照
 - 测试需要有效的 API Key，目前测试为 integration test（需要网络）
 - `internal/xerr/` 替代了原 `bamboo-base-go/common/error` 依赖，使 SDK 内部错误处理自包含
 - OpenAI Completions 适配器的 Legacy 兼容模式可对接旧版第三方代理端点
