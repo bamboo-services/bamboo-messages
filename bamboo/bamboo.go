@@ -90,7 +90,7 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 	select {
 	case firstEvent, hasFirst = <-providerCh:
 	case <-ctx.Done():
-		return nil, pkgErrors.NewBambooError("SDK", "对话已取消: "+ctx.Err().Error(), 0)
+		return nil, pkgErrors.NewBambooErrorWithCause("SDK", "对话已取消: "+ctx.Err().Error(), 0, ctx.Err())
 	}
 	if !hasFirst {
 		return nil, pkgErrors.NewBambooError("SDK", "provider 流在发出任何事件前已关闭", 0)
@@ -167,7 +167,7 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 
 				select {
 				case <-ctx.Done():
-					cancelErr := pkgErrors.NewBambooError("SDK", "对话已取消: "+ctx.Err().Error(), 0)
+					cancelErr := pkgErrors.NewBambooErrorWithCause("SDK", "对话已取消: "+ctx.Err().Error(), 0, ctx.Err())
 					writeAll(converter.Convert(provider.StreamEvent{
 						Type: provider.StreamTypeError,
 						Err:  cancelErr,
@@ -230,5 +230,5 @@ func wrapProviderError(err error) *BambooError {
 	if errors.As(err, &bambooErr) {
 		return bambooErr
 	}
-	return pkgErrors.NewBambooError("SDK", err.Error(), 0)
+	return pkgErrors.NewBambooErrorWithCause("SDK", err.Error(), 0, err)
 }

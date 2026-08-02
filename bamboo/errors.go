@@ -15,3 +15,12 @@ type BambooError = pkgErrors.BambooError
 //   - message - 错误描述信息
 //   - statusCode - HTTP 状态码（可选，无特定状态码可传 0）
 var NewBambooError = pkgErrors.NewBambooError
+
+// NewBambooErrorWithCause 是 pkgErrors.NewBambooErrorWithCause 的别名。
+//
+// 参数:
+//   - category - 错误分类
+//   - message - 错误描述信息
+//   - statusCode - HTTP 状态码（可选，无特定状态码可传 0）
+//   - cause - 底层错误（可为 nil）
+var NewBambooErrorWithCause = pkgErrors.NewBambooErrorWithCause
