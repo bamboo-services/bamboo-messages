@@ -283,6 +283,114 @@ func TestConvertConfigNilOptionals(t *testing.T) {
 	}
 }
 
+// ---- configToProvider 思考屏蔽规则测试 ----
+
+func TestConvertConfigToolChoiceSuppressesThinking(t *testing.T) {
+	cfg := &RequestConfig{
+		Model:          "deepseek-v4-flash",
+		ToolChoice:     "required",
+		ThinkingConfig: &ThinkingConfig{Effort: "medium"},
+		ProviderExtra: map[string]any{
+			"thinking": map[string]any{"type": "enabled"},
+			"seed":     int64(42),
+		},
+	}
+	result := configToProvider(cfg)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.ToolChoice != "required" {
+		t.Errorf("ToolChoice = %q, want required", result.ToolChoice)
+	}
+	if result.ThinkingConfig != nil {
+		t.Errorf("ThinkingConfig = %v, want nil (tool_choice 存在时屏蔽 thinking)", result.ThinkingConfig)
+	}
+	if _, ok := result.ProviderExtra["thinking"]; ok {
+		t.Errorf("ProviderExtra 仍含 thinking 键: %v", result.ProviderExtra)
+	}
+	if _, ok := result.ProviderExtra["seed"]; !ok {
+		t.Errorf("ProviderExtra 丢失非 thinking 字段 seed: %v", result.ProviderExtra)
+	}
+}
+
+func TestConvertConfigNoToolChoiceKeepsThinking(t *testing.T) {
+	cfg := &RequestConfig{
+		Model:          "deepseek-v4-flash",
+		ThinkingConfig: &ThinkingConfig{Effort: "high"},
+	}
+	result := configToProvider(cfg)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.ToolChoice != "" {
+		t.Errorf("ToolChoice = %q, want empty", result.ToolChoice)
+	}
+	if result.ThinkingConfig == nil || result.ThinkingConfig.Effort != "high" {
+		t.Errorf("ThinkingConfig = %v, want effort=high 透传", result.ThinkingConfig)
+	}
+}
+
+func TestConvertConfigToolChoiceWithToolsKeepsTools(t *testing.T) {
+	cfg := &RequestConfig{
+		Model:      "qwen-plus",
+		ToolChoice: "auto",
+		Tools: []Tool{
+			{
+				Name:        "get_weather",
+				Description: "Get weather",
+				InputSchema: json.RawMessage(`{"type":"object"}`),
+			},
+		},
+	}
+	result := configToProvider(cfg)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.ToolChoice != "auto" {
+		t.Errorf("ToolChoice = %q, want auto", result.ToolChoice)
+	}
+	if len(result.Tools) != 1 {
+		t.Fatalf("Tools len = %d, want 1", len(result.Tools))
+	}
+	if result.Tools[0].Function.Name != "get_weather" {
+		t.Errorf("Tool name = %q, want get_weather", result.Tools[0].Function.Name)
+	}
+	if result.ThinkingConfig != nil {
+		t.Errorf("ThinkingConfig = %v, want nil", result.ThinkingConfig)
+	}
+}
+
+func TestStripThinkingExtra(t *testing.T) {
+	// 原 map 无 thinking：返回原引用，不复制。
+	extra := map[string]any{"seed": int64(1)}
+	got := stripThinkingExtra(extra)
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if len(got) != 1 {
+		t.Errorf("len = %d, want 1", len(got))
+	}
+	// 原 map 含 thinking：剔除且不污染原始 map。
+	extra2 := map[string]any{
+		"thinking": map[string]any{"type": "enabled"},
+		"seed":     int64(2),
+	}
+	got2 := stripThinkingExtra(extra2)
+	if _, ok := got2["thinking"]; ok {
+		t.Errorf("got2 仍含 thinking: %v", got2)
+	}
+	if _, ok := extra2["thinking"]; !ok {
+		t.Errorf("原始 map 被修改: %v", extra2)
+	}
+	if got2["seed"] != int64(2) {
+		t.Errorf("got2 seed = %v, want 2", got2["seed"])
+	}
+	// nil 输入返回 nil。
+	if stripThinkingExtra(nil) != nil {
+		t.Error("nil 输入应返回 nil")
+	}
+}
+
 // ---- toolsToProvider 测试 ----
 
 func TestConvertTools(t *testing.T) {

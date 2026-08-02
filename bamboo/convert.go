@@ -194,6 +194,18 @@ func configToProvider(cfg *RequestConfig) *provider.ChatConfig {
 	if cfg == nil {
 		return nil
 	}
+
+	var thinkingConfig *provider.ThinkingConfig
+	var providerExtra map[string]any
+	if cfg.ToolChoice != "" {
+		// 有 tool_choice：屏蔽 thinking，避免上游思考模式与工具选择冲突。
+		thinkingConfig = nil
+		providerExtra = stripThinkingExtra(cfg.ProviderExtra)
+	} else {
+		thinkingConfig = cfg.ThinkingConfig
+		providerExtra = cfg.ProviderExtra
+	}
+
 	return &provider.ChatConfig{
 		Model:              cfg.Model,
 		MaxTokens:          cfg.MaxTokens,
@@ -206,11 +218,30 @@ func configToProvider(cfg *RequestConfig) *provider.ChatConfig {
 		ToolChoice:         cfg.ToolChoice,
 		ResponseFormat:     cfg.ResponseFormat,
 		ParallelToolCalls:  cfg.ParallelToolCalls,
-		ThinkingConfig:     cfg.ThinkingConfig,
+		ThinkingConfig:     thinkingConfig,
 		SystemCacheControl: cfg.SystemCacheControl,
 		PromptCacheKey:     cfg.PromptCacheKey,
-		ProviderExtra:      cfg.ProviderExtra,
+		ProviderExtra:      providerExtra,
 	}
+}
+
+// stripThinkingExtra 返回剔除 thinking 键后的 ProviderExtra 副本。
+//
+// 原 map 无 thinking 键时直接返回原引用（避免无谓复制）；
+// 含 thinking 键时复制一份再删除，不修改调用方持有的原始 map。
+func stripThinkingExtra(extra map[string]any) map[string]any {
+	if extra == nil {
+		return nil
+	}
+	if _, ok := extra["thinking"]; !ok {
+		return extra
+	}
+	cloned := make(map[string]any, len(extra))
+	for k, v := range extra {
+		cloned[k] = v
+	}
+	delete(cloned, "thinking")
+	return cloned
 }
 
 // toolsToProvider 将 bamboo.Tool 列表转换为 provider.Tool 列表。
