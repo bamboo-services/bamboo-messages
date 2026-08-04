@@ -16,6 +16,13 @@ import (
 //
 // 将 provider.Message 映射为 map[string]any 形式的 System/User/Assistant/Tool 消息。
 // 当 ContentBlocks 不为空时，用户消息会构造为多模态 content 数组。
+//
+// 工具消息的邻接约束：Chat Completions 语义要求 tool 消息必须连续紧跟
+// 其对应的 assistant(tool_calls) 消息。若消息序列中 user 文本消息夹在两者之间
+// （如 anthropic 入口的 user 消息同时含 text + tool_result），上游会以
+// "An assistant message with 'tool_calls' must be followed by tool messages"
+// 拒绝请求。因此 tool 消息通过声明位置映射被插入到紧跟 assistant 的位置，
+// 保持并行工具响应的原始顺序。
 func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []provider.Message) []map[string]any {
 	result := make([]map[string]any, 0, len(messages)+1)
 
@@ -25,6 +32,11 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 			"content": systemPrompt,
 		})
 	}
+
+	// tool_call_id → 声明它的 assistant 在 result 中的位置
+	declPos := map[string]int{}
+	// assistant 位置 → 已插入的 tool 消息数（保证并行响应保持输入顺序）
+	toolCountByAnchor := map[int]int{}
 
 	for _, msg := range messages {
 		switch msg.Role {
@@ -85,13 +97,44 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 				})
 			}
 		case provider.RoleAssistant:
-			result = append(result, p.buildAssistantMessage(msg))
+			am := p.buildAssistantMessage(msg)
+			result = append(result, am)
+			// 记录该 assistant 声明的所有 tool_call id → 在 result 中的位置
+			if len(msg.ToolCalls) > 0 {
+				placed := len(result) - 1
+				for _, tc := range msg.ToolCalls {
+					if tc.ID != "" {
+						declPos[tc.ID] = placed
+					}
+				}
+			}
 		case provider.RoleTool:
-			result = append(result, map[string]any{
+			toolMsg := map[string]any{
 				"role":         "tool",
 				"content":      msg.Content,
 				"tool_call_id": msg.ToolCallID,
-			})
+			}
+			// 将 tool 消息插入到声明它的 assistant 之后，保持邻接约束
+			anchor, ok := declPos[msg.ToolCallID]
+			if !ok {
+				// 防御兜底：sanitizeToolMessages 应已过滤孤儿 tool 消息，
+				// 此处追加到末尾保持兼容。
+				xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
+					fmt.Sprintf("warning: tool 消息(tool_call_id=%q) 无对应 assistant tool_call，追加到末尾", msg.ToolCallID))
+				result = append(result, toolMsg)
+				continue
+			}
+			insertPos := anchor + 1 + toolCountByAnchor[anchor]
+			toolCountByAnchor[anchor]++
+			result = append(result, nil)
+			copy(result[insertPos+1:], result[insertPos:])
+			result[insertPos] = toolMsg
+			// 插入后，所有在 insertPos 及之后的元素后移一格，修正 declPos 位置
+			for id, pos := range declPos {
+				if pos >= insertPos {
+					declPos[id] = pos + 1
+				}
+			}
 		case provider.RoleSystem:
 			// system 角色降级为 user（OpenAI 要求 system 仅在 messages 数组顶部出现一次）
 			xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),

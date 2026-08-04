@@ -67,6 +67,13 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 			case *RedactedThinkingBlock:
 				redactedThinkingData = b.Data
 			case *ToolUseBlock:
+				// 过滤无 id 的 tool_use 废片：无法与后续 tool_result 配对，
+				// 且 OpenAI 等上游会因此报 500，直接忽略不向上传递。
+				if b.ID == "" {
+					xLog.WithName("bamboo").SugarWarn(context.Background(),
+						"warning: tool_use block 缺少 id，已忽略（废片，不向上传递）")
+					continue
+				}
 				toolCalls = append(toolCalls, provider.ToolCall{
 					ID:   b.ID,
 					Type: "function",
@@ -81,6 +88,13 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 					cacheControlBlockType = "tool_use"
 				}
 			case *ToolResultBlock:
+				// 过滤无 tool_use_id 的 tool_result 废片：无法与 assistant tool_call 配对，
+				// 且 OpenAI 等上游会因此报 500，直接忽略不向上传递。
+				if b.ToolUseID == "" {
+					xLog.WithName("bamboo").SugarWarn(context.Background(),
+						"warning: tool_result block 缺少 tool_use_id，已忽略（废片，不向上传递）")
+					continue
+				}
 				toolResults = append(toolResults, provider.Message{
 					Role:                  provider.RoleTool,
 					Content:               b.Content,
@@ -160,7 +174,117 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		}
 		result = append(result, toolResults...)
 	}
+
+	// 跨消息孤儿配对：丢弃无法配对的废片工具调用（场景 B/D），
+	// 避免 OpenAI 等上游因 "insufficient tool messages following tool_calls"
+	// 返回 500。正常配对的工具调用不受影响。
+	result = sanitizeToolMessages(result)
+
 	return result, nil
+}
+
+// sanitizeToolMessages 过滤消息序列中无法配对的孤儿工具调用。
+//
+// 配对规则（Chat Completions 语义下 tool 必须紧跟 assistant(tool_calls)）：
+//   - assistant 声明了但没有任何 tool 响应的 tool_call → 丢弃（孤儿工具调用）
+//   - tool 响应没有前置的 assistant 声明 → 丢弃（孤立工具响应）
+//   - tool 响应出现在其声明 assistant 之前 → 丢弃（乱序，无法还原）
+//   - 同一 tool_call_id 的重复响应 → 仅保留第一个
+//   - assistant 消息过滤后无任何内容（无文本/思考/内容块）→ 整体跳过
+//
+// 丢弃后各消息保持原始相对顺序。仅处理含 tool 相关的消息，纯文本消息原样透传。
+func sanitizeToolMessages(msgs []provider.Message) []provider.Message {
+	// 声明记录：tool_call_id → 首次声明的 assistant 消息位置
+	type toolDecl struct {
+		msgIdx    int // 声明它的 assistant 在 msgs 中的下标
+		callIdx   int // 在 ToolCalls 中的下标
+		responded bool
+	}
+	declared := make(map[string]*toolDecl)
+	for i := range msgs {
+		if msgs[i].Role != provider.RoleAssistant {
+			continue
+		}
+		for j := range msgs[i].ToolCalls {
+			id := msgs[i].ToolCalls[j].ID
+			if id == "" {
+				continue // 修改 1 已过滤，此处防御
+			}
+			if _, ok := declared[id]; !ok {
+				declared[id] = &toolDecl{msgIdx: i, callIdx: j}
+			}
+		}
+	}
+
+	// 响应记录：tool_call_id → 首个有效 tool 响应的 msgs 下标
+	respondedPos := make(map[string]int)
+	for i := range msgs {
+		if msgs[i].Role != provider.RoleTool {
+			continue
+		}
+		id := msgs[i].ToolCallID
+		if id == "" {
+			continue
+		}
+		d, ok := declared[id]
+		if !ok {
+			xLog.WithName("bamboo").SugarWarn(context.Background(),
+				fmt.Sprintf("warning: tool_result(tool_use_id=%q) 无对应 assistant tool_call，已忽略（孤儿工具响应）", id))
+			continue
+		}
+		if d.msgIdx > i {
+			xLog.WithName("bamboo").SugarWarn(context.Background(),
+				fmt.Sprintf("warning: tool_result(tool_use_id=%q) 出现在其 assistant tool_call 之前，已忽略（乱序）", id))
+			continue
+		}
+		if _, dup := respondedPos[id]; dup {
+			xLog.WithName("bamboo").SugarWarn(context.Background(),
+				fmt.Sprintf("warning: tool_result(tool_use_id=%q) 重复，已忽略", id))
+			continue
+		}
+		respondedPos[id] = i
+		d.responded = true
+	}
+
+	result := make([]provider.Message, 0, len(msgs))
+	for i := range msgs {
+		m := msgs[i]
+		switch m.Role {
+		case provider.RoleAssistant:
+			if len(m.ToolCalls) > 0 {
+				kept := make([]provider.ToolCall, 0, len(m.ToolCalls))
+				for j := range m.ToolCalls {
+					id := m.ToolCalls[j].ID
+					d := declared[id]
+					if d != nil && d.msgIdx == i && d.callIdx == j && d.responded {
+						kept = append(kept, m.ToolCalls[j])
+					} else if id != "" {
+						xLog.WithName("bamboo").SugarWarn(context.Background(),
+							fmt.Sprintf("warning: assistant tool_call(id=%q) 无对应 tool_result，已忽略（孤儿工具调用）", id))
+					}
+				}
+				m.ToolCalls = kept
+			}
+			// 过滤后无任何内容 → 整体跳过
+			if len(m.ToolCalls) == 0 && m.Content == "" && m.ThinkingContent == "" &&
+				len(m.ContentBlocks) == 0 && m.RedactedThinkingData == "" {
+				xLog.WithName("bamboo").SugarWarn(context.Background(),
+					"warning: assistant 消息仅含被过滤的 tool_call，已整体忽略")
+				continue
+			}
+			result = append(result, m)
+		case provider.RoleTool:
+			// 仅保留首个有效响应（respondedPos 记录的）。
+			// 注意：必须用 ok 模式判断存在性，避免 key 缺失时
+			// map 零值 0 与位置 0 的 tool 消息误匹配。
+			if pos, ok := respondedPos[m.ToolCallID]; ok && pos == i {
+				result = append(result, m)
+			}
+		default:
+			result = append(result, m)
+		}
+	}
+	return result
 }
 
 // providerRole 将 bamboo.MessageRole 转换为 provider.MessageRole。

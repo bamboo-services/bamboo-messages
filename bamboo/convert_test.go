@@ -64,13 +64,17 @@ func TestConvertToolUseMessage(t *testing.T) {
 			NewTextBlock("calling tool"),
 			NewToolUseBlock("call_123", "get_weather", map[string]any{"city": "Tokyo"}),
 		),
+		// 配对的 tool_result，使 assistant tool_call 免于被孤儿配对过滤
+		NewUserMessageBlocks(
+			NewToolResultBlock("call_123", "sunny", false),
+		),
 	}
 	result, err := messagesToProvider(msgs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(result))
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages (assistant + tool_result), got %d", len(result))
 	}
 	if result[0].Content != "calling tool" {
 		t.Errorf("Content = %q, want %q", result[0].Content, "calling tool")
@@ -96,10 +100,21 @@ func TestConvertToolUseMessage(t *testing.T) {
 	if args["city"] != "Tokyo" {
 		t.Errorf("Arguments.city = %v, want Tokyo", args["city"])
 	}
+	// 第二条为拆分出的 tool 消息
+	if result[1].Role != provider.RoleTool {
+		t.Errorf("result[1].Role = %q, want %q", result[1].Role, provider.RoleTool)
+	}
+	if result[1].ToolCallID != "call_123" {
+		t.Errorf("result[1].ToolCallID = %q, want %q", result[1].ToolCallID, "call_123")
+	}
 }
 
 func TestConvertToolResultMessage(t *testing.T) {
 	msgs := []BambooMessage{
+		// 前置 assistant 声明，使 tool_result 免于被孤儿配对过滤
+		NewAssistantMessageBlocks(
+			NewToolUseBlock("call_123", "get_weather", nil),
+		),
 		NewUserMessageBlocks(
 			NewToolResultBlock("call_123", "sunny, 25°C", false),
 		),
@@ -108,17 +123,17 @@ func TestConvertToolResultMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result) != 1 {
-		t.Fatalf("expected 1 message (tool_result split), got %d", len(result))
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages (assistant + tool_result), got %d", len(result))
 	}
-	if result[0].Role != provider.RoleTool {
-		t.Errorf("Role = %q, want %q", result[0].Role, provider.RoleTool)
+	if result[1].Role != provider.RoleTool {
+		t.Errorf("Role = %q, want %q", result[1].Role, provider.RoleTool)
 	}
-	if result[0].Content != "sunny, 25°C" {
-		t.Errorf("Content = %q, want %q", result[0].Content, "sunny, 25°C")
+	if result[1].Content != "sunny, 25°C" {
+		t.Errorf("Content = %q, want %q", result[1].Content, "sunny, 25°C")
 	}
-	if result[0].ToolCallID != "call_123" {
-		t.Errorf("ToolCallID = %q, want %q", result[0].ToolCallID, "call_123")
+	if result[1].ToolCallID != "call_123" {
+		t.Errorf("ToolCallID = %q, want %q", result[1].ToolCallID, "call_123")
 	}
 }
 
@@ -923,42 +938,45 @@ func TestConvertStreamFullLifecycle(t *testing.T) {
 // ---- 边界情况测试 ----
 
 func TestConvertMultipleToolResults(t *testing.T) {
+	// 合并为单次完整调用：assistant 声明两个 tool_use，user 携带两个配对的 tool_result，
+	// 避免碎片化调用导致孤儿配对过滤。
 	msgs := []BambooMessage{
 		NewAssistantMessageBlocks(
 			NewToolUseBlock("call_1", "tool_a", nil),
 			NewToolUseBlock("call_2", "tool_b", nil),
 		),
-	}
-	assistantMsgs, err := messagesToProvider(msgs)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(assistantMsgs) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(assistantMsgs))
-	}
-	if len(assistantMsgs[0].ToolCalls) != 2 {
-		t.Errorf("expected 2 tool calls, got %d", len(assistantMsgs[0].ToolCalls))
-	}
-
-	// Now test tool_result messages
-	msgs2 := []BambooMessage{
 		NewUserMessageBlocks(
 			NewToolResultBlock("call_1", "result A", false),
 			NewToolResultBlock("call_2", "result B", false),
 		),
 	}
-	resultMsgs, err := messagesToProvider(msgs2)
+
+	result, err := messagesToProvider(msgs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resultMsgs) != 2 {
-		t.Fatalf("expected 2 messages (split tool_results), got %d", len(resultMsgs))
+	if len(result) != 3 {
+		t.Fatalf("expected 3 messages (1 assistant + 2 tool_results), got %d", len(result))
 	}
-	if resultMsgs[0].ToolCallID != "call_1" {
-		t.Errorf("resultMsgs[0].ToolCallID = %q, want call_1", resultMsgs[0].ToolCallID)
+	// 第一条: assistant with 2 tool calls
+	if result[0].Role != provider.RoleAssistant {
+		t.Errorf("result[0].Role = %q, want assistant", result[0].Role)
 	}
-	if resultMsgs[1].ToolCallID != "call_2" {
-		t.Errorf("resultMsgs[1].ToolCallID = %q, want call_2", resultMsgs[1].ToolCallID)
+	if len(result[0].ToolCalls) != 2 {
+		t.Errorf("expected 2 tool calls, got %d", len(result[0].ToolCalls))
+	}
+	// 后两条: 拆分出的 tool 消息
+	if result[1].Role != provider.RoleTool {
+		t.Errorf("result[1].Role = %q, want tool", result[1].Role)
+	}
+	if result[1].ToolCallID != "call_1" {
+		t.Errorf("result[1].ToolCallID = %q, want call_1", result[1].ToolCallID)
+	}
+	if result[2].Role != provider.RoleTool {
+		t.Errorf("result[2].Role = %q, want tool", result[2].Role)
+	}
+	if result[2].ToolCallID != "call_2" {
+		t.Errorf("result[2].ToolCallID = %q, want call_2", result[2].ToolCallID)
 	}
 }
 
@@ -1166,15 +1184,20 @@ func TestMessagesToProvider_MixedBlocks(t *testing.T) {
 			NewTextBlock(" and also "),
 			NewToolUseBlock("call_2", "calculator", map[string]any{"expr": "1+1"}),
 		),
+		// 配对的 tool_result，使两个 tool_call 免于被孤儿配对过滤
+		NewUserMessageBlocks(
+			NewToolResultBlock("call_1", "result A", false),
+			NewToolResultBlock("call_2", "result B", false),
+		),
 	}
 	result, err := messagesToProvider(msgs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result) != 1 {
-		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	if len(result) != 3 {
+		t.Fatalf("期望 3 条消息, 实际 %d", len(result))
 	}
-	// 两个 text 拼接
+	// 第一条: assistant，两个 text 拼接
 	if result[0].Content != "let me search and also " {
 		t.Errorf("Content = %q, 期望 %q", result[0].Content, "let me search and also ")
 	}
@@ -1188,6 +1211,13 @@ func TestMessagesToProvider_MixedBlocks(t *testing.T) {
 	if result[0].ToolCalls[1].Function.Name != "calculator" {
 		t.Errorf("ToolCalls[1].Name = %q, 期望 calculator", result[0].ToolCalls[1].Function.Name)
 	}
+	// 后两条: 拆分出的 tool 消息
+	if result[1].Role != provider.RoleTool || result[1].ToolCallID != "call_1" {
+		t.Errorf("result[1] 期望 tool(call_1), 实际 role=%q id=%q", result[1].Role, result[1].ToolCallID)
+	}
+	if result[2].Role != provider.RoleTool || result[2].ToolCallID != "call_2" {
+		t.Errorf("result[2] 期望 tool(call_2), 实际 role=%q id=%q", result[2].Role, result[2].ToolCallID)
+	}
 }
 
 // TestMessagesToProvider_NilToolUseInput 验证 tool_use block 的 Input 为 nil 时使用空 JSON。
@@ -1196,13 +1226,17 @@ func TestMessagesToProvider_NilToolUseInput(t *testing.T) {
 		NewAssistantMessageBlocks(
 			NewToolUseBlock("call_nil", "no_args_tool", nil),
 		),
+		// 配对的 tool_result，使 tool_call 免于被孤儿配对过滤
+		NewUserMessageBlocks(
+			NewToolResultBlock("call_nil", "done", false),
+		),
 	}
 	result, err := messagesToProvider(msgs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result) != 1 {
-		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	if len(result) != 2 {
+		t.Fatalf("期望 2 条消息, 实际 %d", len(result))
 	}
 	if len(result[0].ToolCalls) != 1 {
 		t.Fatalf("期望 1 个 tool call, 实际 %d", len(result[0].ToolCalls))
@@ -1219,13 +1253,17 @@ func TestMessagesToProvider_OnlyToolUseBlocks(t *testing.T) {
 		NewAssistantMessageBlocks(
 			NewToolUseBlock("call_1", "tool_a", nil),
 		),
+		// 配对的 tool_result，使 tool_call 免于被孤儿配对过滤
+		NewUserMessageBlocks(
+			NewToolResultBlock("call_1", "result", false),
+		),
 	}
 	result, err := messagesToProvider(msgs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result) != 1 {
-		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	if len(result) != 2 {
+		t.Fatalf("期望 2 条消息, 实际 %d", len(result))
 	}
 	// 没有文本，但 tool_calls 存在，消息应被保留
 	if result[0].Content != "" {
@@ -2527,6 +2565,10 @@ func TestConvertCacheControlBlockType_ImageBlockNilSource(t *testing.T) {
 
 func TestConvertCacheControlBlockType_ToolResultBlock(t *testing.T) {
 	msgs := []BambooMessage{
+		// 前置 assistant 声明，使 tool_result 免于被孤儿配对过滤
+		NewAssistantMessageBlocks(
+			NewToolUseBlock("call_1", "get_weather", nil),
+		),
 		NewUserMessageBlocks(
 			NewToolResultBlockWithCache("call_1", "result content", false, provider.NewEphemeralCacheControl()),
 		),
@@ -2536,16 +2578,304 @@ func TestConvertCacheControlBlockType_ToolResultBlock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(result) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(result))
+	if len(result) != 2 {
+		t.Fatalf("expected 2 messages (assistant + tool_result), got %d", len(result))
 	}
-	if result[0].Role != provider.RoleTool {
-		t.Errorf("Role = %q, want %q", result[0].Role, provider.RoleTool)
+	if result[1].Role != provider.RoleTool {
+		t.Errorf("Role = %q, want %q", result[1].Role, provider.RoleTool)
 	}
-	if result[0].CacheControl == nil {
+	if result[1].CacheControl == nil {
 		t.Fatal("expected CacheControl to be set")
 	}
-	if result[0].CacheControlBlockType != "tool_result" {
-		t.Errorf("CacheControlBlockType = %q, want %q", result[0].CacheControlBlockType, "tool_result")
+	if result[1].CacheControlBlockType != "tool_result" {
+		t.Errorf("CacheControlBlockType = %q, want %q", result[1].CacheControlBlockType, "tool_result")
+	}
+}
+
+// ---- 修改 1：无 id 废片过滤测试 ----
+
+// TestMessagesToProvider_DropsEmptyIDToolUse 验证无 id 的 tool_use block 被过滤。
+func TestMessagesToProvider_DropsEmptyIDToolUse(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewToolUseBlock("", "tool_a", nil),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 0 {
+		t.Fatalf("期望 0 条消息, 实际 %d", len(result))
+	}
+}
+
+// TestMessagesToProvider_DropsEmptyIDToolUse_WithText 验证文本旁的无 id tool_use 被过滤，text 保留。
+func TestMessagesToProvider_DropsEmptyIDToolUse_WithText(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewTextBlock("hi"),
+			NewToolUseBlock("", "tool_a", nil),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	}
+	if result[0].Content != "hi" {
+		t.Errorf("Content = %q, 期望 %q", result[0].Content, "hi")
+	}
+	if len(result[0].ToolCalls) != 0 {
+		t.Errorf("期望 0 个 tool call, 实际 %d", len(result[0].ToolCalls))
+	}
+}
+
+// TestMessagesToProvider_DropsEmptyIDToolResult 验证无 tool_use_id 的 tool_result block 被过滤。
+func TestMessagesToProvider_DropsEmptyIDToolResult(t *testing.T) {
+	msgs := []BambooMessage{
+		NewUserMessageBlocks(
+			NewToolResultBlock("", "result", false),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 0 {
+		t.Fatalf("期望 0 条消息, 实际 %d", len(result))
+	}
+}
+
+// TestMessagesToProvider_DropsEmptyIDToolResult_WithText 验证文本旁的无 tool_use_id tool_result 被过滤，text 保留。
+func TestMessagesToProvider_DropsEmptyIDToolResult_WithText(t *testing.T) {
+	msgs := []BambooMessage{
+		NewUserMessageBlocks(
+			NewTextBlock("hi"),
+			NewToolResultBlock("", "result", false),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	}
+	if result[0].Role != provider.RoleUser {
+		t.Errorf("Role = %q, 期望 %q", result[0].Role, provider.RoleUser)
+	}
+	if result[0].Content != "hi" {
+		t.Errorf("Content = %q, 期望 %q", result[0].Content, "hi")
+	}
+}
+
+// ---- 修改 2：sanitizeToolMessages 孤儿配对测试 ----
+
+func toolCallMsg(id, name, text string) provider.Message {
+	var calls []provider.ToolCall
+	if id != "" {
+		calls = []provider.ToolCall{{
+			ID:       id,
+			Type:     "function",
+			Function: provider.FunctionCall{Name: name},
+		}}
+	}
+	return provider.Message{Role: provider.RoleAssistant, Content: text, ToolCalls: calls}
+}
+
+func toolResultMsg(id, content string) provider.Message {
+	return provider.Message{Role: provider.RoleTool, ToolCallID: id, Content: content}
+}
+
+// TestSanitizeToolMessages_KeepsNormalPair 验证正常的 assistant(tool_call) → tool 配对被保留。
+func TestSanitizeToolMessages_KeepsNormalPair(t *testing.T) {
+	msgs := []provider.Message{
+		toolCallMsg("tc1", "get_weather", ""),
+		toolResultMsg("tc1", "晴"),
+	}
+	result := sanitizeToolMessages(msgs)
+	if len(result) != 2 {
+		t.Fatalf("期望 2 条消息, 实际 %d", len(result))
+	}
+	if len(result[0].ToolCalls) != 1 {
+		t.Errorf("期望 1 个 tool call, 实际 %d", len(result[0].ToolCalls))
+	}
+}
+
+// TestSanitizeToolMessages_DropsOrphanAssistantToolCall 验证无 tool 响应的孤儿 tool_call 被过滤（场景 B）。
+func TestSanitizeToolMessages_DropsOrphanAssistantToolCall(t *testing.T) {
+	msgs := []provider.Message{
+		toolCallMsg("tc1", "get_weather", ""),
+	}
+	result := sanitizeToolMessages(msgs)
+	if len(result) != 0 {
+		t.Fatalf("期望 0 条消息, 实际 %d", len(result))
+	}
+
+	// 变体：assistant 带 text 时，text 保留、tool_call 被过滤
+	msgs = []provider.Message{
+		toolCallMsg("tc1", "get_weather", "let me check"),
+	}
+	result = sanitizeToolMessages(msgs)
+	if len(result) != 1 {
+		t.Fatalf("期望 1 条消息, 实际 %d", len(result))
+	}
+	if result[0].Content != "let me check" {
+		t.Errorf("Content = %q, 期望 %q", result[0].Content, "let me check")
+	}
+	if len(result[0].ToolCalls) != 0 {
+		t.Errorf("期望 0 个 tool call, 实际 %d", len(result[0].ToolCalls))
+	}
+}
+
+// TestSanitizeToolMessages_DropsOrphanToolResponse 验证无前驱 assistant 声明的孤儿 tool 响应被过滤。
+func TestSanitizeToolMessages_DropsOrphanToolResponse(t *testing.T) {
+	msgs := []provider.Message{
+		toolResultMsg("tc1", "result"),
+	}
+	result := sanitizeToolMessages(msgs)
+	if len(result) != 0 {
+		t.Fatalf("期望 0 条消息, 实际 %d", len(result))
+	}
+}
+
+// TestSanitizeToolMessages_PartialParallelResponses 验证并行 tool_call 部分响应时只保留有响应的。
+func TestSanitizeToolMessages_PartialParallelResponses(t *testing.T) {
+	msgs := []provider.Message{
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "tc1", Type: "function", Function: provider.FunctionCall{Name: "f1"}},
+				{ID: "tc2", Type: "function", Function: provider.FunctionCall{Name: "f2"}},
+			},
+		},
+		toolResultMsg("tc1", "r1"),
+	}
+	result := sanitizeToolMessages(msgs)
+	if len(result) != 2 {
+		t.Fatalf("期望 2 条消息, 实际 %d", len(result))
+	}
+	if len(result[0].ToolCalls) != 1 {
+		t.Fatalf("期望 1 个 tool call, 实际 %d", len(result[0].ToolCalls))
+	}
+	if result[0].ToolCalls[0].ID != "tc1" {
+		t.Errorf("ToolCalls[0].ID = %q, 期望 tc1", result[0].ToolCalls[0].ID)
+	}
+	if result[1].Role != provider.RoleTool || result[1].ToolCallID != "tc1" {
+		t.Errorf("result[1] 期望 tool(tc1), 实际 role=%q id=%q", result[1].Role, result[1].ToolCallID)
+	}
+}
+
+// TestSanitizeToolMessages_DuplicateResponseDropped 验证同一 tool_call_id 的重复响应仅保留第一个。
+func TestSanitizeToolMessages_DuplicateResponseDropped(t *testing.T) {
+	msgs := []provider.Message{
+		toolCallMsg("tc1", "f1", ""),
+		toolResultMsg("tc1", "r1"),
+		toolResultMsg("tc1", "r2"),
+	}
+	result := sanitizeToolMessages(msgs)
+	if len(result) != 2 {
+		t.Fatalf("期望 2 条消息, 实际 %d", len(result))
+	}
+	if result[1].Role != provider.RoleTool || result[1].Content != "r1" {
+		t.Errorf("result[1] 期望 tool(r1), 实际 role=%q content=%q", result[1].Role, result[1].Content)
+	}
+}
+
+// TestSanitizeToolMessages_OutOfOrderBothDropped 验证 tool 响应出现在其声明 assistant 之前时两侧都丢弃。
+func TestSanitizeToolMessages_OutOfOrderBothDropped(t *testing.T) {
+	msgs := []provider.Message{
+		toolResultMsg("tc1", "r1"),
+		toolCallMsg("tc1", "f1", ""),
+	}
+	result := sanitizeToolMessages(msgs)
+	if len(result) != 0 {
+		t.Fatalf("期望 0 条消息, 实际 %d", len(result))
+	}
+}
+
+// TestSanitizeToolMessages_GeminiIDMismatch 验证 Gemini 入口的 ID 合成不一致被安全丢弃（场景 D）。
+func TestSanitizeToolMessages_GeminiIDMismatch(t *testing.T) {
+	msgs := []provider.Message{
+		toolCallMsg("gemini_call_get_weather_0", "get_weather", ""),
+		toolResultMsg("get_weather", "result"),
+	}
+	result := sanitizeToolMessages(msgs)
+	if len(result) != 0 {
+		t.Fatalf("期望 0 条消息, 实际 %d", len(result))
+	}
+}
+
+// TestSanitizeToolMessages_KeepsMultiTurnParallel 验证多轮并行工具调用按 msgIdx 精确配对不串轮。
+func TestSanitizeToolMessages_KeepsMultiTurnParallel(t *testing.T) {
+	msgs := []provider.Message{
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "tc1", Type: "function", Function: provider.FunctionCall{Name: "f1"}},
+				{ID: "tc2", Type: "function", Function: provider.FunctionCall{Name: "f2"}},
+			},
+		},
+		toolResultMsg("tc1", "r1"),
+		toolResultMsg("tc2", "r2"),
+		toolCallMsg("tc3", "f3", ""),
+		toolResultMsg("tc3", "r3"),
+	}
+	result := sanitizeToolMessages(msgs)
+	if len(result) != 5 {
+		t.Fatalf("期望 5 条消息, 实际 %d", len(result))
+	}
+	// 第一条 assistant 保留两个并行 tool_call
+	if result[0].Role != provider.RoleAssistant || len(result[0].ToolCalls) != 2 {
+		t.Errorf("result[0] 期望 assistant(2 tool calls), 实际 role=%q calls=%d", result[0].Role, len(result[0].ToolCalls))
+	}
+	// 第二、三条是 tc1、tc2 的响应
+	if result[1].Role != provider.RoleTool || result[1].ToolCallID != "tc1" {
+		t.Errorf("result[1] 期望 tool(tc1), 实际 role=%q id=%q", result[1].Role, result[1].ToolCallID)
+	}
+	if result[2].Role != provider.RoleTool || result[2].ToolCallID != "tc2" {
+		t.Errorf("result[2] 期望 tool(tc2), 实际 role=%q id=%q", result[2].Role, result[2].ToolCallID)
+	}
+	// 第四、五条是第二轮的 assistant(tc3) + tool(tc3)
+	if result[3].Role != provider.RoleAssistant || len(result[3].ToolCalls) != 1 || result[3].ToolCalls[0].ID != "tc3" {
+		t.Errorf("result[3] 期望 assistant(tc3), 实际 role=%q", result[3].Role)
+	}
+	if result[4].Role != provider.RoleTool || result[4].ToolCallID != "tc3" {
+		t.Errorf("result[4] 期望 tool(tc3), 实际 role=%q id=%q", result[4].Role, result[4].ToolCallID)
+	}
+}
+
+// TestMessagesToProvider_MixedTextAndToolResult 验证场景 C 源头：
+// user 消息同时含 text + tool_result 时，messagesToProvider 输出
+// user(text) + tool(result) 两条消息（user 夹在 assistant 与 tool 之间）。
+// 顺序调整由 OpenAI 层 buildMessages 负责（见 TestCompletionsProvider_buildMessages_ToolFollowsAssistant）。
+func TestMessagesToProvider_MixedTextAndToolResult(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewToolUseBlock("call_1", "get_weather", nil),
+		),
+		NewUserMessageBlocks(
+			NewToolResultBlock("call_1", "晴", false),
+			NewTextBlock("谢谢"),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 3 {
+		t.Fatalf("期望 3 条消息, 实际 %d", len(result))
+	}
+	if result[0].Role != provider.RoleAssistant {
+		t.Errorf("result[0].Role = %q, 期望 assistant", result[0].Role)
+	}
+	if result[1].Role != provider.RoleUser || result[1].Content != "谢谢" {
+		t.Errorf("result[1] 期望 user(谢谢), 实际 role=%q content=%q", result[1].Role, result[1].Content)
+	}
+	if result[2].Role != provider.RoleTool || result[2].ToolCallID != "call_1" {
+		t.Errorf("result[2] 期望 tool(call_1), 实际 role=%q id=%q", result[2].Role, result[2].ToolCallID)
 	}
 }

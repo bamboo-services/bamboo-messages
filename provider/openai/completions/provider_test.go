@@ -217,6 +217,139 @@ func TestCompletionsProvider_buildMessages(t *testing.T) {
 	}
 }
 
+// TestCompletionsProvider_buildMessages_ToolFollowsAssistant 验证场景 C：
+// user 文本消息夹在 assistant(tool_calls) 与 tool 响应之间时，
+// tool 消息被插到紧跟 assistant 的位置（Chat Completions 邻接约束）。
+func TestCompletionsProvider_buildMessages_ToolFollowsAssistant(t *testing.T) {
+	p := NewCompletionsProvider("test-api-key")
+	msgs := []provider.Message{
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "tc1", Type: "function", Function: provider.FunctionCall{Name: "get_weather"}},
+			},
+		},
+		{Role: provider.RoleUser, Content: "谢谢"},
+		{Role: provider.RoleTool, Content: "晴", ToolCallID: "tc1"},
+	}
+
+	result := p.buildMessages("", msgs)
+	if len(result) != 3 {
+		t.Fatalf("期望 3 条消息, 实际 %d", len(result))
+	}
+	// assistant(tc1) → tool(tc1) → user("谢谢")
+	if result[0]["role"] != "assistant" {
+		t.Errorf("result[0].role = %q, 期望 assistant", result[0]["role"])
+	}
+	if result[1]["role"] != "tool" {
+		t.Errorf("result[1].role = %q, 期望 tool", result[1]["role"])
+	}
+	if result[1]["tool_call_id"] != "tc1" {
+		t.Errorf("result[1].tool_call_id = %v, 期望 tc1", result[1]["tool_call_id"])
+	}
+	if result[2]["role"] != "user" {
+		t.Errorf("result[2].role = %q, 期望 user", result[2]["role"])
+	}
+	if result[2]["content"] != "谢谢" {
+		t.Errorf("result[2].content = %v, 期望 谢谢", result[2]["content"])
+	}
+}
+
+// TestCompletionsProvider_buildMessages_ParallelToolOrderPreserved 验证并行 tool_call 的响应保持输入顺序。
+func TestCompletionsProvider_buildMessages_ParallelToolOrderPreserved(t *testing.T) {
+	p := NewCompletionsProvider("test-api-key")
+	msgs := []provider.Message{
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "tc1", Type: "function", Function: provider.FunctionCall{Name: "f1"}},
+				{ID: "tc2", Type: "function", Function: provider.FunctionCall{Name: "f2"}},
+			},
+		},
+		{Role: provider.RoleTool, Content: "r1", ToolCallID: "tc1"},
+		{Role: provider.RoleTool, Content: "r2", ToolCallID: "tc2"},
+	}
+
+	result := p.buildMessages("", msgs)
+	if len(result) != 3 {
+		t.Fatalf("期望 3 条消息, 实际 %d", len(result))
+	}
+	if result[1]["tool_call_id"] != "tc1" {
+		t.Errorf("result[1].tool_call_id = %v, 期望 tc1", result[1]["tool_call_id"])
+	}
+	if result[2]["tool_call_id"] != "tc2" {
+		t.Errorf("result[2].tool_call_id = %v, 期望 tc2", result[2]["tool_call_id"])
+	}
+}
+
+// TestCompletionsProvider_buildMessages_MultiTurnReordering 验证多轮工具调用时每轮 tool 都紧跟其 assistant。
+func TestCompletionsProvider_buildMessages_MultiTurnReordering(t *testing.T) {
+	p := NewCompletionsProvider("test-api-key")
+	msgs := []provider.Message{
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "tc1", Type: "function", Function: provider.FunctionCall{Name: "f1"}},
+			},
+		},
+		{Role: provider.RoleTool, Content: "r1", ToolCallID: "tc1"},
+		{Role: provider.RoleUser, Content: "继续"},
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "tc2", Type: "function", Function: provider.FunctionCall{Name: "f2"}},
+			},
+		},
+		{Role: provider.RoleUser, Content: "夹心文本"},
+		{Role: provider.RoleTool, Content: "r2", ToolCallID: "tc2"},
+	}
+
+	result := p.buildMessages("", msgs)
+	// 期望顺序：assistant(tc1) → tool(tc1) → user("继续") → assistant(tc2) → tool(tc2) → user("夹心文本")
+	if len(result) != 6 {
+		t.Fatalf("期望 6 条消息, 实际 %d", len(result))
+	}
+	if result[1]["role"] != "tool" || result[1]["tool_call_id"] != "tc1" {
+		t.Errorf("result[1] 期望 tool(tc1), 实际 role=%v", result[1]["role"])
+	}
+	if result[2]["role"] != "user" || result[2]["content"] != "继续" {
+		t.Errorf("result[2] 期望 user(继续), 实际 role=%v", result[2]["role"])
+	}
+	if result[4]["role"] != "tool" || result[4]["tool_call_id"] != "tc2" {
+		t.Errorf("result[4] 期望 tool(tc2), 实际 role=%v", result[4]["role"])
+	}
+	if result[5]["role"] != "user" || result[5]["content"] != "夹心文本" {
+		t.Errorf("result[5] 期望 user(夹心文本), 实际 role=%v", result[5]["role"])
+	}
+}
+
+// TestCompletionsProvider_buildMessages_KeepsExistingOrder 验证正常配对序列顺序不变（防回归）。
+func TestCompletionsProvider_buildMessages_KeepsExistingOrder(t *testing.T) {
+	p := NewCompletionsProvider("test-api-key")
+	msgs := []provider.Message{
+		{Role: provider.RoleUser, Content: "What's the weather?"},
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "call-789", Type: "function", Function: provider.FunctionCall{Name: "get_weather"}},
+			},
+		},
+		{Role: provider.RoleTool, Content: `{"temperature": 20}`, ToolCallID: "call-789"},
+		{Role: provider.RoleAssistant, Content: "It's 20°C in Paris."},
+	}
+
+	result := p.buildMessages("", msgs)
+	if len(result) != 4 {
+		t.Fatalf("期望 4 条消息, 实际 %d", len(result))
+	}
+	wantRoles := []string{"user", "assistant", "tool", "assistant"}
+	for i, want := range wantRoles {
+		if result[i]["role"] != want {
+			t.Errorf("result[%d].role = %v, 期望 %s", i, result[i]["role"], want)
+		}
+	}
+}
+
 // ==============================
 // handleChunk 测试
 // ==============================
