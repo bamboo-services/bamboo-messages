@@ -284,6 +284,32 @@ func TestStreamSerializer_ErrorEvent(t *testing.T) {
 	if !strings.HasPrefix(str, "data: ") {
 		t.Errorf("error should be SSE format")
 	}
+	payload := parseSSEJSON(t, data)
+	errObj, ok := payload["error"].(map[string]any)
+	if !ok {
+		t.Fatal("missing error object")
+	}
+	if errObj["code"] != "api_error" {
+		t.Errorf("error.code = %v, want %q", errObj["code"], "api_error")
+	}
+	if errObj["type"] != "api_error" {
+		t.Errorf("error.type = %v, want %q", errObj["type"], "api_error")
+	}
+}
+
+func parseSSEJSON(t *testing.T, raw []byte) map[string]any {
+	t.Helper()
+	str := string(raw)
+	if !strings.HasPrefix(str, "data: ") {
+		t.Fatalf("expected SSE data prefix, got: %q", str)
+	}
+	str = strings.TrimPrefix(str, "data: ")
+	str = strings.TrimRight(str, "\n")
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(str), &payload); err != nil {
+		t.Fatalf("failed to unmarshal SSE json: %v\nraw: %s", err, str)
+	}
+	return payload
 }
 
 func TestStreamSerializer_MultipleToolCalls(t *testing.T) {

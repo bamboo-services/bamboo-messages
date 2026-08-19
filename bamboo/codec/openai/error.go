@@ -43,7 +43,7 @@ func serializeError(err error) []byte {
 			Message: message,
 			Type:    errType,
 			Param:   nil,
-			Code:    nil,
+			Code:    &errType,
 		},
 	}
 

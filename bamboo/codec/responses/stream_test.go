@@ -699,6 +699,55 @@ func TestStreamSerializer_ErrorEvent(t *testing.T) {
 	if errObj["type"] != "server_error" {
 		t.Errorf("error.type = %v", errObj["type"])
 	}
+	if errObj["code"] != "server_error" {
+		t.Errorf("error.code = %v, want %q", errObj["code"], "server_error")
+	}
+}
+
+func TestStreamSerializer_ErrorEventAlwaysHasCode(t *testing.T) {
+	cases := []struct {
+		name       string
+		statusCode int
+		wantCode   string
+	}{
+		{name: "nil error defaults to server_error", statusCode: 0, wantCode: "server_error"},
+		{name: "429 maps to rate_limit_exceeded", statusCode: 429, wantCode: "rate_limit_exceeded"},
+		{name: "401 maps to authentication_error", statusCode: 401, wantCode: "authentication_error"},
+		{name: "400 maps to invalid_request", statusCode: 400, wantCode: "invalid_request"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStreamSerializer("")
+			ev := bamboo.StreamEvent{Type: bamboo.EventError}
+			if tc.statusCode != 0 {
+				ev.Error = &bamboo.BambooError{
+					Category:   "上游",
+					Message:    "weekly usage limit reached",
+					StatusCode: tc.statusCode,
+				}
+			}
+			data, err := s.Serialize(ev)
+			if err != nil {
+				t.Fatalf("Serialize error = %v", err)
+			}
+			_, payload := parseResponsesSSE(t, data)
+			resp := extractResponse(t, payload)
+			errObj, ok := resp["error"].(map[string]any)
+			if !ok {
+				t.Fatal("missing error object in response")
+			}
+			if _, ok := errObj["code"]; !ok {
+				t.Fatal("error.code is missing")
+			}
+			if errObj["code"] != tc.wantCode {
+				t.Errorf("error.code = %v, want %q", errObj["code"], tc.wantCode)
+			}
+			if errObj["type"] != tc.wantCode {
+				t.Errorf("error.type = %v, want %q", errObj["type"], tc.wantCode)
+			}
+		})
+	}
 }
 
 func TestStreamSerializer_Flush(t *testing.T) {

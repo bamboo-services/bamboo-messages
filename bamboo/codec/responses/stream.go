@@ -24,7 +24,8 @@ type responseObj struct {
 type responseError struct {
 	Message string `json:"message,omitempty"`
 	Type    string `json:"type,omitempty"`
-	Code    string `json:"code,omitempty"`
+	// Code 不能 omitempty：Grok Build 等严格客户端把 error.code 当成必填 string。
+	Code string `json:"code"`
 }
 
 type outputItemAdded struct {
@@ -481,10 +482,10 @@ func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 
 func (s *responsesStreamSerializer) handleError(event bamboo.StreamEvent) ([]byte, error) {
 	errMsg := "unknown error"
-	errType := "server_error"
+	errCode := "server_error"
 	if event.Error != nil {
 		errMsg = event.Error.Message
-		errType = mapStatusCodeToResponsesCode(event.Error.StatusCode)
+		errCode = mapStatusCodeToResponsesCode(event.Error.StatusCode)
 	}
 	resp := responseObj{
 		ID:        s.responseID,
@@ -494,7 +495,8 @@ func (s *responsesStreamSerializer) handleError(event bamboo.StreamEvent) ([]byt
 		Output:    []outputItem{},
 		Error: &responseError{
 			Message: errMsg,
-			Type:    errType,
+			Type:    errCode,
+			Code:    errCode,
 		},
 	}
 	return s.marshalSSEWithResponse("response.failed", resp)

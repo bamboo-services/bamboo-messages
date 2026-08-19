@@ -304,6 +304,7 @@ func (s *openaiStreamSerializer) handleError(event bamboo.StreamEvent) ([]byte, 
 		"error": map[string]any{
 			"message": errMsg,
 			"type":    errType,
+			"code":    errType,
 		},
 	}
 	data, _ := json.Marshal(errPayload)
