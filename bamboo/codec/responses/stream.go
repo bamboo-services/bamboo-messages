@@ -56,20 +56,6 @@ type reasoningDeltaEvent struct {
 	Delta        string `json:"delta"`
 }
 
-type reasoningSummaryDeltaEvent struct {
-	OutputIndex  int    `json:"output_index"`
-	SummaryIndex int    `json:"summary_index"`
-	ItemID       string `json:"item_id"`
-	Delta        string `json:"delta"`
-}
-
-type reasoningSummaryDoneEvent struct {
-	OutputIndex  int    `json:"output_index"`
-	SummaryIndex int    `json:"summary_index"`
-	ItemID       string `json:"item_id"`
-	Text         string `json:"text"`
-}
-
 type reasoningDoneEvent struct {
 	OutputIndex  int    `json:"output_index"`
 	ContentIndex int    `json:"content_index"`
@@ -292,21 +278,10 @@ func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamE
 			ItemID:       block.itemID,
 			Delta:        delta.Thinking,
 		}
-		rawBytes, err := s.marshalSSE("response.reasoning_text.delta", raw)
-		if err != nil {
-			return nil, err
-		}
-		summary := reasoningSummaryDeltaEvent{
-			OutputIndex:  block.outputIndex,
-			SummaryIndex: 0,
-			ItemID:       block.itemID,
-			Delta:        delta.Thinking,
-		}
-		summaryBytes, err := s.marshalSSE("response.reasoning_summary_text.delta", summary)
-		if err != nil {
-			return nil, err
-		}
-		return append(rawBytes, summaryBytes...), nil
+		// 只发 reasoning_text 轨道。不再把同一份全文同时发到
+		// reasoning_summary_text.delta：summary 轨道应承载摘要，
+		// 与全文重复会导致客户端把思考内容渲染两遍。
+		return s.marshalSSE("response.reasoning_text.delta", raw)
 
 	case bamboo.DeltaInputJSON:
 		block := s.ensureToolBlock(event.Index, s.currentCallID, s.currentCallName)
@@ -395,23 +370,14 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 		if err != nil {
 			return nil, err
 		}
-		summaryDone := reasoningSummaryDoneEvent{
-			OutputIndex:  block.outputIndex,
-			SummaryIndex: 0,
-			ItemID:       block.itemID,
-			Text:         text,
-		}
-		summaryDoneBytes, err := s.marshalSSE("response.reasoning_summary_text.done", summaryDone)
-		if err != nil {
-			return nil, err
-		}
 		item := outputItem{
 			Type:   "reasoning",
 			ID:     block.itemID,
 			Status: "completed",
 			// content 承载原始思考全文（reasoning_text 轨道），summary 承载
-			// 启发式提取的摘要（提取不出则为空数组）；流式 done 事件中的
-			// reasoning_summary_text.done 保持原始全文作为实时展示轨道。
+			// 启发式提取的摘要（提取不出则为空数组）。不再额外发送
+			// reasoning_summary_text.done 全文事件——summary 轨道应承载摘要，
+			// 与 reasoning_text 重复会让客户端渲染两遍思考内容。
 			Content:          buildReasoningContent(text),
 			Summary:          buildReasoningSummary(text),
 			EncryptedContent: block.encryptedContent,
@@ -421,7 +387,7 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 		if err != nil {
 			return nil, err
 		}
-		out := append(rawDoneBytes, summaryDoneBytes...)
+		out := rawDoneBytes
 		return append(out, itemDoneBytes...), nil
 
 	case "tool_use":
