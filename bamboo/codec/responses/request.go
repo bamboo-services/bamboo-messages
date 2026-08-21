@@ -36,12 +36,15 @@ type responsesRequest struct {
 	PromptCacheKey     string          `json:"prompt_cache_key,omitempty"`
 	Metadata           json.RawMessage `json:"metadata,omitempty"`
 	Text               *textConfig     `json:"text,omitempty"`
+	Include            []string        `json:"include,omitempty"`
 }
 
 // reasoningCfg Reasoning 配置。
 type reasoningCfg struct {
 	Effort  string `json:"effort,omitempty"`
 	Summary string `json:"summary,omitempty"`
+	Mode    string `json:"mode,omitempty"`
+	Context string `json:"context,omitempty"`
 }
 
 // textConfig 文本输出配置（含 format）。
@@ -155,9 +158,14 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	}
 
 	// reasoning.effort → ThinkingConfig
-	if req.Reasoning != nil && req.Reasoning.Effort != "" {
-		config.ThinkingConfig = &bamboo.ThinkingConfig{
-			Effort: req.Reasoning.Effort,
+	if req.Reasoning != nil {
+		if req.Reasoning.Effort != "" {
+			config.ThinkingConfig = &bamboo.ThinkingConfig{
+				Effort: req.Reasoning.Effort,
+			}
+		} else if req.Reasoning.Summary != "" {
+			// 仅 summary opt-in、没有 effort 时仍打开思考，供 Gemini includeThoughts。
+			config.ThinkingConfig = &bamboo.ThinkingConfig{Effort: "medium"}
 		}
 	}
 
@@ -169,9 +177,23 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 		config.PromptCacheKey = req.PromptCacheKey
 	}
 
-	// ProviderExtra：instructions / previous_response_id / store / truncation
+	// ProviderExtra：instructions / previous_response_id / store / truncation / include / reasoning.*
 	if req.PreviousResponseID != "" {
 		extra["previous_response_id"] = req.PreviousResponseID
+	}
+	if len(req.Include) > 0 {
+		extra["include"] = req.Include
+	}
+	if req.Reasoning != nil {
+		if req.Reasoning.Summary != "" {
+			extra["reasoning_summary"] = req.Reasoning.Summary
+		}
+		if req.Reasoning.Mode != "" {
+			extra["reasoning_mode"] = req.Reasoning.Mode
+		}
+		if req.Reasoning.Context != "" {
+			extra["reasoning_context"] = req.Reasoning.Context
+		}
 	}
 	if req.Store != nil {
 		extra["store"] = *req.Store

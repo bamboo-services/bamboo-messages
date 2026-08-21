@@ -35,11 +35,12 @@ type geminiContentOut struct {
 
 // geminiPartOut 输出方向的 Part（支持 text / functionCall / thought / inlineData / fileData）。
 type geminiPartOut struct {
-	Text         string             `json:"text,omitempty"`
-	Thought      bool               `json:"thought,omitempty"`
-	FunctionCall *geminiFuncCallOut `json:"functionCall,omitempty"`
-	InlineData   *geminiInlineData  `json:"inlineData,omitempty"`
-	FileData     *geminiFileData    `json:"fileData,omitempty"`
+	Text             string             `json:"text,omitempty"`
+	Thought          bool               `json:"thought,omitempty"`
+	ThoughtSignature string             `json:"thoughtSignature,omitempty"`
+	FunctionCall     *geminiFuncCallOut `json:"functionCall,omitempty"`
+	InlineData       *geminiInlineData  `json:"inlineData,omitempty"`
+	FileData         *geminiFileData    `json:"fileData,omitempty"`
 }
 
 // geminiFuncCallOut 输出方向的 functionCall。
@@ -121,8 +122,8 @@ func buildResponseParts(blocks []bamboo.ContentBlock) []geminiPartOut {
 			}
 			parts = append(parts, part)
 		case *bamboo.ThinkingBlock:
-			if b.Thinking != "" {
-				parts = append(parts, geminiPartOut{Text: b.Thinking, Thought: true})
+			if b.Thinking != "" || b.Signature != "" {
+				parts = append(parts, geminiPartOut{Text: b.Thinking, Thought: true, ThoughtSignature: b.Signature})
 			}
 		case *bamboo.ImageBlock:
 			// Gemini 原生支持 inlineData / fileData，映射为 inlineData part

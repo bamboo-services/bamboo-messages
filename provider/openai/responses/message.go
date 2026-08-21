@@ -112,19 +112,19 @@ func (p *ResponsesProvider) buildUserItem(msg provider.Message) map[string]any {
 func (p *ResponsesProvider) buildAssistantItem(msg provider.Message) []map[string]any {
 	items := make([]map[string]any, 0, len(msg.ToolCalls)+2)
 
-	// Reasoning item — 推理内容（多轮对话中保留 thinking block 上下文）
-	// 包含 reasoning_text summary 和 encrypted_content 用于服务端加密回传
-	if msg.ThinkingContent != "" || msg.ThinkingSignature != "" {
-		summary := []map[string]any{}
-		if msg.ThinkingContent != "" {
-			summary = append(summary, map[string]any{
-				"type": "reasoning_text",
-				"text": msg.ThinkingContent,
-			})
-		}
+	// Reasoning item — 按官方 schema 三槽位回传：
+	//   content           — reasoning_text 原文
+	//   summary           — 必填数组，无摘要时为空数组（Grok 回放样例）
+	//   encrypted_content — 仅透传上游签名/密文，不伪造
+	if msg.ThinkingContent != "" || msg.ThinkingSignature != "" || msg.ReasoningID != "" {
 		reasoningItem := map[string]any{
 			"type":    "reasoning",
-			"summary": summary,
+			"summary": []map[string]any{},
+		}
+		if msg.ThinkingContent != "" {
+			reasoningItem["content"] = []map[string]any{
+				{"type": "reasoning_text", "text": msg.ThinkingContent},
+			}
 		}
 		if msg.ReasoningID != "" {
 			reasoningItem["id"] = msg.ReasoningID

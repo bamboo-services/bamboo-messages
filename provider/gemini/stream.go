@@ -19,12 +19,15 @@ func (p *Provider) handleStreamEvent(resp *generateContentResponse, textBlockSta
 	if resp.UsageMetadata != nil {
 		events = append(events, provider.StreamEvent{
 			Type: provider.StreamTypeDelta,
-			Delta: provider.NewUsageDeltaWithCache(
-				int64(resp.UsageMetadata.PromptTokenCount),
-				int64(resp.UsageMetadata.CandidatesTokenCount),
-				0,
-				int64(resp.UsageMetadata.CachedContentTokenCount),
-			),
+			Delta: provider.StreamDelta[any]{
+				Type: provider.StreamDeltaTypeUsage,
+				Data: provider.UsageData{
+					InputTokens:          int64(resp.UsageMetadata.PromptTokenCount),
+					OutputTokens:         int64(resp.UsageMetadata.CandidatesTokenCount),
+					CacheReadInputTokens: int64(resp.UsageMetadata.CachedContentTokenCount),
+					ReasoningTokens:      int64(resp.UsageMetadata.ThoughtsTokenCount),
+				},
+			},
 		})
 	}
 
@@ -71,8 +74,7 @@ func (p *Provider) handleCandidate(candidate *geminiCandidate, textBlockStarted 
 func (p *Provider) handlePart(part *geminiPart, textBlockStarted *bool, thinkingBlockStarted *bool) []provider.StreamEvent {
 	var events []provider.StreamEvent
 
-	// 推理内容增量（Gemini 的 Thought 标志）
-	if part.Thought && part.Text != "" {
+	if part.Thought || part.ThoughtSignature != "" {
 		if !*thinkingBlockStarted {
 			events = append(events, provider.StreamEvent{
 				Type:  provider.StreamTypeDelta,
@@ -80,10 +82,18 @@ func (p *Provider) handlePart(part *geminiPart, textBlockStarted *bool, thinking
 			})
 			*thinkingBlockStarted = true
 		}
-		events = append(events, provider.StreamEvent{
-			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewThinkingDelta(part.Text),
-		})
+		if part.Text != "" {
+			events = append(events, provider.StreamEvent{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewThinkingDelta(part.Text),
+			})
+		}
+		if part.ThoughtSignature != "" {
+			events = append(events, provider.StreamEvent{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewSignatureDelta(part.ThoughtSignature),
+			})
+		}
 		return events
 	}
 

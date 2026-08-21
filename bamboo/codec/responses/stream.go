@@ -170,6 +170,16 @@ func (s *responsesStreamSerializer) Flush() ([]byte, error) {
 }
 
 func (s *responsesStreamSerializer) handleMessageStart(event bamboo.StreamEvent) ([]byte, error) {
+	if md, ok := event.Delta.(*bamboo.MessageDelta); ok {
+		s.applyReasoningMeta(md)
+	}
+	return s.ensureCreated()
+}
+
+func (s *responsesStreamSerializer) ensureCreated() ([]byte, error) {
+	if s.created {
+		return nil, nil
+	}
 	s.created = true
 	resp := responseObj{
 		ID:        s.responseID,
@@ -182,9 +192,48 @@ func (s *responsesStreamSerializer) handleMessageStart(event bamboo.StreamEvent)
 	return s.marshalSSEWithResponse("response.created", resp)
 }
 
+func (s *responsesStreamSerializer) applyReasoningMeta(md *bamboo.MessageDelta) {
+	if md == nil {
+		return
+	}
+	if md.ResponseID != "" {
+		s.responseID = md.ResponseID
+	}
+	if md.ReasoningID != "" {
+		s.reasoningItemID = md.ReasoningID
+		for _, block := range s.blocks {
+			if block != nil && block.kind == "thinking" {
+				block.itemID = md.ReasoningID
+			}
+		}
+		for i := range s.completedOutput {
+			if s.completedOutput[i].Type == "reasoning" {
+				s.completedOutput[i].ID = md.ReasoningID
+			}
+		}
+	}
+	if md.EncryptedContent != "" {
+		for _, block := range s.blocks {
+			if block != nil && block.kind == "thinking" {
+				block.encryptedContent = md.EncryptedContent
+			}
+		}
+		for i := range s.completedOutput {
+			if s.completedOutput[i].Type == "reasoning" {
+				s.completedOutput[i].EncryptedContent = md.EncryptedContent
+			}
+		}
+	}
+}
+
 func (s *responsesStreamSerializer) handleContentBlockStart(event bamboo.StreamEvent) ([]byte, error) {
 	if event.ContentBlock == nil {
 		return nil, nil
+	}
+
+	created, err := s.ensureCreated()
+	if err != nil {
+		return nil, err
 	}
 
 	switch event.ContentBlock.BlockType() {
@@ -214,7 +263,7 @@ func (s *responsesStreamSerializer) handleContentBlockStart(event bamboo.StreamE
 		if err != nil {
 			return nil, err
 		}
-		return append(itemAddedBytes, partAddedBytes...), nil
+		return append(created, append(itemAddedBytes, partAddedBytes...)...), nil
 
 	case bamboo.ContentBlockThinking:
 		block := s.ensureReasoningBlock(event.Index)
@@ -228,7 +277,17 @@ func (s *responsesStreamSerializer) handleContentBlockStart(event bamboo.StreamE
 		if err != nil {
 			return nil, err
 		}
-		return itemAddedBytes, nil
+		partAdded := contentPartAddedEvent{
+			OutputIndex:  block.outputIndex,
+			ContentIndex: 0,
+			ItemID:       block.itemID,
+			Part:         map[string]any{"type": "summary_text", "text": ""},
+		}
+		partAddedBytes, err := s.marshalSSE("response.reasoning_summary_part.added", partAdded)
+		if err != nil {
+			return nil, err
+		}
+		return append(created, append(itemAddedBytes, partAddedBytes...)...), nil
 
 	case bamboo.ContentBlockToolUse:
 		toolUse, ok := event.ContentBlock.(*bamboo.ToolUseBlock)
@@ -244,9 +303,13 @@ func (s *responsesStreamSerializer) handleContentBlockStart(event bamboo.StreamE
 			Arguments: "",
 			Status:    "in_progress",
 		}
-		return s.marshalSSE("response.output_item.added", outputItemAdded{OutputIndex: block.outputIndex, Item: item})
+		itemBytes, err := s.marshalSSE("response.output_item.added", outputItemAdded{OutputIndex: block.outputIndex, Item: item})
+		if err != nil {
+			return nil, err
+		}
+		return append(created, itemBytes...), nil
 	default:
-		return nil, nil
+		return created, nil
 	}
 }
 
@@ -270,18 +333,30 @@ func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamE
 		return s.marshalSSE("response.output_text.delta", ev)
 
 	case bamboo.DeltaThinkingDelta:
+		created, err := s.ensureCreated()
+		if err != nil {
+			return nil, err
+		}
 		block := s.ensureReasoningBlock(event.Index)
 		s.reasoningText.WriteString(delta.Thinking)
-		raw := reasoningDeltaEvent{
+		ev := reasoningDeltaEvent{
 			OutputIndex:  block.outputIndex,
 			ContentIndex: 0,
 			ItemID:       block.itemID,
 			Delta:        delta.Thinking,
 		}
-		// 只发 reasoning_text 轨道。不再把同一份全文同时发到
-		// reasoning_summary_text.delta：summary 轨道应承载摘要，
-		// 与全文重复会导致客户端把思考内容渲染两遍。
-		return s.marshalSSE("response.reasoning_text.delta", raw)
+		// 双轨并行：raw 给 gpt-oss / 听 reasoning_text 的客户端，
+		// summary 给 Codex / OpenAI SDK（官方展示轨）。
+		rawBytes, err := s.marshalSSE("response.reasoning_text.delta", ev)
+		if err != nil {
+			return nil, err
+		}
+		summaryBytes, err := s.marshalSSE("response.reasoning_summary_text.delta", ev)
+		if err != nil {
+			return nil, err
+		}
+		out := append(created, rawBytes...)
+		return append(out, summaryBytes...), nil
 
 	case bamboo.DeltaInputJSON:
 		block := s.ensureToolBlock(event.Index, s.currentCallID, s.currentCallName)
@@ -360,24 +435,24 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 
 	case "thinking":
 		text := s.reasoningText.String()
-		rawDone := reasoningDoneEvent{
+		done := reasoningDoneEvent{
 			OutputIndex:  block.outputIndex,
 			ContentIndex: 0,
 			ItemID:       block.itemID,
 			Text:         text,
 		}
-		rawDoneBytes, err := s.marshalSSE("response.reasoning_text.done", rawDone)
+		rawDoneBytes, err := s.marshalSSE("response.reasoning_text.done", done)
+		if err != nil {
+			return nil, err
+		}
+		summaryDoneBytes, err := s.marshalSSE("response.reasoning_summary_text.done", done)
 		if err != nil {
 			return nil, err
 		}
 		item := outputItem{
-			Type:   "reasoning",
-			ID:     block.itemID,
-			Status: "completed",
-			// content 承载原始思考全文（reasoning_text 轨道），summary 承载
-			// 启发式提取的摘要（提取不出则为空数组）。不再额外发送
-			// reasoning_summary_text.done 全文事件——summary 轨道应承载摘要，
-			// 与 reasoning_text 重复会让客户端渲染两遍思考内容。
+			Type:             "reasoning",
+			ID:               block.itemID,
+			Status:           "completed",
 			Content:          buildReasoningContent(text),
 			Summary:          buildReasoningSummary(text),
 			EncryptedContent: block.encryptedContent,
@@ -387,7 +462,7 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 		if err != nil {
 			return nil, err
 		}
-		out := rawDoneBytes
+		out := append(rawDoneBytes, summaryDoneBytes...)
 		return append(out, itemDoneBytes...), nil
 
 	case "tool_use":
@@ -423,12 +498,23 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 }
 
 func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([]byte, error) {
+	msgDelta, ok := event.Delta.(*bamboo.MessageDelta)
+	if ok {
+		s.applyReasoningMeta(msgDelta)
+	}
+	if (!ok || msgDelta.StopReason == "") && event.Usage == nil {
+		return s.ensureCreated()
+	}
 	if s.completedSent {
 		return nil, nil
 	}
 	s.completedSent = true
 
-	msgDelta, ok := event.Delta.(*bamboo.MessageDelta)
+	created, err := s.ensureCreated()
+	if err != nil {
+		return nil, err
+	}
+
 	status := "completed"
 	if ok && msgDelta.StopReason == bamboo.FinishReasonMaxTokens {
 		status = "incomplete"
@@ -443,7 +529,11 @@ func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 		Output:    append([]outputItem{}, s.completedOutput...),
 		Usage:     buildResponsesUsage(event.Usage),
 	}
-	return s.marshalSSEWithResponse("response.completed", resp)
+	completed, err := s.marshalSSEWithResponse("response.completed", resp)
+	if err != nil {
+		return nil, err
+	}
+	return append(created, completed...), nil
 }
 
 func (s *responsesStreamSerializer) handleError(event bamboo.StreamEvent) ([]byte, error) {
@@ -543,7 +633,7 @@ func buildResponsesUsage(usage *bamboo.Usage) *responsesUsage {
 		OutputTokens:        usage.OutputTokens,
 		TotalTokens:         usage.InputTokens + usage.OutputTokens,
 		InputTokensDetails:  &responsesInputTokensDet{CachedTokens: usage.CacheReadInputTokens},
-		OutputTokensDetails: &responsesOutputTokensDet{},
+		OutputTokensDetails: &responsesOutputTokensDet{ReasoningTokens: usage.ReasoningTokens},
 	}
 }
 

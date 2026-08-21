@@ -203,6 +203,9 @@ func (s *anthropicStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 	if !ok {
 		return nil, nil
 	}
+	if msgDelta.StopReason == "" && event.Usage == nil {
+		return nil, nil
+	}
 
 	stopSeq := msgDelta.StopSequence
 	var stopSeqField any = stopSeq

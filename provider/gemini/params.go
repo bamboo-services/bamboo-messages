@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -94,12 +95,8 @@ func (p *Provider) buildContentConfig(config *provider.ChatConfig) map[string]an
 		gc["stopSequences"] = config.Stop
 	}
 
-	// ThinkingConfig 映射: none→不设置, 其他非空值→{includeThoughts:true, thinkingLevel:effort}
-	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" && config.ThinkingConfig.Effort != "none" {
-		gc["thinkingConfig"] = map[string]any{
-			"includeThoughts": true,
-			"thinkingLevel":   config.ThinkingConfig.Effort,
-		}
+	if thinking := buildGeminiThinkingConfig(config); thinking != nil {
+		gc["thinkingConfig"] = thinking
 	}
 
 	// 响应格式 — json_object → application/json
@@ -140,6 +137,57 @@ func (p *Provider) buildContentConfig(config *provider.ChatConfig) map[string]an
 	}
 
 	return gc
+}
+
+func buildGeminiThinkingConfig(config *provider.ChatConfig) map[string]any {
+	if config == nil {
+		return nil
+	}
+	effort := ""
+	if config.ThinkingConfig != nil {
+		effort = config.ThinkingConfig.Effort
+	}
+	if effort == "none" {
+		return map[string]any{"thinkingBudget": 0}
+	}
+	includeThoughts := effort != ""
+	if v, ok := provider.GetExtraBool(config.ProviderExtra, "include_thoughts"); ok {
+		includeThoughts = v
+	}
+	if !includeThoughts {
+		return nil
+	}
+	tc := map[string]any{"includeThoughts": true}
+	if effort == "" {
+		return tc
+	}
+	effort = provider.NormalizeReasoningEffort(effort)
+	model := strings.ToLower(config.Model)
+	switch {
+	case strings.Contains(model, "gemini-3"):
+		tc["thinkingLevel"] = effort
+	case strings.Contains(model, "2.5") || strings.Contains(model, "gemini-2"):
+		tc["thinkingBudget"] = effortToGeminiBudget(effort)
+	default:
+		tc["thinkingLevel"] = effort
+		tc["thinkingBudget"] = effortToGeminiBudget(effort)
+	}
+	return tc
+}
+
+func effortToGeminiBudget(effort string) int {
+	switch effort {
+	case "minimal", "low":
+		return 1024
+	case "medium":
+		return 8192
+	case "high":
+		return 16384
+	case "xhigh":
+		return -1
+	default:
+		return 8192
+	}
 }
 
 // buildToolConfig 将统一的 ToolChoice 字符串映射为 Gemini toolConfig。

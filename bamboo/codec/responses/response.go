@@ -83,13 +83,13 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 			textParts = append(textParts, b.Text)
 
 		case *bamboo.ThinkingBlock:
-			// reasoning item 三槽位分工（与官方 schema 对齐）：
-			//   content           — 原始思考全文（reasoning_text 轨道）
-			//   summary           — 启发式提取的摘要，提取不出则为空数组
-			//   encrypted_content — 透传上游签名/加密内容，不伪造
+			id := resp.ReasoningID
+			if id == "" {
+				id = fmt.Sprintf("rs_%d", resp.CreatedAt)
+			}
 			reasoningItems = append(reasoningItems, outputItem{
 				Type:             "reasoning",
-				ID:               "rs_" + b.Signature,
+				ID:               id,
 				Content:          buildReasoningContent(b.Thinking),
 				Summary:          buildReasoningSummary(b.Thinking),
 				EncryptedContent: b.Signature,
@@ -161,8 +161,13 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 		OutputTokensDetails: &responsesOutputTokensDet{},
 	}
 
+	respID := resp.ID
+	if resp.ResponseID != "" {
+		respID = resp.ResponseID
+	}
+	usage.OutputTokensDetails.ReasoningTokens = resp.Usage.ReasoningTokens
 	out := responsesOutput{
-		ID:        resp.ID,
+		ID:        respID,
 		Object:    "response",
 		CreatedAt: resp.CreatedAt,
 		Model:     resp.Model,

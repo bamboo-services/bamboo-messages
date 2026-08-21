@@ -80,6 +80,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 			InputTokens:          int64(geminiResp.UsageMetadata.PromptTokenCount),
 			OutputTokens:         int64(geminiResp.UsageMetadata.CandidatesTokenCount),
 			CacheReadInputTokens: int64(geminiResp.UsageMetadata.CachedContentTokenCount),
+			ReasoningTokens:      int64(geminiResp.UsageMetadata.ThoughtsTokenCount),
 		}
 	}
 
@@ -93,6 +94,9 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 				// 推理内容（Thought 标记）
 				if part.Thought && part.Text != "" {
 					result.Thinking += part.Text
+				}
+				if part.ThoughtSignature != "" {
+					result.ThinkingSignature = part.ThoughtSignature
 				}
 				// 文本内容（忽略 Thought==true 的推理内容）
 				if !part.Thought && part.Text != "" {

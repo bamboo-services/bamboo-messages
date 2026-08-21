@@ -70,6 +70,7 @@ type chatCompletionMessage struct {
 	Role             string             `json:"role,omitempty"`
 	Content          string             `json:"content,omitempty"`
 	ReasoningContent json.RawMessage    `json:"reasoning_content,omitempty"`
+	Reasoning        json.RawMessage    `json:"reasoning,omitempty"`
 	ToolCalls        []responseToolCall `json:"tool_calls,omitempty"`
 }
 

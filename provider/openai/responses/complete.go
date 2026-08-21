@@ -215,6 +215,9 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 		if response.Usage.InputTokensDetails != nil {
 			result.Usage.CacheReadInputTokens = int64(response.Usage.InputTokensDetails.CachedTokens)
 		}
+		if response.Usage.OutputTokensDetails != nil {
+			result.Usage.ReasoningTokens = int64(response.Usage.OutputTokensDetails.ReasoningTokens)
+		}
 	}
 
 	return result, nil

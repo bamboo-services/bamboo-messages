@@ -88,4 +88,12 @@ func TestBuildAssistantItem_EncryptedContent(t *testing.T) {
 	if enc != "gAAAAABp_test_encrypted" {
 		t.Errorf("encrypted_content = %q, want gAAAAABp_test_encrypted", enc)
 	}
+	summary, _ := reasoningItem["summary"].([]map[string]any)
+	if len(summary) != 0 {
+		t.Errorf("summary = %v, want empty array", summary)
+	}
+	content, _ := reasoningItem["content"].([]map[string]any)
+	if len(content) != 1 || content[0]["type"] != "reasoning_text" || content[0]["text"] != "thinking" {
+		t.Errorf("content = %v, want reasoning_text", content)
+	}
 }

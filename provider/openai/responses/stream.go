@@ -263,19 +263,7 @@ func (p *ResponsesProvider) contentResponseCompleted(event responseStreamEvent) 
 	var events []provider.StreamEvent
 
 	if resp.Usage != nil && (resp.Usage.InputTokens > 0 || resp.Usage.OutputTokens > 0) {
-		var cachedTokens int64
-		if resp.Usage.InputTokensDetails != nil {
-			cachedTokens = int64(resp.Usage.InputTokensDetails.CachedTokens)
-		}
-		events = append(events, provider.StreamEvent{
-			Type: provider.StreamTypeDelta,
-			Delta: provider.NewUsageDeltaWithCache(
-				int64(resp.Usage.InputTokens),
-				int64(resp.Usage.OutputTokens),
-				0,
-				cachedTokens,
-			),
-		})
+		events = append(events, usageEventFromResponses(resp.Usage))
 	}
 
 	// 发送 StreamTypeStop 并携带完成原因
@@ -295,19 +283,7 @@ func (p *ResponsesProvider) contentResponseFailed(ctx context.Context, event res
 
 	if event.Response != nil && event.Response.Usage != nil &&
 		(event.Response.Usage.InputTokens > 0 || event.Response.Usage.OutputTokens > 0) {
-		var cachedTokens int64
-		if event.Response.Usage.InputTokensDetails != nil {
-			cachedTokens = int64(event.Response.Usage.InputTokensDetails.CachedTokens)
-		}
-		events = append(events, provider.StreamEvent{
-			Type: provider.StreamTypeDelta,
-			Delta: provider.NewUsageDeltaWithCache(
-				int64(event.Response.Usage.InputTokens),
-				int64(event.Response.Usage.OutputTokens),
-				0,
-				cachedTokens,
-			),
-		})
+		events = append(events, usageEventFromResponses(event.Response.Usage))
 	}
 
 	errMsg := "OpenAI 响应失败"
@@ -327,19 +303,7 @@ func (p *ResponsesProvider) contentResponseIncomplete(event responseStreamEvent)
 
 	if event.Response != nil && event.Response.Usage != nil &&
 		(event.Response.Usage.InputTokens > 0 || event.Response.Usage.OutputTokens > 0) {
-		var cachedTokens int64
-		if event.Response.Usage.InputTokensDetails != nil {
-			cachedTokens = int64(event.Response.Usage.InputTokensDetails.CachedTokens)
-		}
-		events = append(events, provider.StreamEvent{
-			Type: provider.StreamTypeDelta,
-			Delta: provider.NewUsageDeltaWithCache(
-				int64(event.Response.Usage.InputTokens),
-				int64(event.Response.Usage.OutputTokens),
-				0,
-				cachedTokens,
-			),
-		})
+		events = append(events, usageEventFromResponses(event.Response.Usage))
 	}
 
 	// 响应未完成，发送停止事件并携带完成原因
@@ -351,14 +315,26 @@ func (p *ResponsesProvider) contentResponseIncomplete(event responseStreamEvent)
 	return events
 }
 
+func usageEventFromResponses(usage *responsesUsage) provider.StreamEvent {
+	var cachedTokens int64
+	if usage.InputTokensDetails != nil {
+		cachedTokens = int64(usage.InputTokensDetails.CachedTokens)
+	}
+	data := provider.UsageData{
+		InputTokens:          int64(usage.InputTokens),
+		OutputTokens:         int64(usage.OutputTokens),
+		CacheReadInputTokens: cachedTokens,
+	}
+	if usage.OutputTokensDetails != nil {
+		data.ReasoningTokens = int64(usage.OutputTokensDetails.ReasoningTokens)
+	}
+	return provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.StreamDelta[any]{Type: provider.StreamDeltaTypeUsage, Data: data},
+	}
+}
+
 // mapResponseFinishReason 根据 OpenAI Responses 状态和输出推断完成原因。
-//
-// 参考 Vercel AI SDK mapOpenAIResponseFinishReason:
-// incomplete 状态使用 incomplete_details.reason 区分 max_output_tokens/content_filter；
-// 其他状态的 finishReason 为 null/undefined 时，有 function_call → tool_calls，否则 → stop。
-//
-// 注意：responseObjectItem.Summary 在流式事件中为 string 类型（reasoning summary 文本），
-// 在非流式完整响应中可能为结构化数组，此处仅依赖 Status 和 Output[].Type 做推断。
 func mapResponseFinishReason(resp *responseObject) provider.FinishReason {
 	if resp == nil {
 		return provider.FinishReasonStop

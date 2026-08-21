@@ -1,5 +1,7 @@
 package responses
 
+import "encoding/json"
+
 // responseCreateRequest 表示 OpenAI Responses API 的创建请求体。
 type responseCreateRequest struct {
 	// Model 指定要使用的模型 ID。
@@ -62,9 +64,9 @@ type responseStreamEvent struct {
 	OutputIndex *int `json:"output_index,omitempty"`
 	// ContentIndex 内容块索引。
 	ContentIndex *int `json:"content_index,omitempty"`
-	// Text 文本增量内容（output_text.delta 使用）。
+	// Text 文本增量内容。官方 SSE 字段名为 delta，见 UnmarshalJSON。
 	Text string `json:"text,omitempty"`
-	// Arguments 函数调用参数增量（function_call_arguments.delta 使用）。
+	// Arguments 函数调用参数增量。官方 SSE 字段名为 delta，见 UnmarshalJSON。
 	Arguments string `json:"arguments,omitempty"`
 	// Name 工具名称。
 	Name string `json:"name,omitempty"`
@@ -74,6 +76,29 @@ type responseStreamEvent struct {
 	Response *responseObject `json:"response,omitempty"`
 	// EncryptedContent 服务端加密的推理内容。
 	EncryptedContent string `json:"encrypted_content,omitempty"`
+}
+
+// UnmarshalJSON 兼容官方 Responses 流式帧：增量正文在 delta 字段，
+// 而不是 text / arguments。Grok 与 OpenAI 原生 SSE 均使用 delta。
+func (e *responseStreamEvent) UnmarshalJSON(data []byte) error {
+	type alias responseStreamEvent
+	aux := struct {
+		Delta string `json:"delta"`
+		*alias
+	}{alias: (*alias)(e)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.Delta == "" {
+		return nil
+	}
+	if e.Text == "" {
+		e.Text = aux.Delta
+	}
+	if e.Arguments == "" {
+		e.Arguments = aux.Delta
+	}
+	return nil
 }
 
 // responseObject 表示 OpenAI Responses API 的非流式完整响应。
@@ -112,8 +137,10 @@ type responseObjectItem struct {
 	CallID string `json:"call_id,omitempty"`
 	// Arguments 工具调用参数（function_call 类型使用）。
 	Arguments string `json:"arguments,omitempty"`
-	// Summary 推理摘要文本（reasoning 类型使用）。
-	Summary string `json:"summary,omitempty"`
+	// Summary 推理摘要。官方为 [{type,text}] 数组，部分代理发 string。
+	// 使用 RawMessage 避免数组解进 string 导致整帧 Unmarshal 失败、
+	// 从而丢掉 encrypted_content / id。
+	Summary json.RawMessage `json:"summary,omitempty"`
 	// EncryptedContent 服务端加密的推理内容（reasoning 类型使用）。
 	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
@@ -139,6 +166,10 @@ type responsesUsage struct {
 		// CachedTokens 缓存命中 token 数量。
 		CachedTokens int `json:"cached_tokens,omitempty"`
 	} `json:"input_tokens_details,omitempty"`
+	// OutputTokensDetails 输出 token 细分（含 reasoning_tokens）。
+	OutputTokensDetails *struct {
+		ReasoningTokens int `json:"reasoning_tokens,omitempty"`
+	} `json:"output_tokens_details,omitempty"`
 }
 
 // openaiError 表示上游 OpenAI 兼容端点返回的错误结构。

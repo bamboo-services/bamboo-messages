@@ -133,16 +133,6 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 				break
 			}
 
-			// 首次成功读取数据后发送 StreamTypeStart
-			if !startSent {
-				startSent = true
-				select {
-				case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
-				case <-ctx.Done():
-					return
-				}
-			}
-
 			// 解析 SSE 帧数据为 responseStreamEvent
 			var event responseStreamEvent
 			if jsonErr := json.Unmarshal(data, &event); jsonErr != nil {
@@ -153,6 +143,22 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			// 如果 event: 行有类型但 JSON 中无 type 字段，用 eventType 补充
 			if event.Type == "" && eventType != "" {
 				event.Type = eventType
+			}
+
+			// 首次成功解析后发送 StreamTypeStart。若首帧是 response.created，
+			// 把上游真实 response.id 挂到 Start 上，供出口 codec 原样使用，
+			// 避免伪造 resp_<nano> 打断 Grok previous_response_id 链路。
+			if !startSent {
+				startSent = true
+				startEv := provider.StreamEvent{Type: provider.StreamTypeStart}
+				if event.Type == "response.created" && event.Response != nil && event.Response.ID != "" {
+					startEv.Delta = provider.NewMetadataDelta(event.Response.ID, "", "")
+				}
+				select {
+				case eventCh <- startEv:
+				case <-ctx.Done():
+					return
+				}
 			}
 
 			// 分发事件到处理函数

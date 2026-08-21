@@ -108,7 +108,11 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 	}
 
 	// 推理内容提取：兼容 reasoning_content 和 reasoning 两种字段名
-	if reasoningStr := parseReasoningRaw(choice.Message.ReasoningContent); reasoningStr != "" {
+	reasoningStr := parseReasoningRaw(choice.Message.ReasoningContent)
+	if reasoningStr == "" {
+		reasoningStr = parseReasoningRaw(choice.Message.Reasoning)
+	}
+	if reasoningStr != "" {
 		result.Thinking = reasoningStr
 	}
 

@@ -317,8 +317,8 @@ func TestConvertConfigToolChoiceSuppressesThinking(t *testing.T) {
 	if result.ToolChoice != "required" {
 		t.Errorf("ToolChoice = %q, want required", result.ToolChoice)
 	}
-	if result.ThinkingConfig != nil {
-		t.Errorf("ThinkingConfig = %v, want nil (tool_choice 存在时屏蔽 thinking)", result.ThinkingConfig)
+	if result.ThinkingConfig == nil || result.ThinkingConfig.Effort != "medium" {
+		t.Errorf("ThinkingConfig = %v, want effort=medium 保留（tool_choice 不再屏蔽思考）", result.ThinkingConfig)
 	}
 	if _, ok := result.ProviderExtra["thinking"]; ok {
 		t.Errorf("ProviderExtra 仍含 thinking 键: %v", result.ProviderExtra)

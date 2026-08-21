@@ -321,13 +321,14 @@ func configToProvider(cfg *RequestConfig) *provider.ChatConfig {
 
 	var thinkingConfig *provider.ThinkingConfig
 	var providerExtra map[string]any
-	if cfg.ToolChoice != "" {
-		// 有 tool_choice：屏蔽 thinking，避免上游思考模式与工具选择冲突。
-		thinkingConfig = nil
+	thinkingConfig = cfg.ThinkingConfig
+	providerExtra = cfg.ProviderExtra
+	if cfg.ToolChoice == "required" || cfg.ToolChoice == "forced" || cfg.ToolChoice == "none" {
+		// 仅在强制/禁用工具时去掉 Anthropic 风格的 thinking 透传键，
+		// 避免 GLM 等上游把 thinking JSON 与 tool_choice 冲突。
+		// ThinkingConfig.Effort 必须保留：Gemini 思考+工具是官方支持组合，
+		// Responses 客户端带 tool_choice=auto 时也不能把思考关掉。
 		providerExtra = stripThinkingExtra(cfg.ProviderExtra)
-	} else {
-		thinkingConfig = cfg.ThinkingConfig
-		providerExtra = cfg.ProviderExtra
 	}
 
 	return &provider.ChatConfig{
@@ -434,8 +435,12 @@ func resultToResponse(result *provider.CompletionResult, providerType string) *R
 	if len(content) == 0 {
 		content = []ContentBlock{}
 	}
+	id := fmt.Sprintf("bamboo_msg_%d", time.Now().UnixNano())
+	if result.ResponseID != "" {
+		id = result.ResponseID
+	}
 	return &Response{
-		ID:         fmt.Sprintf("bamboo_msg_%d", time.Now().UnixNano()),
+		ID:         id,
 		Type:       "message",
 		Role:       RoleAssistant,
 		Content:    content,
@@ -445,10 +450,12 @@ func resultToResponse(result *provider.CompletionResult, providerType string) *R
 			OutputTokens:             result.Usage.OutputTokens,
 			CacheCreationInputTokens: result.Usage.CacheCreationInputTokens,
 			CacheReadInputTokens:     result.Usage.CacheReadInputTokens,
+			ReasoningTokens:          result.Usage.ReasoningTokens,
 		},
 		ProviderType: providerType,
 		RequestID:    fmt.Sprintf("req_%d", time.Now().UnixNano()),
 		ResponseID:   result.ResponseID,
+		ReasoningID:  result.ReasoningID,
 		CreatedAt:    time.Now().Unix(),
 	}
 }
@@ -495,7 +502,7 @@ func NewStreamConverter() *StreamConverter { return &StreamConverter{} }
 func (sc *StreamConverter) Convert(event provider.StreamEvent) []StreamEvent {
 	switch event.Type {
 	case provider.StreamTypeStart:
-		return sc.handleStart()
+		return sc.handleStart(event)
 	case provider.StreamTypeDelta:
 		return sc.handleDelta(event.Delta)
 	case provider.StreamTypeStop:
@@ -541,7 +548,7 @@ func finishReasonPriority(r FinishReason) int {
 	}
 }
 
-func (sc *StreamConverter) handleStart() []StreamEvent {
+func (sc *StreamConverter) handleStart(event provider.StreamEvent) []StreamEvent {
 	sc.started = true
 	sc.blockIndex = 0
 	sc.nextBlockIndex = 0
@@ -558,13 +565,22 @@ func (sc *StreamConverter) handleStart() []StreamEvent {
 	sc.stopHandled = false
 	sc.stoppedBlockIndexes = make(map[int]bool)
 	sc.metadata = nil
-	return []StreamEvent{
-		{
-			Type:    EventMessageStart,
-			Message: &BambooMessage{Role: RoleAssistant, Content: []ContentBlock{}},
-			Usage:   &Usage{},
-		},
+	start := StreamEvent{
+		Type:    EventMessageStart,
+		Message: &BambooMessage{Role: RoleAssistant, Content: []ContentBlock{}},
+		Usage:   &Usage{},
 	}
+	if event.Delta.Type == provider.StreamDeltaTypeMetadata {
+		if data, ok := event.Delta.Data.(provider.MetadataData); ok {
+			sc.metadata = &MessageDelta{
+				ResponseID:       data.ResponseID,
+				ReasoningID:      data.ReasoningID,
+				EncryptedContent: data.EncryptedContent,
+			}
+			start.Delta = sc.metadata
+		}
+	}
+	return []StreamEvent{start}
 }
 
 func (sc *StreamConverter) nextIndex() int {
@@ -833,6 +849,7 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 			OutputTokens:             data.OutputTokens,
 			CacheCreationInputTokens: data.CacheCreationInputTokens,
 			CacheReadInputTokens:     data.CacheReadInputTokens,
+			ReasoningTokens:          data.ReasoningTokens,
 		}
 		// 通过 Ping 事件携带 usage，确保流中断时 relay 层仍可提取 usage。
 		// 不使用 EventMessageDelta 以避免在 finish_reason 之前产生携带 usage 的终止语义 chunk，
@@ -845,6 +862,7 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 				OutputTokens:             data.OutputTokens,
 				CacheCreationInputTokens: data.CacheCreationInputTokens,
 				CacheReadInputTokens:     data.CacheReadInputTokens,
+				ReasoningTokens:          data.ReasoningTokens,
 			},
 		}}
 	case provider.StreamDeltaTypeMetadata:
@@ -852,8 +870,6 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		if !ok {
 			return nil
 		}
-		// 元数据不产生即时事件，累积到 sc.metadata，由 handleStop 在 message_delta 中统一输出。
-		// 多次 MetadataDelta 时采用"后值覆盖"策略（与 provider 层语义一致）。
 		if sc.metadata == nil {
 			sc.metadata = &MessageDelta{}
 		}
@@ -866,7 +882,13 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		if data.EncryptedContent != "" {
 			sc.metadata.EncryptedContent = data.EncryptedContent
 		}
-		return nil
+		// 立即发出无 StopReason 的 message_delta，让 Responses 出口能在
+		// output_item.done 到达时写入真实 rs_ id / encrypted_content。
+		md := *sc.metadata
+		return []StreamEvent{{
+			Type:  EventMessageDelta,
+			Delta: &md,
+		}}
 	case provider.StreamDeltaTypeRedactedThinking:
 		// redacted_thinking 作为独立内容块输出: 先关闭异类活跃块，再发出 block_start + block_stop。
 		// redacted_thinking 是原子块（无增量），直接 start + stop 完成生命周期。

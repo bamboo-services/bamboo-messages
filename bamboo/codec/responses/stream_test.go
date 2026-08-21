@@ -424,14 +424,11 @@ func TestStreamSerializer_ThinkingStream(t *testing.T) {
 	}
 }
 
-// TestStreamSerializer_ThinkingNoDuplicateSummaryTrack 验证 thinking 增量与收尾
-// 只产生 reasoning_text 轨道事件，不再把同一份全文同时发到
-// reasoning_summary_text 轨道——summary 轨道应承载摘要，与全文重复会
-// 导致客户端把思考内容渲染两遍。
-func TestStreamSerializer_ThinkingNoDuplicateSummaryTrack(t *testing.T) {
+// TestStreamSerializer_ThinkingEmitsDisplayAndRawTracks 验证 thinking 增量同时发出
+// reasoning_text 与 reasoning_summary_text：后者是 Codex / OpenAI SDK 的展示轨。
+func TestStreamSerializer_ThinkingEmitsDisplayAndRawTracks(t *testing.T) {
 	s := newStreamSerializer("")
 
-	// message_start + content_block_start (thinking)
 	if _, err := s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
@@ -446,7 +443,6 @@ func TestStreamSerializer_ThinkingNoDuplicateSummaryTrack(t *testing.T) {
 		t.Fatalf("Serialize(thinking block_start) error = %v", err)
 	}
 
-	// thinking_delta → 仅 reasoning_text.delta，无 summary delta
 	data, err := s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockDelta,
 		Index: 0,
@@ -456,35 +452,43 @@ func TestStreamSerializer_ThinkingNoDuplicateSummaryTrack(t *testing.T) {
 		t.Fatalf("Serialize(thinking_delta) error = %v", err)
 	}
 	frames := parseAllResponsesSSE(t, data)
-	if len(frames) != 1 {
-		t.Fatalf("thinking_delta produced %d events, want exactly 1 (reasoning_text.delta)", len(frames))
+	hasRaw, hasSummary := false, false
+	for _, f := range frames {
+		switch f.eventType {
+		case "response.reasoning_text.delta":
+			hasRaw = true
+			if f.payload["delta"] != "hmm..." {
+				t.Errorf("reasoning_text.delta = %v", f.payload["delta"])
+			}
+		case "response.reasoning_summary_text.delta":
+			hasSummary = true
+			if f.payload["delta"] != "hmm..." {
+				t.Errorf("reasoning_summary_text.delta = %v", f.payload["delta"])
+			}
+		}
 	}
-	if frames[0].eventType != "response.reasoning_text.delta" {
-		t.Errorf("event type = %q, want %q", frames[0].eventType, "response.reasoning_text.delta")
+	if !hasRaw || !hasSummary {
+		t.Fatalf("thinking_delta missing tracks raw=%v summary=%v frames=%d", hasRaw, hasSummary, len(frames))
 	}
 
-	// content_block_stop → reasoning_text.done + output_item.done，无 summary 事件
 	data, err = s.Serialize(bamboo.StreamEvent{Type: bamboo.EventContentBlockStop, Index: 0})
 	if err != nil {
 		t.Fatalf("Serialize(content_block_stop) error = %v", err)
 	}
 	stopFrames := parseAllResponsesSSE(t, data)
-	for _, f := range stopFrames {
-		if f.eventType == "response.reasoning_summary_text.delta" || f.eventType == "response.reasoning_summary_text.done" {
-			t.Errorf("unexpected duplicate summary event %q: thinking must not repeat on summary track", f.eventType)
-		}
-	}
-	hasRawDone, hasItemDone := false, false
+	hasRawDone, hasSummaryDone, hasItemDone := false, false, false
 	for _, f := range stopFrames {
 		switch f.eventType {
 		case "response.reasoning_text.done":
 			hasRawDone = true
+		case "response.reasoning_summary_text.done":
+			hasSummaryDone = true
 		case "response.output_item.done":
 			hasItemDone = true
 		}
 	}
-	if !hasRawDone || !hasItemDone {
-		t.Errorf("thinking stop missing reasoning_text.done/output_item.done, got %d frames", len(stopFrames))
+	if !hasRawDone || !hasSummaryDone || !hasItemDone {
+		t.Errorf("thinking stop missing done events raw=%v summary=%v item=%v", hasRawDone, hasSummaryDone, hasItemDone)
 	}
 }
 

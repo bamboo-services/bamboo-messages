@@ -257,6 +257,9 @@ func (s *geminiStreamSerializer) handleMessageDelta(event bamboo.StreamEvent) ([
 	if !ok {
 		return nil, nil
 	}
+	if msgDelta.StopReason == "" && event.Usage == nil {
+		return nil, nil
+	}
 
 	finishReason := mapFinishReasonToGemini(msgDelta.StopReason)
 

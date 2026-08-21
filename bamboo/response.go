@@ -46,10 +46,11 @@ type Response struct {
 
 	// ---- Bamboo 扩展字段 ----
 
-	ProviderType string `json:"provider_type"`         // 底层协议类型（如 "anthropic"、"openai-completions"）
-	RequestID    string `json:"request_id,omitempty"`  // 请求追踪 ID
-	ResponseID   string `json:"response_id,omitempty"` // 响应 ID（OpenAI Responses API 的 response ID，用于多轮对话链路追踪）
-	CreatedAt    int64  `json:"created_at,omitempty"`  // 响应创建时间的 Unix 时间戳
+	ProviderType string `json:"provider_type"`          // 底层协议类型（如 "anthropic"、"openai-completions"）
+	RequestID    string `json:"request_id,omitempty"`   // 请求追踪 ID
+	ResponseID   string `json:"response_id,omitempty"`  // 响应 ID（OpenAI Responses API 的 response ID，用于多轮对话链路追踪）
+	ReasoningID  string `json:"reasoning_id,omitempty"` // reasoning item ID（如 "rs_xxx"）
+	CreatedAt    int64  `json:"created_at,omitempty"`   // 响应创建时间的 Unix 时间戳
 }
 
 // UnmarshalJSON 自定义 JSON 反序列化，使用 ContentBlocks 包装类型
@@ -77,4 +78,5 @@ type Usage struct {
 	OutputTokens             int64 `json:"output_tokens"`                         // 输出 token 数量
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"` // 缓存创建消耗的输入 token 数量（可选）
 	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`     // 缓存命中读取的输入 token 数量（可选）
+	ReasoningTokens          int64 `json:"reasoning_tokens,omitempty"`            // 思考/推理 token 数量（可选）
 }

@@ -71,6 +71,7 @@ type geminiContent struct {
 type geminiPart struct {
 	Text             string            `json:"text,omitempty"`
 	Thought          bool              `json:"thought,omitempty"`
+	ThoughtSignature string            `json:"thoughtSignature,omitempty"`
 	FunctionCall     *functionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *functionResponse `json:"functionResponse,omitempty"`
 	InlineData       *inlineData       `json:"inlineData,omitempty"`
@@ -147,6 +148,7 @@ type usageMetadata struct {
 	CandidatesTokenCount    int `json:"candidatesTokenCount,omitempty"`
 	TotalTokenCount         int `json:"totalTokenCount,omitempty"`
 	CachedContentTokenCount int `json:"cachedContentTokenCount,omitempty"`
+	ThoughtsTokenCount      int `json:"thoughtsTokenCount,omitempty"`
 }
 
 // geminiErrorResponse 是 Gemini API 返回的错误响应外层结构。

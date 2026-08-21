@@ -22,8 +22,8 @@ func TestBuildParams_MaxEffortNormalized(t *testing.T) {
 	if reasoning["effort"] != "xhigh" {
 		t.Errorf("reasoning.effort = %v, want %q", reasoning["effort"], "xhigh")
 	}
-	if reasoning["summary"] != "detailed" {
-		t.Errorf("reasoning.summary = %v, want %q", reasoning["summary"], "detailed")
+	if _, ok := reasoning["summary"]; ok {
+		t.Errorf("reasoning.summary = %v, want omitted (不自动推导，以免 Grok 拒请求)", reasoning["summary"])
 	}
 }
 
@@ -42,7 +42,30 @@ func TestBuildParams_HighEffortSummary(t *testing.T) {
 	if reasoning["effort"] != "high" {
 		t.Errorf("reasoning.effort = %v, want %q", reasoning["effort"], "high")
 	}
-	if reasoning["summary"] != "detailed" {
-		t.Errorf("reasoning.summary = %v, want %q", reasoning["summary"], "detailed")
+	if _, ok := reasoning["summary"]; ok {
+		t.Errorf("reasoning.summary = %v, want omitted (不自动推导)", reasoning["summary"])
+	}
+}
+
+func TestBuildParams_PassthroughReasoningSummaryAndInclude(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+	config := &provider.ChatConfig{
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
+		ProviderExtra: map[string]any{
+			"reasoning_summary": "auto",
+			"include":           []any{"reasoning.encrypted_content"},
+		},
+	}
+	params := testBuildParams(p, config)
+	reasoning, ok := params["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatal("reasoning should be set")
+	}
+	if reasoning["summary"] != "auto" {
+		t.Errorf("summary = %v, want auto (client opt-in)", reasoning["summary"])
+	}
+	include, ok := params["include"].([]string)
+	if !ok || len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+		t.Errorf("include = %v", params["include"])
 	}
 }

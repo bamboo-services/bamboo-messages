@@ -87,10 +87,8 @@ func (p *ResponsesProvider) buildParams(model string, systemPrompt string, messa
 	}
 
 	// ProviderExtra: include — 指定响应中需包含的附加数据（如 reasoning.encrypted_content）
-	if include, ok := provider.GetExtraAny(config.ProviderExtra, "include"); ok {
-		if items, ok := include.([]string); ok && len(items) > 0 {
-			params["include"] = items
-		}
+	if items := extraStringSlice(config.ProviderExtra, "include"); len(items) > 0 {
+		params["include"] = items
 	}
 
 	// ProviderExtra: modalities — 输出模态
@@ -112,25 +110,28 @@ func (p *ResponsesProvider) buildParams(model string, systemPrompt string, messa
 		params["tools"] = tools
 	}
 
-	// Reasoning — 思考/推理配置（effort + summary 自动推导）
+	// Reasoning — 思考/推理配置。
 	// effort 为 "none" 时不输出 reasoning 字段。
-	// 透传前经 NormalizeReasoningEffort 归一化（max→xhigh），与 Completions 出口保持一致：
-	// qwen 等上游拒绝 "max"，归一化后语义等价（最高推理强度）且兼容所有上游。
-	if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" && config.ThinkingConfig.Effort != "none" {
-		effort := provider.NormalizeReasoningEffort(config.ThinkingConfig.Effort)
-		reasoning := map[string]any{
-			"effort": effort,
+	// 透传前经 NormalizeReasoningEffort 归一化（max→xhigh）。
+	// summary 只透传客户端显式给出的值：Grok 不接受 reasoning.summary，
+	// 自动推导会触发上游校验失败；OpenAI 官方则要求显式 opt-in 才返回摘要。
+	if config != nil {
+		reasoning := map[string]any{}
+		if config.ThinkingConfig != nil && config.ThinkingConfig.Effort != "" && config.ThinkingConfig.Effort != "none" {
+			reasoning["effort"] = provider.NormalizeReasoningEffort(config.ThinkingConfig.Effort)
 		}
-		// Summary 按归一化后的 effort 自动推导（max 归一化为 xhigh，落入 detailed 档）
-		switch effort {
-		case "minimal", "low":
-			reasoning["summary"] = "concise"
-		case "medium":
-			reasoning["summary"] = "auto"
-		case "high", "xhigh":
-			reasoning["summary"] = "detailed"
+		if summary, ok := provider.GetExtraString(config.ProviderExtra, "reasoning_summary"); ok && summary != "" {
+			reasoning["summary"] = summary
 		}
-		params["reasoning"] = reasoning
+		if mode, ok := provider.GetExtraString(config.ProviderExtra, "reasoning_mode"); ok && mode != "" {
+			reasoning["mode"] = mode
+		}
+		if ctxMode, ok := provider.GetExtraString(config.ProviderExtra, "reasoning_context"); ok && ctxMode != "" {
+			reasoning["context"] = ctxMode
+		}
+		if len(reasoning) > 0 {
+			params["reasoning"] = reasoning
+		}
 	}
 
 	// ToolChoice — 工具选择策略（"forced" 统一映射为 "required"）
@@ -158,4 +159,29 @@ func (p *ResponsesProvider) buildParams(model string, systemPrompt string, messa
 	}
 
 	return params
+}
+
+// extraStringSlice 从 ProviderExtra 读取字符串数组。
+// JSON 解进 map[string]any 后数组类型是 []any，不能直接断言 []string。
+func extraStringSlice(extra map[string]any, key string) []string {
+	v, ok := provider.GetExtraAny(extra, key)
+	if !ok || v == nil {
+		return nil
+	}
+	switch items := v.(type) {
+	case []string:
+		return items
+	case []any:
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			s, ok := item.(string)
+			if !ok || s == "" {
+				continue
+			}
+			out = append(out, s)
+		}
+		return out
+	default:
+		return nil
+	}
 }

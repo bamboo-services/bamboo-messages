@@ -147,6 +147,44 @@ func TestAudit_Gemini_FunctionResponseWithID(t *testing.T) {
 }
 
 // TestAudit_Gemini_EmptyModel verifies model is empty (documents the gap).
+func TestAudit_Gemini_ThoughtPartBecomesThinkingBlock(t *testing.T) {
+	body := []byte(`{
+		"contents":[{"role":"model","parts":[
+			{"text":"let me think","thought":true,"thoughtSignature":"sig_1"},
+			{"text":"answer"}
+		]}]
+	}`)
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if len(req.Messages) != 1 || len(req.Messages[0].Content) != 2 {
+		t.Fatalf("messages/content = %+v", req.Messages)
+	}
+	tb, ok := req.Messages[0].Content[0].(*bamboo.ThinkingBlock)
+	if !ok {
+		t.Fatalf("block[0] = %T, want *ThinkingBlock", req.Messages[0].Content[0])
+	}
+	if tb.Thinking != "let me think" || tb.Signature != "sig_1" {
+		t.Errorf("ThinkingBlock = %+v", tb)
+	}
+	text, ok := req.Messages[0].Content[1].(*bamboo.TextBlock)
+	if !ok || text.Text != "answer" {
+		t.Errorf("block[1] = %+v", req.Messages[0].Content[1])
+	}
+}
+
+func TestAudit_Gemini_ThinkingLevelParsed(t *testing.T) {
+	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"Hi"}]}],"generationConfig":{"thinkingConfig":{"thinkingLevel":"HIGH","includeThoughts":true}}}`)
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if req.Config.ThinkingConfig == nil || req.Config.ThinkingConfig.Effort != "high" {
+		t.Fatalf("ThinkingConfig = %+v", req.Config.ThinkingConfig)
+	}
+}
+
 func TestAudit_Gemini_EmptyModel(t *testing.T) {
 	body := []byte(`{
 		"contents": [{"role":"user","parts":[{"text":"test"}]}],

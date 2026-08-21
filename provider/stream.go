@@ -113,6 +113,7 @@ type UsageData struct {
 	OutputTokens             int64 `json:"output_tokens"`                         // 输出 Token 数量
 	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"` // 缓存创建消耗的输入 token 数量（Anthropic）
 	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`     // 缓存命中读取的输入 token 数量（Anthropic/OpenAI/Gemini）
+	ReasoningTokens          int64 `json:"reasoning_tokens,omitempty"`            // 思考/推理 token 数量（OpenAI reasoning_tokens / Gemini thoughtsTokenCount）
 }
 
 // BlockStartData 内容块开始数据。

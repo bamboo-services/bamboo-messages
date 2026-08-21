@@ -24,6 +24,38 @@ func findBlockStartType(t *testing.T, events []provider.StreamEvent) string {
 }
 
 // TestContentReasoningTextDelta_BlockStartType 验证首次调用时 BlockStart 类型为 "thinking"
+func TestUnmarshalResponseEvent_OfficialDeltaField(t *testing.T) {
+	event := unmarshalResponseEvent(t, `{"type":"response.reasoning_summary_text.delta","delta":"visible thinking"}`)
+	if event.Text != "visible thinking" {
+		t.Fatalf("Text = %q, want official delta field mapped", event.Text)
+	}
+	event = unmarshalResponseEvent(t, `{"type":"response.function_call_arguments.delta","delta":"{\"a\":1}"}`)
+	if event.Arguments != `{"a":1}` {
+		t.Fatalf("Arguments = %q, want official delta field mapped", event.Arguments)
+	}
+}
+
+func TestUnmarshalResponseEvent_SummaryArrayDoesNotDropItem(t *testing.T) {
+	event := unmarshalResponseEvent(t, `{
+		"type":"response.output_item.done",
+		"item":{
+			"type":"reasoning",
+			"id":"rs_real",
+			"summary":[],
+			"encrypted_content":"gAAAAABp_enc"
+		}
+	}`)
+	if event.Item == nil {
+		t.Fatal("item dropped because summary is an array")
+	}
+	if event.Item.ID != "rs_real" {
+		t.Errorf("Item.ID = %q", event.Item.ID)
+	}
+	if event.Item.EncryptedContent != "gAAAAABp_enc" {
+		t.Errorf("EncryptedContent = %q", event.Item.EncryptedContent)
+	}
+}
+
 func TestContentReasoningTextDelta_BlockStartType(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 

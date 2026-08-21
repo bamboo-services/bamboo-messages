@@ -75,6 +75,45 @@ func TestAudit_MaxTokens_Int64ToInt32_NormalRange(t *testing.T) {
 }
 
 // TestAudit_SafetySettings_Passthrough 验证 safety_settings 从 ProviderExtra 提取并透传。
+func TestBuildContentConfig_ThinkingBudgetForGemini25(t *testing.T) {
+	p := NewProvider("test-key")
+	gc := p.buildContentConfig(&provider.ChatConfig{
+		Model:          "gemini-2.5-flash",
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "medium"},
+	})
+	tc, ok := gc["thinkingConfig"].(map[string]any)
+	if !ok {
+		t.Fatal("thinkingConfig missing")
+	}
+	if tc["includeThoughts"] != true {
+		t.Errorf("includeThoughts = %v", tc["includeThoughts"])
+	}
+	if tc["thinkingBudget"] != 8192 {
+		t.Errorf("thinkingBudget = %v, want 8192", tc["thinkingBudget"])
+	}
+	if _, ok := tc["thinkingLevel"]; ok {
+		t.Errorf("thinkingLevel should be omitted for 2.5: %v", tc["thinkingLevel"])
+	}
+}
+
+func TestBuildContentConfig_ThinkingLevelForGemini3(t *testing.T) {
+	p := NewProvider("test-key")
+	gc := p.buildContentConfig(&provider.ChatConfig{
+		Model:          "gemini-3.1-pro",
+		ThinkingConfig: &provider.ThinkingConfig{Effort: "high"},
+	})
+	tc, ok := gc["thinkingConfig"].(map[string]any)
+	if !ok {
+		t.Fatal("thinkingConfig missing")
+	}
+	if tc["thinkingLevel"] != "high" {
+		t.Errorf("thinkingLevel = %v, want high", tc["thinkingLevel"])
+	}
+	if _, ok := tc["thinkingBudget"]; ok {
+		t.Errorf("thinkingBudget should be omitted for gemini-3: %v", tc["thinkingBudget"])
+	}
+}
+
 func TestAudit_SafetySettings_Passthrough(t *testing.T) {
 	p := NewProvider("test-key")
 

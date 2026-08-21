@@ -452,6 +452,35 @@ func TestParseRequest_ProviderExtra(t *testing.T) {
 	}
 }
 
+func TestParseRequest_IncludeAndReasoningSummary(t *testing.T) {
+	body := []byte(`{
+		"model": "grok-4.6",
+		"input": "Hi",
+		"include": ["reasoning.encrypted_content"],
+		"reasoning": {"effort": "high", "summary": "auto", "mode": "pro", "context": "all_turns"}
+	}`)
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if req.Config.ThinkingConfig == nil || req.Config.ThinkingConfig.Effort != "high" {
+		t.Fatalf("ThinkingConfig = %+v", req.Config.ThinkingConfig)
+	}
+	include, ok := req.Config.ProviderExtra["include"].([]string)
+	if !ok || len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+		t.Errorf("include = %v", req.Config.ProviderExtra["include"])
+	}
+	if req.Config.ProviderExtra["reasoning_summary"] != "auto" {
+		t.Errorf("reasoning_summary = %v", req.Config.ProviderExtra["reasoning_summary"])
+	}
+	if req.Config.ProviderExtra["reasoning_mode"] != "pro" {
+		t.Errorf("reasoning_mode = %v", req.Config.ProviderExtra["reasoning_mode"])
+	}
+	if req.Config.ProviderExtra["reasoning_context"] != "all_turns" {
+		t.Errorf("reasoning_context = %v", req.Config.ProviderExtra["reasoning_context"])
+	}
+}
+
 func TestParseRequest_ToolChoiceString(t *testing.T) {
 	tests := []struct {
 		input    string

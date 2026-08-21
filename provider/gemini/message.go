@@ -71,8 +71,11 @@ func (p *Provider) buildUserMessage(msg provider.Message) map[string]any {
 // 当存在 ToolCalls 时，构建包含文本和 functionCall 的多 Part 消息；
 // 否则构建纯文本消息。FunctionCall 的 ID 在为空时合成。
 func (p *Provider) buildAssistantMessage(msg provider.Message) map[string]any {
+	parts := make([]map[string]any, 0, len(msg.ToolCalls)+2)
+	if thought := buildThoughtPart(msg); thought != nil {
+		parts = append(parts, thought)
+	}
 	if len(msg.ToolCalls) > 0 {
-		parts := make([]map[string]any, 0, len(msg.ToolCalls)+1)
 		if msg.Content != "" {
 			parts = append(parts, map[string]any{"text": msg.Content})
 		}
@@ -94,12 +97,32 @@ func (p *Provider) buildAssistantMessage(msg provider.Message) map[string]any {
 				},
 			})
 		}
+		if len(parts) == 0 {
+			parts = append(parts, map[string]any{"text": msg.Content})
+		}
 		return map[string]any{"role": "model", "parts": parts}
 	}
-	return map[string]any{
-		"role":  "model",
-		"parts": []map[string]any{{"text": msg.Content}},
+	if msg.Content != "" {
+		parts = append(parts, map[string]any{"text": msg.Content})
 	}
+	if len(parts) == 0 {
+		parts = append(parts, map[string]any{"text": msg.Content})
+	}
+	return map[string]any{"role": "model", "parts": parts}
+}
+
+func buildThoughtPart(msg provider.Message) map[string]any {
+	if msg.ThinkingContent == "" && msg.ThinkingSignature == "" {
+		return nil
+	}
+	part := map[string]any{"thought": true}
+	if msg.ThinkingContent != "" {
+		part["text"] = msg.ThinkingContent
+	}
+	if msg.ThinkingSignature != "" {
+		part["thoughtSignature"] = msg.ThinkingSignature
+	}
+	return part
 }
 
 // buildToolMessage 构建工具响应消息。

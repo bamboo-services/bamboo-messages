@@ -42,6 +42,8 @@ type geminiContent struct {
 //   - executableCode / codeExecutionResult 等扩展类型
 type geminiPart struct {
 	Text             string              `json:"text,omitempty"`
+	Thought          bool                `json:"thought,omitempty"`
+	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
 	InlineData       *geminiInlineData   `json:"inlineData,omitempty"`
 	FileData         *geminiFileData     `json:"fileData,omitempty"`
 	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
@@ -87,7 +89,9 @@ type geminiGenConfig struct {
 
 // geminiThinkingCfg Gemini thinking 配置。
 type geminiThinkingCfg struct {
-	ThinkingBudget *int64 `json:"thinkingBudget,omitempty"`
+	ThinkingBudget  *int64 `json:"thinkingBudget,omitempty"`
+	IncludeThoughts *bool  `json:"includeThoughts,omitempty"`
+	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
 }
 
 // geminiTool 工具定义（包含 functionDeclarations 数组）。
@@ -271,6 +275,10 @@ func parseContents(contents []geminiContent) ([]bamboo.BambooMessage, error) {
 func parseParts(parts []geminiPart, callIndex *int) ([]bamboo.ContentBlock, error) {
 	blocks := make([]bamboo.ContentBlock, 0, len(parts))
 	for _, part := range parts {
+		if part.Thought || part.ThoughtSignature != "" {
+			blocks = append(blocks, bamboo.NewThinkingBlock(part.Text, part.ThoughtSignature))
+			continue
+		}
 		// text → TextBlock
 		if part.Text != "" {
 			blocks = append(blocks, bamboo.NewTextBlock(part.Text))
@@ -392,7 +400,7 @@ func applyGenerationConfig(config *bamboo.RequestConfig, gc *geminiGenConfig) {
 
 	// thinkingConfig → ThinkingConfig
 	if gc.ThinkingConfig != nil {
-		config.ThinkingConfig = mapThinkingBudgetToEffort(gc.ThinkingConfig.ThinkingBudget)
+		config.ThinkingConfig = mapGeminiThinkingCfg(gc.ThinkingConfig)
 	}
 }
 
@@ -468,6 +476,22 @@ func convertSafetySettings(settings []geminiSafetySetting) []map[string]string {
 	return result
 }
 
+func mapGeminiThinkingCfg(cfg *geminiThinkingCfg) *bamboo.ThinkingConfig {
+	if cfg == nil {
+		return nil
+	}
+	if cfg.ThinkingLevel != "" {
+		return &bamboo.ThinkingConfig{Effort: strings.ToLower(cfg.ThinkingLevel)}
+	}
+	if cfg.ThinkingBudget != nil {
+		return mapThinkingBudgetToEffort(cfg.ThinkingBudget)
+	}
+	if cfg.IncludeThoughts != nil && *cfg.IncludeThoughts {
+		return &bamboo.ThinkingConfig{Effort: "medium"}
+	}
+	return nil
+}
+
 // mapThinkingBudgetToEffort 将 Gemini thinkingBudget 映射为 ThinkingConfig。
 //
 // budget 为 nil 时返回 nil（不启用思考）；
@@ -480,7 +504,6 @@ func mapThinkingBudgetToEffort(budget *int64) *bamboo.ThinkingConfig {
 	if b <= 0 {
 		return &bamboo.ThinkingConfig{Effort: "none"}
 	}
-	// 按 budget 大小推断 effort：低预算→low，中预算→medium，高预算→high
 	if b <= 2048 {
 		return &bamboo.ThinkingConfig{Effort: "low"}
 	}
