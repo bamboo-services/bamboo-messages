@@ -145,6 +145,7 @@ type responsesStreamSerializer struct {
 
 	created       bool
 	completedSent bool
+	lastUsage     *bamboo.Usage
 }
 
 type responsesStreamBlock struct {
@@ -169,6 +170,7 @@ func newStreamSerializer(model string) *responsesStreamSerializer {
 func (s *responsesStreamSerializer) Serialize(event bamboo.StreamEvent) ([]byte, error) {
 	switch event.Type {
 	case bamboo.EventMessageStart:
+		s.rememberUsage(event.Usage)
 		return s.handleMessageStart(event)
 	case bamboo.EventContentBlockStart:
 		return s.handleContentBlockStart(event)
@@ -177,10 +179,12 @@ func (s *responsesStreamSerializer) Serialize(event bamboo.StreamEvent) ([]byte,
 	case bamboo.EventContentBlockStop:
 		return s.handleContentBlockStop(event)
 	case bamboo.EventMessageDelta:
+		s.rememberUsage(event.Usage)
 		return s.handleMessageDelta(event)
 	case bamboo.EventMessageStop:
 		return nil, nil
 	case bamboo.EventPing:
+		s.rememberUsage(event.Usage)
 		return []byte(": keep-alive\n\n"), nil
 	case bamboo.EventError:
 		return s.handleError(event)
@@ -534,7 +538,7 @@ func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 		Status:    status,
 		Model:     s.model,
 		Output:    append([]outputItem{}, s.completedOutput...),
-		Usage:     buildResponsesUsage(event.Usage),
+		Usage:     buildResponsesUsage(s.usageForComplete(event.Usage)),
 	}
 	completed, err := s.marshalSSEWithResponse("response.completed", resp)
 	if err != nil {
@@ -626,6 +630,29 @@ func (s *responsesStreamSerializer) ensureToolBlock(index int, callID, name stri
 	s.functionCallIdx = block.outputIndex
 	s.currentCallArgs.Reset()
 	return block
+}
+
+func (s *responsesStreamSerializer) rememberUsage(u *bamboo.Usage) {
+	if u == nil {
+		return
+	}
+	if u.InputTokens == 0 && u.OutputTokens == 0 &&
+		u.CacheReadInputTokens == 0 && u.CacheCreationInputTokens == 0 &&
+		u.ReasoningTokens == 0 {
+		return
+	}
+	cp := *u
+	s.lastUsage = &cp
+}
+
+func (s *responsesStreamSerializer) usageForComplete(eventUsage *bamboo.Usage) *bamboo.Usage {
+	if eventUsage != nil && (eventUsage.InputTokens > 0 || eventUsage.OutputTokens > 0) {
+		return eventUsage
+	}
+	if s.lastUsage != nil {
+		return s.lastUsage
+	}
+	return eventUsage
 }
 
 func buildResponsesUsage(usage *bamboo.Usage) *responsesUsage {

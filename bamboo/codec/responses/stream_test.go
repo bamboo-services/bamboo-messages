@@ -568,6 +568,59 @@ func TestStreamSerializer_ResponseCompletedWithUsage(t *testing.T) {
 	}
 }
 
+func TestStreamSerializer_ResponseCompletedFallsBackToLastNonZeroUsage(t *testing.T) {
+	s := newStreamSerializer("")
+
+	if _, err := s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+		Usage:   &bamboo.Usage{InputTokens: 10, OutputTokens: 0},
+	}); err != nil {
+		t.Fatalf("Serialize(message_start) error = %v", err)
+	}
+	if _, err := s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventPing,
+		Usage: &bamboo.Usage{InputTokens: 42, OutputTokens: 18, ReasoningTokens: 7},
+	}); err != nil {
+		t.Fatalf("Serialize(ping) error = %v", err)
+	}
+
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type: bamboo.EventMessageDelta,
+		Delta: &bamboo.MessageDelta{
+			StopReason: bamboo.FinishReasonEndTurn,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(message_delta) error = %v", err)
+	}
+	evType, payload := parseResponsesSSE(t, data)
+	if evType != "response.completed" {
+		t.Fatalf("event type = %q, want response.completed", evType)
+	}
+	resp := extractResponse(t, payload)
+	usage, ok := resp["usage"].(map[string]any)
+	if !ok {
+		t.Fatal("missing usage in response.completed")
+	}
+	if int64(usage["input_tokens"].(float64)) != 42 {
+		t.Errorf("input_tokens = %v, want 42 from last ping", usage["input_tokens"])
+	}
+	if int64(usage["output_tokens"].(float64)) != 18 {
+		t.Errorf("output_tokens = %v, want 18 from last ping", usage["output_tokens"])
+	}
+	if int64(usage["total_tokens"].(float64)) != 60 {
+		t.Errorf("total_tokens = %v, want 60", usage["total_tokens"])
+	}
+	details, ok := usage["output_tokens_details"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing output_tokens_details: %v", usage)
+	}
+	if int64(details["reasoning_tokens"].(float64)) != 7 {
+		t.Errorf("reasoning_tokens = %v, want 7", details["reasoning_tokens"])
+	}
+}
+
 func TestStreamSerializer_ResponseCompletedUsageDetailsIncludeZeroRequiredFields(t *testing.T) {
 	s := newStreamSerializer("")
 
