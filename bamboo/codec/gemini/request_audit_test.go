@@ -174,6 +174,35 @@ func TestAudit_Gemini_ThoughtPartBecomesThinkingBlock(t *testing.T) {
 	}
 }
 
+func TestAudit_Gemini_FunctionCallThoughtSignatureSplitsBlocks(t *testing.T) {
+	body := []byte(`{
+		"contents":[{"role":"model","parts":[
+			{"functionCall":{"id":"call-1","name":"get_weather","args":{"city":"Paris"}},"thoughtSignature":"sig_fc"}
+		]}]
+	}`)
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if len(req.Messages) != 1 || len(req.Messages[0].Content) != 2 {
+		t.Fatalf("messages/content = %+v", req.Messages)
+	}
+	tb, ok := req.Messages[0].Content[0].(*bamboo.ThinkingBlock)
+	if !ok {
+		t.Fatalf("block[0] = %T, want *ThinkingBlock", req.Messages[0].Content[0])
+	}
+	if tb.Signature != "sig_fc" {
+		t.Errorf("ThinkingBlock.Signature = %q, want sig_fc", tb.Signature)
+	}
+	tu, ok := req.Messages[0].Content[1].(*bamboo.ToolUseBlock)
+	if !ok {
+		t.Fatalf("block[1] = %T, want *ToolUseBlock", req.Messages[0].Content[1])
+	}
+	if tu.ID != "call-1" || tu.Name != "get_weather" {
+		t.Errorf("ToolUseBlock = %+v", tu)
+	}
+}
+
 func TestAudit_Gemini_ThinkingLevelParsed(t *testing.T) {
 	body := []byte(`{"contents":[{"role":"user","parts":[{"text":"Hi"}]}],"generationConfig":{"thinkingConfig":{"thinkingLevel":"HIGH","includeThoughts":true}}}`)
 	req, err := parseRequest(body)

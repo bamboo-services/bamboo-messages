@@ -1,12 +1,10 @@
 package gemini
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
-	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 )
@@ -124,7 +122,8 @@ func (s *geminiStreamSerializer) handleMessageStart(event bamboo.StreamEvent) ([
 // handleContentBlockStart 处理 content_block_start 事件。
 //
 // 对于 tool_use 类型，记录 name 和 id，开启累积模式。
-// text 和 thinking 类型不输出（Gemini 没有 block_start 概念）。
+// text 不输出（Gemini 没有 block_start 概念）。
+// thinking 仅在 start 已携带正文或签名时输出 thought part。
 func (s *geminiStreamSerializer) handleContentBlockStart(event bamboo.StreamEvent) ([]byte, error) {
 	if event.ContentBlock == nil {
 		return nil, nil
@@ -141,9 +140,15 @@ func (s *geminiStreamSerializer) handleContentBlockStart(event bamboo.StreamEven
 		// 不输出，等待 content_block_stop
 		return nil, nil
 
-	case bamboo.ContentBlockText, bamboo.ContentBlockThinking:
-		// 不输出
+	case bamboo.ContentBlockText:
 		return nil, nil
+
+	case bamboo.ContentBlockThinking:
+		tb, ok := event.ContentBlock.(*bamboo.ThinkingBlock)
+		if !ok || (tb.Thinking == "" && tb.Signature == "") {
+			return nil, nil
+		}
+		return s.marshalThoughtPart(tb.Thinking, tb.Signature)
 	}
 
 	return nil, nil
@@ -154,6 +159,7 @@ func (s *geminiStreamSerializer) handleContentBlockStart(event bamboo.StreamEven
 // 根据增量类型分发：
 //   - text_delta     → {candidates:[{content:{role:"model",parts:[{text}]}}]}
 //   - thinking_delta → {candidates:[{content:{parts:[{text, thought:true}]}}]}
+//   - signature_delta → {candidates:[{content:{parts:[{thought:true, thoughtSignature}]}}]}
 //   - input_json_delta → 累积到 pendingCallArgs，不输出
 func (s *geminiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEvent) ([]byte, error) {
 	delta, ok := event.Delta.(*bamboo.StreamDelta)
@@ -175,19 +181,7 @@ func (s *geminiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 		return s.marshalChunk(chunk)
 
 	case bamboo.DeltaThinkingDelta:
-		chunk := geminiStreamChunk{
-			Candidates: []geminiStreamCandidate{{
-				Index: 0,
-				Content: &geminiContentOut{
-					Role: "model",
-					Parts: []geminiPartOut{{
-						Text:    delta.Thinking,
-						Thought: true,
-					}},
-				},
-			}},
-		}
-		return s.marshalChunk(chunk)
+		return s.marshalThoughtPart(delta.Thinking, "")
 
 	case bamboo.DeltaInputJSON:
 		// 累积 functionCall 参数，不输出
@@ -197,9 +191,8 @@ func (s *geminiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 		return nil, nil
 
 	case bamboo.DeltaSignature:
-		xLog.WithName("codec/gemini").SugarWarn(context.Background(),
-			"warning: signature_delta has no equivalent in Gemini protocol, dropped")
-		return nil, nil
+		// thoughtSignature ≡ Bamboo ThinkingBlock.Signature / Anthropic signature_delta
+		return s.marshalThoughtPart("", delta.Signature)
 	}
 
 	return nil, nil
@@ -311,6 +304,26 @@ func (s *geminiStreamSerializer) handleError(event bamboo.StreamEvent) ([]byte, 
 	}
 	data, _ := json.Marshal(payload)
 	return []byte(fmt.Sprintf("data: %s\n\n", data)), nil
+}
+
+func (s *geminiStreamSerializer) marshalThoughtPart(text, signature string) ([]byte, error) {
+	part := geminiPartOut{Thought: true}
+	if text != "" {
+		part.Text = text
+	}
+	if signature != "" {
+		part.ThoughtSignature = signature
+	}
+	chunk := geminiStreamChunk{
+		Candidates: []geminiStreamCandidate{{
+			Index: 0,
+			Content: &geminiContentOut{
+				Role:  "model",
+				Parts: []geminiPartOut{part},
+			},
+		}},
+	}
+	return s.marshalChunk(chunk)
 }
 
 // marshalChunk 将 chunk 序列化为 SSE data 行。

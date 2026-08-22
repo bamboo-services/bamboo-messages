@@ -465,6 +465,7 @@ func TestStreamSerializer_ThinkingEmitsDisplayAndRawTracks(t *testing.T) {
 			if f.payload["delta"] != "hmm..." {
 				t.Errorf("reasoning_summary_text.delta = %v", f.payload["delta"])
 			}
+			requireSummaryIndex(t, f.payload)
 		}
 	}
 	if !hasRaw || !hasSummary {
@@ -483,12 +484,74 @@ func TestStreamSerializer_ThinkingEmitsDisplayAndRawTracks(t *testing.T) {
 			hasRawDone = true
 		case "response.reasoning_summary_text.done":
 			hasSummaryDone = true
+			requireSummaryIndex(t, f.payload)
+		case "response.reasoning_summary_part.done":
+			requireSummaryIndex(t, f.payload)
 		case "response.output_item.done":
 			hasItemDone = true
 		}
 	}
 	if !hasRawDone || !hasSummaryDone || !hasItemDone {
 		t.Errorf("thinking stop missing done events raw=%v summary=%v item=%v", hasRawDone, hasSummaryDone, hasItemDone)
+	}
+}
+
+func TestStreamSerializer_ThinkingSummaryEventsHaveSummaryIndex(t *testing.T) {
+	s := newStreamSerializer("")
+	if _, err := s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	}); err != nil {
+		t.Fatalf("Serialize(message_start) error = %v", err)
+	}
+
+	startData, err := s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        0,
+		ContentBlock: bamboo.NewThinkingBlock("", ""),
+	})
+	if err != nil {
+		t.Fatalf("Serialize(thinking block_start) error = %v", err)
+	}
+	var sawPartAdded bool
+	for _, f := range parseAllResponsesSSE(t, startData) {
+		if f.eventType == "response.reasoning_summary_part.added" {
+			sawPartAdded = true
+			requireSummaryIndex(t, f.payload)
+		}
+	}
+	if !sawPartAdded {
+		t.Fatal("missing response.reasoning_summary_part.added")
+	}
+
+	deltaData, err := s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 0,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaThinkingDelta, Thinking: "step"},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(thinking_delta) error = %v", err)
+	}
+	for _, f := range parseAllResponsesSSE(t, deltaData) {
+		if f.eventType == "response.reasoning_summary_text.delta" {
+			requireSummaryIndex(t, f.payload)
+		}
+		if f.eventType == "response.reasoning_text.delta" {
+			if _, ok := f.payload["summary_index"]; ok {
+				t.Errorf("reasoning_text.delta must not carry summary_index: %v", f.payload)
+			}
+		}
+	}
+}
+
+func requireSummaryIndex(t *testing.T, payload map[string]any) {
+	t.Helper()
+	v, ok := payload["summary_index"].(float64)
+	if !ok {
+		t.Fatalf("missing summary_index: %v", payload)
+	}
+	if v != 0 {
+		t.Errorf("summary_index = %v, want 0", v)
 	}
 }
 

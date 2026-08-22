@@ -275,17 +275,28 @@ func parseContents(contents []geminiContent) ([]bamboo.BambooMessage, error) {
 func parseParts(parts []geminiPart, callIndex *int) ([]bamboo.ContentBlock, error) {
 	blocks := make([]bamboo.ContentBlock, 0, len(parts))
 	for _, part := range parts {
+		// functionCall 与 thoughtSignature 可同 part。对齐 Anthropic：
+		// ThinkingBlock（签名）与 ToolUseBlock 分开进 IR，禁止用 signature 把工具调用吃掉。
+		if part.FunctionCall != nil {
+			if part.Thought && part.Text != "" {
+				blocks = append(blocks, bamboo.NewThinkingBlock(part.Text, part.ThoughtSignature))
+			} else if part.ThoughtSignature != "" {
+				blocks = append(blocks, bamboo.NewThinkingBlock("", part.ThoughtSignature))
+			}
+			blocks = append(blocks, newGeminiToolUseBlock(part.FunctionCall, callIndex))
+			continue
+		}
+
 		if part.Thought || part.ThoughtSignature != "" {
 			blocks = append(blocks, bamboo.NewThinkingBlock(part.Text, part.ThoughtSignature))
 			continue
 		}
-		// text → TextBlock
+
 		if part.Text != "" {
 			blocks = append(blocks, bamboo.NewTextBlock(part.Text))
 			continue
 		}
 
-		// inlineData → ImageBlock (base64)
 		if part.InlineData != nil {
 			blocks = append(blocks, bamboo.NewImageBlock(bamboo.ContentSource{
 				Type:      "base64",
@@ -295,7 +306,6 @@ func parseParts(parts []geminiPart, callIndex *int) ([]bamboo.ContentBlock, erro
 			continue
 		}
 
-		// fileData → ImageBlock (url)
 		if part.FileData != nil {
 			blocks = append(blocks, bamboo.NewImageBlock(bamboo.ContentSource{
 				Type:      "url",
@@ -305,28 +315,6 @@ func parseParts(parts []geminiPart, callIndex *int) ([]bamboo.ContentBlock, erro
 			continue
 		}
 
-		// functionCall → ToolUseBlock
-		if part.FunctionCall != nil {
-			id := part.FunctionCall.ID
-			if id == "" {
-				id = fmt.Sprintf("gemini_call_%s_%d", part.FunctionCall.Name, *callIndex)
-			}
-			*callIndex++
-
-			input := part.FunctionCall.Args
-			if len(input) == 0 {
-				input = json.RawMessage(`{}`)
-			}
-			blocks = append(blocks, &bamboo.ToolUseBlock{
-				Type:  bamboo.ContentBlockToolUse,
-				ID:    id,
-				Name:  part.FunctionCall.Name,
-				Input: input,
-			})
-			continue
-		}
-
-		// functionResponse → ToolResultBlock
 		if part.FunctionResponse != nil {
 			toolUseID := part.FunctionResponse.ID
 			if toolUseID == "" {
@@ -340,6 +328,24 @@ func parseParts(parts []geminiPart, callIndex *int) ([]bamboo.ContentBlock, erro
 		}
 	}
 	return blocks, nil
+}
+
+func newGeminiToolUseBlock(call *geminiFunctionCall, callIndex *int) *bamboo.ToolUseBlock {
+	id := call.ID
+	if id == "" {
+		id = fmt.Sprintf("gemini_call_%s_%d", call.Name, *callIndex)
+	}
+	*callIndex++
+	input := call.Args
+	if len(input) == 0 {
+		input = json.RawMessage(`{}`)
+	}
+	return &bamboo.ToolUseBlock{
+		Type:  bamboo.ContentBlockToolUse,
+		ID:    id,
+		Name:  call.Name,
+		Input: input,
+	}
 }
 
 // serializeFuncResponse 将 functionResponse.response 序列化为字符串。
@@ -398,9 +404,16 @@ func applyGenerationConfig(config *bamboo.RequestConfig, gc *geminiGenConfig) {
 		config.ProviderExtra["top_k"] = *gc.TopK
 	}
 
-	// thinkingConfig → ThinkingConfig
+	// thinkingConfig → ThinkingConfig.Effort（Bamboo 规范化槽）。
+	// includeThoughts 另存 ProviderExtra，供 Gemini provider 还原 includeThoughts。
 	if gc.ThinkingConfig != nil {
 		config.ThinkingConfig = mapGeminiThinkingCfg(gc.ThinkingConfig)
+		if gc.ThinkingConfig.IncludeThoughts != nil {
+			if config.ProviderExtra == nil {
+				config.ProviderExtra = make(map[string]any)
+			}
+			config.ProviderExtra["include_thoughts"] = *gc.ThinkingConfig.IncludeThoughts
+		}
 	}
 }
 

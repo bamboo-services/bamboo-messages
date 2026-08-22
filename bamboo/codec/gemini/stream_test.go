@@ -262,6 +262,42 @@ func TestStreamSerializer_ThinkingStream(t *testing.T) {
 	}
 }
 
+func TestStreamSerializer_SignatureDeltaEmitsThoughtSignature(t *testing.T) {
+	s := newStreamSerializer("")
+	s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+	s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        0,
+		ContentBlock: bamboo.NewThinkingBlock("", ""),
+	})
+
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 0,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaSignature, Signature: "sig_abc"},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(signature_delta) error = %v", err)
+	}
+	if data == nil {
+		t.Fatal("signature_delta should emit a Gemini thoughtSignature chunk")
+	}
+	chunk := parseGeminiSSE(t, data)
+	parts := chunk.Candidates[0].Content.Parts
+	if len(parts) != 1 {
+		t.Fatalf("Parts len = %d", len(parts))
+	}
+	if !parts[0].Thought {
+		t.Error("Thought should be true for signature_delta")
+	}
+	if parts[0].ThoughtSignature != "sig_abc" {
+		t.Errorf("thoughtSignature = %q, want sig_abc", parts[0].ThoughtSignature)
+	}
+}
+
 func TestStreamSerializer_MultipleFunctionCalls(t *testing.T) {
 	s := newStreamSerializer("")
 

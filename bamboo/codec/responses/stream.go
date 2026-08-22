@@ -63,6 +63,30 @@ type reasoningDoneEvent struct {
 	Text         string `json:"text"`
 }
 
+// reasoningSummaryDeltaEvent 是 response.reasoning_summary_text.delta 的 payload。
+//
+// summary_index 不能 omitempty：Codex / OpenAI SDK 把它当必填 int，缺字段会直接反序列化失败。
+type reasoningSummaryDeltaEvent struct {
+	OutputIndex  int    `json:"output_index"`
+	SummaryIndex int    `json:"summary_index"`
+	ItemID       string `json:"item_id"`
+	Delta        string `json:"delta"`
+}
+
+type reasoningSummaryDoneEvent struct {
+	OutputIndex  int    `json:"output_index"`
+	SummaryIndex int    `json:"summary_index"`
+	ItemID       string `json:"item_id"`
+	Text         string `json:"text"`
+}
+
+type reasoningSummaryPartEvent struct {
+	OutputIndex  int    `json:"output_index"`
+	SummaryIndex int    `json:"summary_index"`
+	ItemID       string `json:"item_id"`
+	Part         any    `json:"part"`
+}
+
 type functionCallArgsDelta struct {
 	OutputIndex int    `json:"output_index"`
 	ItemID      string `json:"item_id"`
@@ -277,9 +301,9 @@ func (s *responsesStreamSerializer) handleContentBlockStart(event bamboo.StreamE
 		if err != nil {
 			return nil, err
 		}
-		partAdded := contentPartAddedEvent{
+		partAdded := reasoningSummaryPartEvent{
 			OutputIndex:  block.outputIndex,
-			ContentIndex: 0,
+			SummaryIndex: 0,
 			ItemID:       block.itemID,
 			Part:         map[string]any{"type": "summary_text", "text": ""},
 		}
@@ -339,19 +363,25 @@ func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamE
 		}
 		block := s.ensureReasoningBlock(event.Index)
 		s.reasoningText.WriteString(delta.Thinking)
-		ev := reasoningDeltaEvent{
+		raw := reasoningDeltaEvent{
 			OutputIndex:  block.outputIndex,
 			ContentIndex: 0,
 			ItemID:       block.itemID,
 			Delta:        delta.Thinking,
 		}
-		// 双轨并行：raw 给 gpt-oss / 听 reasoning_text 的客户端，
-		// summary 给 Codex / OpenAI SDK（官方展示轨）。
-		rawBytes, err := s.marshalSSE("response.reasoning_text.delta", ev)
+		// 双轨并行：raw 给听 reasoning_text 的客户端；
+		// summary 给 Codex / OpenAI SDK（官方展示轨，必须带 summary_index）。
+		rawBytes, err := s.marshalSSE("response.reasoning_text.delta", raw)
 		if err != nil {
 			return nil, err
 		}
-		summaryBytes, err := s.marshalSSE("response.reasoning_summary_text.delta", ev)
+		summary := reasoningSummaryDeltaEvent{
+			OutputIndex:  block.outputIndex,
+			SummaryIndex: 0,
+			ItemID:       block.itemID,
+			Delta:        delta.Thinking,
+		}
+		summaryBytes, err := s.marshalSSE("response.reasoning_summary_text.delta", summary)
 		if err != nil {
 			return nil, err
 		}
@@ -435,17 +465,33 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 
 	case "thinking":
 		text := s.reasoningText.String()
-		done := reasoningDoneEvent{
+		rawDone := reasoningDoneEvent{
 			OutputIndex:  block.outputIndex,
 			ContentIndex: 0,
 			ItemID:       block.itemID,
 			Text:         text,
 		}
-		rawDoneBytes, err := s.marshalSSE("response.reasoning_text.done", done)
+		rawDoneBytes, err := s.marshalSSE("response.reasoning_text.done", rawDone)
 		if err != nil {
 			return nil, err
 		}
-		summaryDoneBytes, err := s.marshalSSE("response.reasoning_summary_text.done", done)
+		summaryDone := reasoningSummaryDoneEvent{
+			OutputIndex:  block.outputIndex,
+			SummaryIndex: 0,
+			ItemID:       block.itemID,
+			Text:         text,
+		}
+		summaryDoneBytes, err := s.marshalSSE("response.reasoning_summary_text.done", summaryDone)
+		if err != nil {
+			return nil, err
+		}
+		partDone := reasoningSummaryPartEvent{
+			OutputIndex:  block.outputIndex,
+			SummaryIndex: 0,
+			ItemID:       block.itemID,
+			Part:         map[string]any{"type": "summary_text", "text": text},
+		}
+		partDoneBytes, err := s.marshalSSE("response.reasoning_summary_part.done", partDone)
 		if err != nil {
 			return nil, err
 		}
@@ -463,6 +509,7 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 			return nil, err
 		}
 		out := append(rawDoneBytes, summaryDoneBytes...)
+		out = append(out, partDoneBytes...)
 		return append(out, itemDoneBytes...), nil
 
 	case "tool_use":
