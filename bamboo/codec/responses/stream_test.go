@@ -424,9 +424,9 @@ func TestStreamSerializer_ThinkingStream(t *testing.T) {
 	}
 }
 
-// TestStreamSerializer_ThinkingEmitsDisplayAndRawTracks 验证 thinking 增量同时发出
-// reasoning_text 与 reasoning_summary_text：后者是 Codex / OpenAI SDK 的展示轨。
-func TestStreamSerializer_ThinkingEmitsDisplayAndRawTracks(t *testing.T) {
+// TestStreamSerializer_ThinkingDoesNotDuplicateSummaryTrack 验证思考增量只走
+// reasoning_text，不把同一份全文再推到 reasoning_summary_text。
+func TestStreamSerializer_ThinkingDoesNotDuplicateSummaryTrack(t *testing.T) {
 	s := newStreamSerializer("")
 
 	if _, err := s.Serialize(bamboo.StreamEvent{
@@ -452,7 +452,7 @@ func TestStreamSerializer_ThinkingEmitsDisplayAndRawTracks(t *testing.T) {
 		t.Fatalf("Serialize(thinking_delta) error = %v", err)
 	}
 	frames := parseAllResponsesSSE(t, data)
-	hasRaw, hasSummary := false, false
+	hasRaw := false
 	for _, f := range frames {
 		switch f.eventType {
 		case "response.reasoning_text.delta":
@@ -460,16 +460,14 @@ func TestStreamSerializer_ThinkingEmitsDisplayAndRawTracks(t *testing.T) {
 			if f.payload["delta"] != "hmm..." {
 				t.Errorf("reasoning_text.delta = %v", f.payload["delta"])
 			}
-		case "response.reasoning_summary_text.delta":
-			hasSummary = true
-			if f.payload["delta"] != "hmm..." {
-				t.Errorf("reasoning_summary_text.delta = %v", f.payload["delta"])
-			}
-			requireSummaryIndex(t, f.payload)
+		case "response.reasoning_summary_text.delta",
+			"response.reasoning_summary_part.added",
+			"response.reasoning_summary_part.done":
+			t.Errorf("thinking_delta must not emit summary-track event %s: %v", f.eventType, f.payload)
 		}
 	}
-	if !hasRaw || !hasSummary {
-		t.Fatalf("thinking_delta missing tracks raw=%v summary=%v frames=%d", hasRaw, hasSummary, len(frames))
+	if !hasRaw {
+		t.Fatalf("thinking_delta missing reasoning_text.delta frames=%d", len(frames))
 	}
 
 	data, err = s.Serialize(bamboo.StreamEvent{Type: bamboo.EventContentBlockStop, Index: 0})
@@ -477,81 +475,20 @@ func TestStreamSerializer_ThinkingEmitsDisplayAndRawTracks(t *testing.T) {
 		t.Fatalf("Serialize(content_block_stop) error = %v", err)
 	}
 	stopFrames := parseAllResponsesSSE(t, data)
-	hasRawDone, hasSummaryDone, hasItemDone := false, false, false
+	hasRawDone, hasItemDone := false, false
 	for _, f := range stopFrames {
 		switch f.eventType {
 		case "response.reasoning_text.done":
 			hasRawDone = true
-		case "response.reasoning_summary_text.done":
-			hasSummaryDone = true
-			requireSummaryIndex(t, f.payload)
-		case "response.reasoning_summary_part.done":
-			requireSummaryIndex(t, f.payload)
+		case "response.reasoning_summary_text.done",
+			"response.reasoning_summary_part.done":
+			t.Errorf("thinking stop must not emit summary-track event %s", f.eventType)
 		case "response.output_item.done":
 			hasItemDone = true
 		}
 	}
-	if !hasRawDone || !hasSummaryDone || !hasItemDone {
-		t.Errorf("thinking stop missing done events raw=%v summary=%v item=%v", hasRawDone, hasSummaryDone, hasItemDone)
-	}
-}
-
-func TestStreamSerializer_ThinkingSummaryEventsHaveSummaryIndex(t *testing.T) {
-	s := newStreamSerializer("")
-	if _, err := s.Serialize(bamboo.StreamEvent{
-		Type:    bamboo.EventMessageStart,
-		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
-	}); err != nil {
-		t.Fatalf("Serialize(message_start) error = %v", err)
-	}
-
-	startData, err := s.Serialize(bamboo.StreamEvent{
-		Type:         bamboo.EventContentBlockStart,
-		Index:        0,
-		ContentBlock: bamboo.NewThinkingBlock("", ""),
-	})
-	if err != nil {
-		t.Fatalf("Serialize(thinking block_start) error = %v", err)
-	}
-	var sawPartAdded bool
-	for _, f := range parseAllResponsesSSE(t, startData) {
-		if f.eventType == "response.reasoning_summary_part.added" {
-			sawPartAdded = true
-			requireSummaryIndex(t, f.payload)
-		}
-	}
-	if !sawPartAdded {
-		t.Fatal("missing response.reasoning_summary_part.added")
-	}
-
-	deltaData, err := s.Serialize(bamboo.StreamEvent{
-		Type:  bamboo.EventContentBlockDelta,
-		Index: 0,
-		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaThinkingDelta, Thinking: "step"},
-	})
-	if err != nil {
-		t.Fatalf("Serialize(thinking_delta) error = %v", err)
-	}
-	for _, f := range parseAllResponsesSSE(t, deltaData) {
-		if f.eventType == "response.reasoning_summary_text.delta" {
-			requireSummaryIndex(t, f.payload)
-		}
-		if f.eventType == "response.reasoning_text.delta" {
-			if _, ok := f.payload["summary_index"]; ok {
-				t.Errorf("reasoning_text.delta must not carry summary_index: %v", f.payload)
-			}
-		}
-	}
-}
-
-func requireSummaryIndex(t *testing.T, payload map[string]any) {
-	t.Helper()
-	v, ok := payload["summary_index"].(float64)
-	if !ok {
-		t.Fatalf("missing summary_index: %v", payload)
-	}
-	if v != 0 {
-		t.Errorf("summary_index = %v, want 0", v)
+	if !hasRawDone || !hasItemDone {
+		t.Errorf("thinking stop missing done events raw=%v item=%v", hasRawDone, hasItemDone)
 	}
 }
 

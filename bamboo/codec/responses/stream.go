@@ -301,17 +301,7 @@ func (s *responsesStreamSerializer) handleContentBlockStart(event bamboo.StreamE
 		if err != nil {
 			return nil, err
 		}
-		partAdded := reasoningSummaryPartEvent{
-			OutputIndex:  block.outputIndex,
-			SummaryIndex: 0,
-			ItemID:       block.itemID,
-			Part:         map[string]any{"type": "summary_text", "text": ""},
-		}
-		partAddedBytes, err := s.marshalSSE("response.reasoning_summary_part.added", partAdded)
-		if err != nil {
-			return nil, err
-		}
-		return append(created, append(itemAddedBytes, partAddedBytes...)...), nil
+		return append(created, itemAddedBytes...), nil
 
 	case bamboo.ContentBlockToolUse:
 		toolUse, ok := event.ContentBlock.(*bamboo.ToolUseBlock)
@@ -369,24 +359,13 @@ func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamE
 			ItemID:       block.itemID,
 			Delta:        delta.Thinking,
 		}
-		// 双轨并行：raw 给听 reasoning_text 的客户端；
-		// summary 给 Codex / OpenAI SDK（官方展示轨，必须带 summary_index）。
+		// 只发 reasoning_text 轨道。summary 是摘要槽，不是全文副本；
+		// 把同一段思考再推到 reasoning_summary_text 会让客户端叠两遍。
 		rawBytes, err := s.marshalSSE("response.reasoning_text.delta", raw)
 		if err != nil {
 			return nil, err
 		}
-		summary := reasoningSummaryDeltaEvent{
-			OutputIndex:  block.outputIndex,
-			SummaryIndex: 0,
-			ItemID:       block.itemID,
-			Delta:        delta.Thinking,
-		}
-		summaryBytes, err := s.marshalSSE("response.reasoning_summary_text.delta", summary)
-		if err != nil {
-			return nil, err
-		}
-		out := append(created, rawBytes...)
-		return append(out, summaryBytes...), nil
+		return append(created, rawBytes...), nil
 
 	case bamboo.DeltaInputJSON:
 		block := s.ensureToolBlock(event.Index, s.currentCallID, s.currentCallName)
@@ -475,30 +454,12 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 		if err != nil {
 			return nil, err
 		}
-		summaryDone := reasoningSummaryDoneEvent{
-			OutputIndex:  block.outputIndex,
-			SummaryIndex: 0,
-			ItemID:       block.itemID,
-			Text:         text,
-		}
-		summaryDoneBytes, err := s.marshalSSE("response.reasoning_summary_text.done", summaryDone)
-		if err != nil {
-			return nil, err
-		}
-		partDone := reasoningSummaryPartEvent{
-			OutputIndex:  block.outputIndex,
-			SummaryIndex: 0,
-			ItemID:       block.itemID,
-			Part:         map[string]any{"type": "summary_text", "text": text},
-		}
-		partDoneBytes, err := s.marshalSSE("response.reasoning_summary_part.done", partDone)
-		if err != nil {
-			return nil, err
-		}
 		item := outputItem{
-			Type:             "reasoning",
-			ID:               block.itemID,
-			Status:           "completed",
+			Type:   "reasoning",
+			ID:     block.itemID,
+			Status: "completed",
+			// content = Bamboo Thinking 全文；summary = 启发式摘要（可空）。
+			// 不再发 reasoning_summary_text.done 全文，避免与 reasoning_text 叠两遍。
 			Content:          buildReasoningContent(text),
 			Summary:          buildReasoningSummary(text),
 			EncryptedContent: block.encryptedContent,
@@ -508,8 +469,7 @@ func (s *responsesStreamSerializer) handleContentBlockStop(event bamboo.StreamEv
 		if err != nil {
 			return nil, err
 		}
-		out := append(rawDoneBytes, summaryDoneBytes...)
-		out = append(out, partDoneBytes...)
+		out := rawDoneBytes
 		return append(out, itemDoneBytes...), nil
 
 	case "tool_use":

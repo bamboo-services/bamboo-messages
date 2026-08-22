@@ -91,7 +91,7 @@ bamboo/codec/
 - **Gemini ThinkingBlock 序列化** — `buildResponseParts` 将 `ThinkingBlock` 序列化为 `{text, thought: true, thoughtSignature}`；流式 `thinking_delta` → thought part，`signature_delta` → `thoughtSignature`
 - **Gemini inlineData / fileData 映射** — `buildInlineDataPart` 将 `ContentSource` 映射为 Gemini part：base64→`{inlineData}`、url→`{fileData}`
 - **Gemini ToolResultBlock.ToolName** — 解析 `functionResponse` 时将 `Name` 写入 `ToolResultBlock.ToolName`
-- **Responses 流式序列器重大重写** — `responses/stream.go` 完全重写为 `responsesStreamSerializer` 状态机模型，追踪 output_item 生命周期（added/done）、自动注入 `sequence_number` 和 `response_id`、双轨 reasoning（raw `reasoning_text.*` + summary `reasoning_summary_text.*` 并行发射）、summary 轨事件必须带 `summary_index`（Codex / OpenAI SDK 必填）、支持 `encrypted_content` 透传、完整覆盖 `response.created/output_item.added/content_part.added/output_text.delta/output_text.done/content_part.done/reasoning_text.delta/reasoning_summary_part.added/reasoning_summary_text.delta/reasoning_text.done/reasoning_summary_text.done/reasoning_summary_part.done/function_call_arguments.delta/function_call_arguments.done/output_item.done/response.completed/response.failed` 事件
+- **Responses 流式序列器重大重写** — `responses/stream.go` 完全重写为 `responsesStreamSerializer` 状态机模型，追踪 output_item 生命周期（added/done）、自动注入 `sequence_number` 和 `response_id`。思考流式只发 `reasoning_text.*`（Bamboo Thinking 全文）；`output_item.done.summary` 才是启发式摘要槽，禁止把同一份全文再推到 `reasoning_summary_text.*`（客户端会叠两遍）。支持 `encrypted_content` 透传
 - **Responses SerializeResponse 签名变更** — `serializeResponse` 返回值从 `[]byte` 变为 `([]byte, error)`，与 Codec 接口保持一致；新增 `EncryptedContent` 和 `StopSequence` 字段支持
 - **Responses reasoning item 三槽位语义** — 序列化 ThinkingBlock 时按官方 schema 分工：`content: [{type: "reasoning_text"}]` 承载原始思考全文；`summary: [{type: "summary_text"}]` 承载 `summarizeThinking`（`responses/summary.go`）启发式提取的摘要（首行/首句 + Markdown 剥离 + 超长截断），提取不出则为空数组；`encrypted_content` 仅透传上游签名/加密值（ThinkingBlock.Signature），绝不伪造明文。流式 done 事件（`reasoning_text.done` / `reasoning_summary_text.done`）保持原始全文作为实时展示轨道，最终 item 才做槽位分流
 - **Responses reasoning 请求解析优先级** — `parseInput` 的 reasoning 分支优先取 `content`（reasoning_text 原始全文），缺失时回退 `summary`（有损摘要）；`encrypted_content` 解析为 `ThinkingBlock.Signature` 透传，保证 Codex 等客户端多轮回传的加密推理链不断裂
@@ -109,6 +109,7 @@ bamboo/codec/
 - **禁止** 在 OpenAI Chat Completions 中输出 DeltaSignature — 该协议无签名槽，应返回 nil 静默丢弃；禁止把 Gemini `thoughtSignature` 当成无对应槽而丢弃
 - **禁止** 在响应序列化中遗漏 ToolResultBlock/ImageBlock/DocumentBlock 的警告日志 — 不支持的 block 类型必须记录 warning 后跳过，不得静默丢弃
 - **禁止** 在 Responses reasoning item 的 `encrypted_content` 中填证明文 — 该字段是服务端加密的不透明 token（官方契约：原样回传、不可伪造），明文会导致真实 OpenAI 上游解密失败；无上游真值时留空
+- **禁止** 把 ThinkingBlock 全文同时流式推到 `reasoning_text` 与 `reasoning_summary_text` — summary 槽只承载摘要（item.done.summary），复制全文会让客户端把思考叠两遍
 
 ## 调试路径
 
@@ -126,7 +127,7 @@ bamboo/codec/
 12. Responses metadata 丢失 → 全 string metadata 现存入 `config.Metadata`；混合类型存入 `ProviderExtra["metadata"]`；检查是否读取了正确的字段
 13. input_image / input_file 未解析 → Responses codec 现支持 `input_image`（→ ImageBlock）和 `input_file`（→ DocumentBlock），检查 content part 的 type 字段
 14. Responses 流式事件缺失 → 检查 `responsesStreamSerializer` 是否正确追踪 output_item 状态（added/done）；检查 `sequence_number` 是否自动递增
-15. Responses reasoning 双轨不完整 → 检查 raw `reasoning_text.*` 和 summary `reasoning_summary_text.*` 是否并行发射；summary 轨（`reasoning_summary_part.*` / `reasoning_summary_text.*`）必须带 `summary_index`
+15. Responses 思考显示两遍 → 检查是否把 Thinking 全文同时发到 `reasoning_text.*` 和 `reasoning_summary_text.*`；summary 实时轨不得复制全文
 16. Responses encrypted_content 丢失 → 检查 `response.output_item.done` 事件是否携带 `encrypted_content` 字段
 17. bamboo 请求解析失败 → 检查 `bamboo/request.go` 的 `parseRequest` 是否正确解析 `{messages,system,config,stream}` 信封，确认 `config` 缺失时是否填充零值
 18. bamboo SSE 帧格式异常 → 检查 `bamboo/stream.go` 的输出是否为 `event: {type}\ndata: {json}\n\n`（无 `[DONE]` 标记）
