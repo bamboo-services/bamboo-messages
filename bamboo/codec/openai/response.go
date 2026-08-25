@@ -31,8 +31,11 @@ type openaiMsgOut struct {
 	Content *string `json:"content"`
 	// ReasoningContent 思考/推理内容。
 	// 注意：此字段为 DeepSeek/vLLM 兼容性扩展，非官方 OpenAI Chat Completions 规范字段。
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	ToolCalls        []openaiToolOut `json:"tool_calls,omitempty"`
+	ReasoningContent  string          `json:"reasoning_content,omitempty"`
+	ThinkingSignature string          `json:"thinking_signature,omitempty"`
+	ThinkingProvider  string          `json:"thinking_provider,omitempty"`
+	ReasoningID       string          `json:"reasoning_id,omitempty"`
+	ToolCalls         []openaiToolOut `json:"tool_calls,omitempty"`
 }
 
 type openaiToolOut struct {
@@ -67,6 +70,8 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 
 	var textParts []string
 	var reasoningParts []string
+	var thinkingSignature string
+	var thinkingProvider string
 	var toolCalls []openaiToolOut
 
 	for _, block := range resp.Content {
@@ -75,6 +80,12 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 			textParts = append(textParts, b.Text)
 		case *bamboo.ThinkingBlock:
 			reasoningParts = append(reasoningParts, b.Thinking)
+			if b.Signature != "" {
+				thinkingSignature = b.Signature
+				thinkingProvider = b.SignatureProvider
+			} else if thinkingProvider == "" && b.SignatureProvider != "" {
+				thinkingProvider = b.SignatureProvider
+			}
 		case *bamboo.ToolUseBlock:
 			args := string(b.Input)
 			if args == "" {
@@ -116,6 +127,15 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 	// reasoning_content
 	if len(reasoningParts) > 0 {
 		choice.Message.ReasoningContent = strings.Join(reasoningParts, "")
+	}
+	if thinkingSignature != "" {
+		choice.Message.ThinkingSignature = thinkingSignature
+	}
+	if thinkingProvider != "" {
+		choice.Message.ThinkingProvider = thinkingProvider
+	}
+	if resp.ReasoningID != "" {
+		choice.Message.ReasoningID = resp.ReasoningID
 	}
 
 	// tool_calls

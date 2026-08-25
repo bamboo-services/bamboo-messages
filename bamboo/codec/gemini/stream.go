@@ -45,15 +45,16 @@ type geminiStreamErrorBody struct {
 // 当收到 input_json_delta 时必须累积到 pendingCallArgs，
 // 在 content_block_stop 时一次性输出完整的 functionCall。
 type geminiStreamSerializer struct {
-	model           string
-	pendingCallName string
-	pendingCallID   string
-	pendingCallArgs strings.Builder
-	accumulating    bool
-	inputTokens     int64
-	outputTokens    int64
-	cacheReadTokens int64
-	started         bool
+	model             string
+	pendingCallName   string
+	pendingCallID     string
+	pendingCallArgs   strings.Builder
+	accumulating      bool
+	inputTokens       int64
+	outputTokens      int64
+	cacheReadTokens   int64
+	started           bool
+	thinkingProvider  string
 }
 
 // newStreamSerializer 创建一个新的 Gemini 流式序列化器实例。
@@ -145,7 +146,18 @@ func (s *geminiStreamSerializer) handleContentBlockStart(event bamboo.StreamEven
 
 	case bamboo.ContentBlockThinking:
 		tb, ok := event.ContentBlock.(*bamboo.ThinkingBlock)
-		if !ok || (tb.Thinking == "" && tb.Signature == "") {
+		if !ok {
+			return nil, nil
+		}
+		s.thinkingProvider = tb.SignatureProvider
+		if !bamboo.HasNativeThinkingCredential(tb.Signature, tb.SignatureProvider, bamboo.SignatureProviderGemini) &&
+			tb.SignatureProvider != bamboo.SignatureProviderGemini {
+			return nil, nil
+		}
+		if tb.Thinking == "" && tb.Signature == "" {
+			return nil, nil
+		}
+		if tb.SignatureProvider != bamboo.SignatureProviderGemini {
 			return nil, nil
 		}
 		return s.marshalThoughtPart(tb.Thinking, tb.Signature)
@@ -181,6 +193,9 @@ func (s *geminiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 		return s.marshalChunk(chunk)
 
 	case bamboo.DeltaThinkingDelta:
+		if s.thinkingProvider != bamboo.SignatureProviderGemini {
+			return nil, nil
+		}
 		return s.marshalThoughtPart(delta.Thinking, "")
 
 	case bamboo.DeltaInputJSON:
@@ -191,7 +206,13 @@ func (s *geminiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 		return nil, nil
 
 	case bamboo.DeltaSignature:
-		// thoughtSignature ≡ Bamboo ThinkingBlock.Signature / Anthropic signature_delta
+		prov := delta.SignatureProvider
+		if prov == "" {
+			prov = s.thinkingProvider
+		}
+		if prov != bamboo.SignatureProviderGemini {
+			return nil, nil
+		}
 		return s.marshalThoughtPart("", delta.Signature)
 	}
 

@@ -86,6 +86,9 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 			result.Thinking += block.Thinking
 			if block.Signature != "" {
 				signatures = append(signatures, block.Signature)
+				if block.SignatureProvider != "" {
+					result.ThinkingSignatureProvider = block.SignatureProvider
+				}
 			}
 		case "redacted_thinking":
 			result.RedactedThinking = append(result.RedactedThinking, block.Data)

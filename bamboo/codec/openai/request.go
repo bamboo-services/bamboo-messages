@@ -35,12 +35,15 @@ type openaiRequest struct {
 }
 
 type openaiMessage struct {
-	Role             string           `json:"role"`
-	Content          json.RawMessage  `json:"content,omitempty"`
-	ReasoningContent json.RawMessage  `json:"reasoning_content,omitempty"`
-	Reasoning        json.RawMessage  `json:"reasoning,omitempty"`
-	ToolCalls        []openaiToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string           `json:"tool_call_id,omitempty"`
+	Role              string           `json:"role"`
+	Content           json.RawMessage  `json:"content,omitempty"`
+	ReasoningContent  json.RawMessage  `json:"reasoning_content,omitempty"`
+	Reasoning         json.RawMessage  `json:"reasoning,omitempty"`
+	ThinkingSignature string           `json:"thinking_signature,omitempty"`
+	ThinkingProvider  string           `json:"thinking_provider,omitempty"`
+	ReasoningID       string           `json:"reasoning_id,omitempty"`
+	ToolCalls         []openaiToolCall `json:"tool_calls,omitempty"`
+	ToolCallID        string           `json:"tool_call_id,omitempty"`
 }
 
 type openaiToolCall struct {
@@ -288,8 +291,9 @@ func parseDataURIMediaType(header string) string {
 func parseAssistantMessage(msg openaiMessage) bamboo.BambooMessage {
 	var blocks []bamboo.ContentBlock
 
-	if reasoning := extractReasoningContent(msg.ReasoningContent, msg.Reasoning); reasoning != "" {
-		blocks = append(blocks, bamboo.NewThinkingBlock(reasoning, ""))
+	reasoning := extractReasoningContent(msg.ReasoningContent, msg.Reasoning)
+	if reasoning != "" || msg.ThinkingSignature != "" {
+		blocks = append(blocks, bamboo.NewThinkingBlockWithProvider(reasoning, msg.ThinkingSignature, msg.ThinkingProvider))
 	}
 
 	if text := extractPlainText(msg.Content); text != "" {
@@ -312,9 +316,13 @@ func parseAssistantMessage(msg openaiMessage) bamboo.BambooMessage {
 	}
 
 	if len(blocks) == 0 {
-		return bamboo.BambooMessage{Role: bamboo.RoleAssistant}
+		out := bamboo.BambooMessage{Role: bamboo.RoleAssistant}
+		out.ReasoningID = msg.ReasoningID
+		return out
 	}
-	return bamboo.NewAssistantMessageBlocks(blocks...)
+	out := bamboo.NewAssistantMessageBlocks(blocks...)
+	out.ReasoningID = msg.ReasoningID
+	return out
 }
 
 func extractReasoningContent(sources ...json.RawMessage) string {

@@ -171,17 +171,16 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 			if item.ID != "" {
 				result.ReasoningID = item.ID
 			}
-			// 优先从 summary 数组提取推理文本
-			for _, sum := range item.Summary {
-				if sum.Text != "" {
-					result.Thinking += sum.Text
+			// 优先取 content 的 reasoning_text 全文，缺失时回退 summary。
+			for _, content := range item.Content {
+				if content.Text != "" {
+					result.Thinking += content.Text
 				}
 			}
-			// summary 为空时回退到 content 数组
 			if result.Thinking == "" {
-				for _, content := range item.Content {
-					if content.Text != "" {
-						result.Thinking += content.Text
+				for _, sum := range item.Summary {
+					if sum.Text != "" {
+						result.Thinking += sum.Text
 					}
 				}
 			}
@@ -189,6 +188,7 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 			// Responses → Responses 直连时原样传回可保持推理上下文连续性。
 			if item.EncryptedContent != "" {
 				result.ThinkingSignature = item.EncryptedContent
+				result.ThinkingSignatureProvider = provider.SignatureProviderOpenAIResponses
 			}
 		case "function_call":
 			// 函数调用项：提取工具调用信息

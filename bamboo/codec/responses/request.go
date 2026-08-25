@@ -346,8 +346,12 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 				text = extractSummaryText(normalizeSummary(item.Summary))
 			}
 			if text != "" || item.EncryptedContent != "" {
+				sp := ""
+				if item.EncryptedContent != "" {
+					sp = bamboo.SignatureProviderOpenAIResponses
+				}
 				assistantBlocks = append(assistantBlocks,
-					bamboo.NewThinkingBlock(text, item.EncryptedContent))
+					bamboo.NewThinkingBlockWithProvider(text, item.EncryptedContent, sp))
 				if assistantReasoningID == "" {
 					assistantReasoningID = item.ID
 				}

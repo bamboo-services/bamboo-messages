@@ -115,6 +115,13 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 	if reasoningStr != "" {
 		result.Thinking = reasoningStr
 	}
+	if choice.Message.ThinkingSignature != "" {
+		result.ThinkingSignature = choice.Message.ThinkingSignature
+		result.ThinkingSignatureProvider = choice.Message.ThinkingProvider
+	}
+	if choice.Message.ReasoningID != "" {
+		result.ReasoningID = choice.Message.ReasoningID
+	}
 
 	// 合并内联 think 推理内容：reasoning_content 优先，内联内容追加
 	if inlineThinking != "" {

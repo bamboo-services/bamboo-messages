@@ -167,6 +167,15 @@ func (p *CompletionsProvider) buildAssistantMessage(msg provider.Message) map[st
 	if msg.ThinkingContent != "" {
 		m["reasoning_content"] = msg.ThinkingContent
 	}
+	if msg.ThinkingSignature != "" {
+		m["thinking_signature"] = msg.ThinkingSignature
+	}
+	if msg.ThinkingSignatureProvider != "" {
+		m["thinking_provider"] = msg.ThinkingSignatureProvider
+	}
+	if msg.ReasoningID != "" {
+		m["reasoning_id"] = msg.ReasoningID
+	}
 
 	if len(msg.ToolCalls) > 0 {
 		toolCalls := make([]map[string]any, 0, len(msg.ToolCalls))

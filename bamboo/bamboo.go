@@ -107,7 +107,7 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 	// 终止事件（message_stop 等）通过 select on ctx.Done() 保障写入，
 	// 既不会被 default 丢弃，也不会因固定超时在消费者背压时被静默吞掉。
 	out := make(chan StreamEvent, 64)
-	converter := NewStreamConverter()
+	converter := NewStreamConverterForProvider(c.provider.GetProviderType())
 
 	go func() {
 		defer close(out)

@@ -279,16 +279,16 @@ func parseParts(parts []geminiPart, callIndex *int) ([]bamboo.ContentBlock, erro
 		// ThinkingBlock（签名）与 ToolUseBlock 分开进 IR，禁止用 signature 把工具调用吃掉。
 		if part.FunctionCall != nil {
 			if part.Thought && part.Text != "" {
-				blocks = append(blocks, bamboo.NewThinkingBlock(part.Text, part.ThoughtSignature))
+				blocks = append(blocks, bamboo.NewThinkingBlockWithProvider(part.Text, part.ThoughtSignature, geminiSignatureProvider(part.ThoughtSignature)))
 			} else if part.ThoughtSignature != "" {
-				blocks = append(blocks, bamboo.NewThinkingBlock("", part.ThoughtSignature))
+				blocks = append(blocks, bamboo.NewThinkingBlockWithProvider("", part.ThoughtSignature, bamboo.SignatureProviderGemini))
 			}
 			blocks = append(blocks, newGeminiToolUseBlock(part.FunctionCall, callIndex))
 			continue
 		}
 
 		if part.Thought || part.ThoughtSignature != "" {
-			blocks = append(blocks, bamboo.NewThinkingBlock(part.Text, part.ThoughtSignature))
+			blocks = append(blocks, bamboo.NewThinkingBlockWithProvider(part.Text, part.ThoughtSignature, geminiSignatureProvider(part.ThoughtSignature)))
 			continue
 		}
 
@@ -524,4 +524,11 @@ func mapThinkingBudgetToEffort(budget *int64) *bamboo.ThinkingConfig {
 		return &bamboo.ThinkingConfig{Effort: "medium"}
 	}
 	return &bamboo.ThinkingConfig{Effort: "high"}
+}
+
+func geminiSignatureProvider(signature string) string {
+	if signature == "" {
+		return ""
+	}
+	return bamboo.SignatureProviderGemini
 }

@@ -122,9 +122,10 @@ func buildResponseParts(blocks []bamboo.ContentBlock) []geminiPartOut {
 			}
 			parts = append(parts, part)
 		case *bamboo.ThinkingBlock:
-			if b.Thinking != "" || b.Signature != "" {
-				parts = append(parts, geminiPartOut{Text: b.Thinking, Thought: true, ThoughtSignature: b.Signature})
+			if !bamboo.HasNativeThinkingCredential(b.Signature, b.SignatureProvider, bamboo.SignatureProviderGemini) {
+				continue
 			}
+			parts = append(parts, geminiPartOut{Text: b.Thinking, Thought: true, ThoughtSignature: b.Signature})
 		case *bamboo.ImageBlock:
 			// Gemini 原生支持 inlineData / fileData，映射为 inlineData part
 			if b.Source == nil {

@@ -182,7 +182,7 @@ func TestSerializeResponse_Reasoning(t *testing.T) {
 		Model:      "o3",
 		StopReason: bamboo.FinishReasonEndTurn,
 		Content: []bamboo.ContentBlock{
-			bamboo.NewThinkingBlock("Let me think...", "sig_abc"),
+			bamboo.NewThinkingBlockWithProvider("Let me think...", "sig_abc", bamboo.SignatureProviderOpenAIResponses),
 			bamboo.NewTextBlock("The answer is 42."),
 		},
 		Usage: bamboo.Usage{

@@ -75,6 +75,14 @@ type ThinkingData string
 // - OpenAI Responses: encrypted_content（服务端加密的不透明 token）
 type SignatureData string
 
+// SignatureDeltaData 带血统的推理签名增量。
+//
+// Chat Completions 枢纽往返时，上游可能同时给出签名和 thinking_provider。
+type SignatureDeltaData struct {
+	Signature string
+	Provider  string
+}
+
 // RedactedThinkingData redacted_thinking 数据。
 //
 // 用于 Anthropic 响应中的加密 thinking block，多轮对话必须原样传回。
@@ -186,6 +194,14 @@ func NewSignatureDelta(signature string) StreamDelta[any] {
 	return StreamDelta[any]{
 		Type: StreamDeltaTypeSignature,
 		Data: SignatureData(signature),
+	}
+}
+
+// NewSignatureDeltaWithProvider 创建带血统的签名增量。
+func NewSignatureDeltaWithProvider(signature, signatureProvider string) StreamDelta[any] {
+	return StreamDelta[any]{
+		Type: StreamDeltaTypeSignature,
+		Data: SignatureDeltaData{Signature: signature, Provider: signatureProvider},
 	}
 }
 

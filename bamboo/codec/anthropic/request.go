@@ -346,11 +346,16 @@ func convertContentBlock(rb rawContentBlock) bamboo.ContentBlock {
 		}
 
 	case "thinking":
+		sp := ""
+		if rb.Signature != "" {
+			sp = bamboo.SignatureProviderAnthropic
+		}
 		return &bamboo.ThinkingBlock{
-			Type:         bamboo.ContentBlockThinking,
-			Thinking:     rb.Thinking,
-			Signature:    rb.Signature,
-			CacheControl: cc,
+			Type:              bamboo.ContentBlockThinking,
+			Thinking:          rb.Thinking,
+			Signature:         rb.Signature,
+			SignatureProvider: sp,
+			CacheControl:      cc,
 		}
 
 	case "document":

@@ -58,8 +58,9 @@ type StreamDelta struct {
 	Type        StreamDeltaType `json:"type"`                   // 增量类型
 	Text        string          `json:"text,omitempty"`         // 文本增量内容（Type 为 DeltaTextDelta 时使用）
 	Thinking    string          `json:"thinking,omitempty"`     // 思考过程增量内容（Type 为 DeltaThinkingDelta 时使用）
-	Signature   string          `json:"signature,omitempty"`    // 思考签名增量（Type 为 DeltaSignature 时使用）
-	PartialJSON string          `json:"partial_json,omitempty"` // 工具调用参数增量（Type 为 DeltaInputJSON 时使用）
+	Signature         string          `json:"signature,omitempty"`          // 思考签名增量（Type 为 DeltaSignature 时使用）
+	SignatureProvider string          `json:"signature_provider,omitempty"` // 签名血统，随 signature_delta 带出
+	PartialJSON       string          `json:"partial_json,omitempty"`       // 工具调用参数增量（Type 为 DeltaInputJSON 时使用）
 }
 
 // MessageDelta 消息增量，用于 message_delta 事件中携带停止原因和用量统计。

@@ -14,8 +14,38 @@ const (
 	ProviderAnthropic         ProviderType = "anthropic"          // Anthropic Messages 协议
 	ProviderOpenAIResponses   ProviderType = "openai-responses"   // OpenAI Responses 协议
 	ProviderOpenAICompletions ProviderType = "openai-completions" // OpenAI Chat Completions 协议
+	ProviderGemini            ProviderType = "gemini"             // Google Gemini 协议
 	ProviderBamboo            ProviderType = "bamboo"             // bamboo 原生协议
 )
+
+// SignatureProvider 思考凭证血统。三种异构签名/密文共用 ThinkingSignature 槽，
+// 必须用血统区分，禁止跨上游回填。
+const (
+	SignatureProviderAnthropic       = "anthropic"
+	SignatureProviderGemini          = "gemini"
+	SignatureProviderOpenAIResponses = "openai-responses"
+)
+
+// SignatureProviderFromUpstream 由实际打上游的协议推断血统。
+// Chat Completions / 未知协议没有原生签名槽，返回空。
+func SignatureProviderFromUpstream(pt ProviderType) string {
+	switch pt {
+	case ProviderAnthropic:
+		return SignatureProviderAnthropic
+	case ProviderGemini:
+		return SignatureProviderGemini
+	case ProviderOpenAIResponses:
+		return SignatureProviderOpenAIResponses
+	default:
+		return ""
+	}
+}
+
+// NativeThinkingCredential 判断不透明思考凭证是否可以注入目标上游的签名/密文槽。
+// 无签名或血统不匹配时必须清洗，禁止投毒。
+func NativeThinkingCredential(signature, signatureProvider, target string) bool {
+	return signature != "" && signatureProvider != "" && signatureProvider == target
+}
 
 // MessageRole 消息角色。
 //
@@ -83,8 +113,9 @@ func NewEphemeralCacheControl(ttl ...CacheControlEphemeralTTL) *CacheControl {
 // 和 Token 用量统计。适用于不需要流式输出的同步请求场景。
 type CompletionResult struct {
 	Content           string       `json:"content"`                      // 文本响应内容
-	Thinking          string       `json:"thinking,omitempty"`           // 思考过程内容（如 Claude extended thinking）
-	ThinkingSignature string       `json:"thinking_signature,omitempty"` // 推理签名/加密内容（OpenAI encrypted_content 透传）
+	Thinking                  string       `json:"thinking,omitempty"`                    // 思考过程内容（如 Claude extended thinking）
+	ThinkingSignature         string       `json:"thinking_signature,omitempty"`          // 推理签名/加密内容（OpenAI encrypted_content 透传）
+	ThinkingSignatureProvider string       `json:"thinking_signature_provider,omitempty"` // 签名血统：anthropic / gemini / openai-responses
 	RedactedThinking  []string     `json:"redacted_thinking,omitempty"`  // 非流式响应中多个 redacted_thinking block
 	ToolCalls         []ToolCall   `json:"tool_calls,omitempty"`         // 工具调用列表
 	FinishReason      FinishReason `json:"finish_reason"`                // 结束原因
@@ -106,9 +137,10 @@ type Message struct {
 	Role                 MessageRole    `json:"role"`                             // 消息角色
 	Content              string         `json:"content,omitempty"`                // 消息文本内容（向后兼容）
 	ContentBlocks        []ContentBlock `json:"content_blocks,omitempty"`         // 多媒体内容块（优先于 Content）
-	ThinkingContent      string         `json:"thinking_content,omitempty"`       // 思考过程内容（用于多轮对话中保留 thinking block）
-	ThinkingSignature    string         `json:"thinking_signature,omitempty"`     // 思考过程签名（Anthropic extended thinking 验证签名）
-	RedactedThinkingData string         `json:"redacted_thinking_data,omitempty"` // 加密 thinking block 的 data（Anthropic redacted_thinking，多轮对话原样传回）
+	ThinkingContent           string         `json:"thinking_content,omitempty"`            // 思考过程内容（用于多轮对话中保留 thinking block）
+	ThinkingSignature         string         `json:"thinking_signature,omitempty"`          // 思考过程签名（Anthropic / Gemini / Responses 密文共用槽）
+	ThinkingSignatureProvider string         `json:"thinking_signature_provider,omitempty"` // 签名血统：anthropic / gemini / openai-responses
+	RedactedThinkingData      string         `json:"redacted_thinking_data,omitempty"`      // 加密 thinking block 的 data（Anthropic redacted_thinking，多轮对话原样传回）
 	ReasoningID          string         `json:"reasoning_id,omitempty"`           // 推理项 ID（OpenAI Responses API 的 reasoning item ID，如 "rs_xxx"，独立于 ThinkingSignature）
 	ToolCalls            []ToolCall     `json:"tool_calls,omitempty"`             // 助手发起的工具调用
 	ToolCallID           string         `json:"tool_call_id,omitempty"`           // 工具响应的调用 ID

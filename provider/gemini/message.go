@@ -112,15 +112,15 @@ func (p *Provider) buildAssistantMessage(msg provider.Message) map[string]any {
 }
 
 func buildThoughtPart(msg provider.Message) map[string]any {
-	if msg.ThinkingContent == "" && msg.ThinkingSignature == "" {
+	if !provider.NativeThinkingCredential(msg.ThinkingSignature, msg.ThinkingSignatureProvider, provider.SignatureProviderGemini) {
 		return nil
 	}
-	part := map[string]any{"thought": true}
+	part := map[string]any{
+		"thought":          true,
+		"thoughtSignature": msg.ThinkingSignature,
+	}
 	if msg.ThinkingContent != "" {
 		part["text"] = msg.ThinkingContent
-	}
-	if msg.ThinkingSignature != "" {
-		part["thoughtSignature"] = msg.ThinkingSignature
 	}
 	return part
 }

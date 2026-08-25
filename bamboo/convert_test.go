@@ -53,6 +53,44 @@ func TestConvertMultiBlockMessage(t *testing.T) {
 	if result[0].ThinkingSignature != "sig123" {
 		t.Errorf("ThinkingSignature = %q, want %q", result[0].ThinkingSignature, "sig123")
 	}
+}
+
+func TestConvertThinkingSignatureProvider(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewThinkingBlockWithProvider("let me think", "g_sig", SignatureProviderGemini),
+			NewTextBlock("done"),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result[0].ThinkingSignature != "g_sig" {
+		t.Errorf("ThinkingSignature = %q", result[0].ThinkingSignature)
+	}
+	if result[0].ThinkingSignatureProvider != SignatureProviderGemini {
+		t.Errorf("ThinkingSignatureProvider = %q", result[0].ThinkingSignatureProvider)
+	}
+}
+
+func TestConvertSignatureOnlyThinkingBlock(t *testing.T) {
+	msgs := []BambooMessage{
+		NewAssistantMessageBlocks(
+			NewThinkingBlockWithProvider("", "sig_only", SignatureProviderGemini),
+			NewTextBlock("done"),
+		),
+	}
+	result, err := messagesToProvider(msgs)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result[0].ThinkingSignature != "sig_only" {
+		t.Errorf("ThinkingSignature = %q, want sig_only", result[0].ThinkingSignature)
+	}
+	if result[0].ThinkingSignatureProvider != SignatureProviderGemini {
+		t.Errorf("ThinkingSignatureProvider = %q", result[0].ThinkingSignatureProvider)
+	}
 	if result[0].Role != provider.RoleAssistant {
 		t.Errorf("Role = %q, want %q", result[0].Role, provider.RoleAssistant)
 	}

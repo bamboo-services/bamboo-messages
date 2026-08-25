@@ -234,7 +234,7 @@ func TestStreamSerializer_ThinkingStream(t *testing.T) {
 	data, _ := s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        0,
-		ContentBlock: bamboo.NewThinkingBlock("", ""),
+		ContentBlock: bamboo.NewThinkingBlockWithProvider("", "", bamboo.SignatureProviderGemini),
 	})
 	if data != nil {
 		t.Error("thinking content_block_start should produce nil output")
@@ -271,7 +271,7 @@ func TestStreamSerializer_SignatureDeltaEmitsThoughtSignature(t *testing.T) {
 	s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        0,
-		ContentBlock: bamboo.NewThinkingBlock("", ""),
+		ContentBlock: bamboo.NewThinkingBlockWithProvider("", "", bamboo.SignatureProviderGemini),
 	})
 
 	data, err := s.Serialize(bamboo.StreamEvent{

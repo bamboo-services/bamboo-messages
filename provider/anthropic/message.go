@@ -104,8 +104,8 @@ func (p *Provider) appendMessage(result []map[string]any, msg provider.Message) 
 	case provider.RoleAssistant:
 		blocks := make([]map[string]any, 0, len(msg.ToolCalls)+2)
 
-		// Thinking block（多轮对话中保留 extended thinking 签名）
-		if msg.ThinkingSignature != "" {
+		// Thinking block（仅回传 Anthropic 原生 signature，外来签名清洗掉）
+		if provider.NativeThinkingCredential(msg.ThinkingSignature, msg.ThinkingSignatureProvider, provider.SignatureProviderAnthropic) {
 			blocks = append(blocks, map[string]any{
 				"type":      "thinking",
 				"thinking":  msg.ThinkingContent,

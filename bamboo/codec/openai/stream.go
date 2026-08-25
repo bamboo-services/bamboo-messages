@@ -1,12 +1,10 @@
 package openai
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 )
@@ -39,8 +37,11 @@ type openaiDeltaMsg struct {
 	Content string `json:"content,omitempty"`
 	// ReasoningContent 思考/推理内容增量。
 	// 注意：此字段为 DeepSeek/vLLM 兼容性扩展，非官方 OpenAI Chat Completions 规范字段。
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	ToolCalls        []openaiDeltaTC `json:"tool_calls,omitempty"`
+	ReasoningContent  string          `json:"reasoning_content,omitempty"`
+	ThinkingSignature string          `json:"thinking_signature,omitempty"`
+	ThinkingProvider  string          `json:"thinking_provider,omitempty"`
+	ReasoningID       string          `json:"reasoning_id,omitempty"`
+	ToolCalls         []openaiDeltaTC `json:"tool_calls,omitempty"`
 }
 
 type openaiDeltaTC struct {
@@ -224,10 +225,22 @@ func (s *openaiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 		return s.marshalChunk(chunk)
 
 	case bamboo.DeltaSignature:
-		// OpenAI Chat Completions 无 signature 字段，跨协议转换时记录 warning 后跳过
-		xLog.WithName("codec/openai").SugarWarn(context.Background(),
-			"warning: signature_delta has no equivalent in OpenAI Chat Completions protocol, dropped")
-		return nil, nil
+		if delta.Signature == "" && delta.SignatureProvider == "" {
+			return nil, nil
+		}
+		chunk := openaiChunk{
+			ID:      s.id,
+			Object:  "chat.completion.chunk",
+			Created: s.created,
+			Choices: []openaiDelta{{
+				Index: 0,
+				Delta: openaiDeltaMsg{
+					ThinkingSignature: delta.Signature,
+					ThinkingProvider:  delta.SignatureProvider,
+				},
+			}},
+		}
+		return s.marshalChunk(chunk)
 	}
 
 	return nil, nil

@@ -121,6 +121,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 
 	if len(signatures) > 0 {
 		result.ThinkingSignature = strings.Join(signatures, "\n---\n")
+		result.ThinkingSignatureProvider = provider.SignatureProviderAnthropic
 	}
 
 	return result, nil

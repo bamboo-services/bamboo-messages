@@ -97,6 +97,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 				}
 				if part.ThoughtSignature != "" {
 					result.ThinkingSignature = part.ThoughtSignature
+					result.ThinkingSignatureProvider = provider.SignatureProviderGemini
 				}
 				// 文本内容（忽略 Thought==true 的推理内容）
 				if !part.Thought && part.Text != "" {

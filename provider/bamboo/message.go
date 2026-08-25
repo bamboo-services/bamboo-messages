@@ -67,9 +67,10 @@ func buildWireContentBlocks(msg provider.Message) []wireContentBlock {
 	// Thinking block（多轮对话中保留 extended thinking 签名）
 	if msg.ThinkingContent != "" || msg.ThinkingSignature != "" {
 		blocks = append(blocks, wireContentBlock{
-			Type:      "thinking",
-			Thinking:  msg.ThinkingContent,
-			Signature: msg.ThinkingSignature,
+			Type:              "thinking",
+			Thinking:          msg.ThinkingContent,
+			Signature:         msg.ThinkingSignature,
+			SignatureProvider: msg.ThinkingSignatureProvider,
 		})
 	}
 

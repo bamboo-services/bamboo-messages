@@ -89,6 +89,9 @@ func serializeContentBlock(block bamboo.ContentBlock) (json.RawMessage, error) {
 		})
 
 	case *bamboo.ThinkingBlock:
+		if !bamboo.HasNativeThinkingCredential(b.Signature, b.SignatureProvider, bamboo.SignatureProviderAnthropic) {
+			return nil, nil
+		}
 		return json.Marshal(map[string]any{
 			"type":      "thinking",
 			"thinking":  b.Thinking,

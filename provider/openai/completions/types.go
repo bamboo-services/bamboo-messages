@@ -21,11 +21,14 @@ type chatCompletionChunkChoice struct {
 
 // chatCompletionDelta 表示流式响应中的增量消息数据。
 type chatCompletionDelta struct {
-	Role             string               `json:"role,omitempty"`
-	Content          string               `json:"content,omitempty"`
-	ReasoningContent json.RawMessage      `json:"reasoning_content,omitempty"` // 可能是字符串或对象
-	Reasoning        json.RawMessage      `json:"reasoning,omitempty"`         // 部分服务商使用 reasoning 字段
-	ToolCalls        []chunkDeltaToolCall `json:"tool_calls,omitempty"`
+	Role              string               `json:"role,omitempty"`
+	Content           string               `json:"content,omitempty"`
+	ReasoningContent  json.RawMessage      `json:"reasoning_content,omitempty"` // 可能是字符串或对象
+	Reasoning         json.RawMessage      `json:"reasoning,omitempty"`         // 部分服务商使用 reasoning 字段
+	ThinkingSignature string               `json:"thinking_signature,omitempty"`
+	ThinkingProvider  string               `json:"thinking_provider,omitempty"`
+	ReasoningID       string               `json:"reasoning_id,omitempty"`
+	ToolCalls         []chunkDeltaToolCall `json:"tool_calls,omitempty"`
 }
 
 // chunkDeltaToolCall 表示流式增量中的工具调用片段。
@@ -67,11 +70,14 @@ type chatCompletionResponseChoice struct {
 
 // chatCompletionMessage 表示非流式响应中的 assistant 消息。
 type chatCompletionMessage struct {
-	Role             string             `json:"role,omitempty"`
-	Content          string             `json:"content,omitempty"`
-	ReasoningContent json.RawMessage    `json:"reasoning_content,omitempty"`
-	Reasoning        json.RawMessage    `json:"reasoning,omitempty"`
-	ToolCalls        []responseToolCall `json:"tool_calls,omitempty"`
+	Role              string             `json:"role,omitempty"`
+	Content           string             `json:"content,omitempty"`
+	ReasoningContent  json.RawMessage    `json:"reasoning_content,omitempty"`
+	Reasoning         json.RawMessage    `json:"reasoning,omitempty"`
+	ThinkingSignature string             `json:"thinking_signature,omitempty"`
+	ThinkingProvider  string             `json:"thinking_provider,omitempty"`
+	ReasoningID       string             `json:"reasoning_id,omitempty"`
+	ToolCalls         []responseToolCall `json:"tool_calls,omitempty"`
 }
 
 // responseToolCall 表示非流式响应中的工具调用结果。

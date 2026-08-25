@@ -132,6 +132,9 @@ func TestSerializeResponse_Thinking(t *testing.T) {
 	if choice.Message.ReasoningContent != "Let me think..." {
 		t.Errorf("ReasoningContent = %q, want %q", choice.Message.ReasoningContent, "Let me think...")
 	}
+	if choice.Message.ThinkingSignature != "sig_abc" {
+		t.Errorf("ThinkingSignature = %q, want sig_abc", choice.Message.ThinkingSignature)
+	}
 	if choice.Message.Content == nil || *choice.Message.Content != "The answer is 42." {
 		t.Errorf("Content = %v", choice.Message.Content)
 	}

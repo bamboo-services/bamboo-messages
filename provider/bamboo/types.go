@@ -37,8 +37,9 @@ type wireMessage struct {
 type wireContentBlock struct {
 	Type         string          `json:"type"`                    // 内容块类型标识（必填）
 	Text         string          `json:"text,omitempty"`          // text: 文本内容
-	Thinking     string          `json:"thinking,omitempty"`      // thinking: 思考过程内容
-	Signature    string          `json:"signature,omitempty"`     // thinking: 验证签名
+	Thinking          string          `json:"thinking,omitempty"`           // thinking: 思考过程内容
+	Signature         string          `json:"signature,omitempty"`          // thinking: 验证签名
+	SignatureProvider string          `json:"signature_provider,omitempty"` // thinking: 签名血统
 	ID           string          `json:"id,omitempty"`            // tool_use: 调用 ID
 	Name         string          `json:"name,omitempty"`          // tool_use / tool_result: 函数名
 	Input        json.RawMessage `json:"input,omitempty"`         // tool_use: 参数 JSON

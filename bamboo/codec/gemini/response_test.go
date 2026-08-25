@@ -141,7 +141,7 @@ func TestSerializeResponse_ThinkingBlock_Serialized(t *testing.T) {
 		Model:      "gemini-2.5-pro",
 		StopReason: bamboo.FinishReasonEndTurn,
 		Content: []bamboo.ContentBlock{
-			bamboo.NewThinkingBlock("thinking content", "sig"),
+			bamboo.NewThinkingBlockWithProvider("thinking content", "sig", bamboo.SignatureProviderGemini),
 			bamboo.NewTextBlock("answer"),
 		},
 		Usage: bamboo.Usage{},

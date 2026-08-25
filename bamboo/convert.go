@@ -38,6 +38,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		var ccCount int
 		var thinkingContent string
 		var thinkingSignature string
+		var thinkingSignatureProvider string
 		var redactedThinkingData string
 
 		// Content 为空数组时允许透传，生成 Content="" 的空消息，
@@ -54,10 +55,15 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 			case *ThinkingBlock:
 				// 保留思考过程到 provider.Message 的 ThinkingContent/ThinkingSignature 字段，
 				// 用于多轮对话中向 provider 回传 thinking block 内容。
-				// 多个 ThinkingBlock 时拼接内容，保留最后一个签名。
+				// 多个 ThinkingBlock 时拼接内容，保留最后一个签名及其血统。
 				if b.Thinking != "" {
 					thinkingContent += b.Thinking
+				}
+				if b.Signature != "" {
 					thinkingSignature = b.Signature
+					thinkingSignatureProvider = b.SignatureProvider
+				} else if thinkingSignatureProvider == "" && b.SignatureProvider != "" {
+					thinkingSignatureProvider = b.SignatureProvider
 				}
 				if b.CacheControl != nil {
 					ccCount++
@@ -150,7 +156,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 		}
 
 		content := textBuilder.String()
-		hasContent := content != "" || len(toolCalls) > 0 || len(contentBlocks) > 0 || thinkingContent != "" || redactedThinkingData != ""
+		hasContent := content != "" || len(toolCalls) > 0 || len(contentBlocks) > 0 || thinkingContent != "" || thinkingSignature != "" || redactedThinkingData != ""
 		if hasContent || len(msg.Content) == 0 {
 			if msg.Role == RoleAssistant && content == "" && len(toolCalls) == 0 && len(contentBlocks) == 0 && thinkingContent == "" && redactedThinkingData == "" {
 				content = "-"
@@ -163,9 +169,10 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 				Role:                  providerRole(msg.Role),
 				Content:               content,
 				ContentBlocks:         contentBlocks,
-				ThinkingContent:       thinkingContent,
-				ThinkingSignature:     thinkingSignature,
-				RedactedThinkingData:  redactedThinkingData,
+				ThinkingContent:           thinkingContent,
+				ThinkingSignature:         thinkingSignature,
+				ThinkingSignatureProvider: thinkingSignatureProvider,
+				RedactedThinkingData:      redactedThinkingData,
 				ReasoningID:           msg.ReasoningID,
 				ToolCalls:             toolCalls,
 				CacheControl:          msgCacheControl,
@@ -420,8 +427,12 @@ func resultToResponse(result *provider.CompletionResult, providerType string) *R
 		return nil
 	}
 	var content []ContentBlock
-	if result.Thinking != "" {
-		content = append(content, NewThinkingBlock(result.Thinking, result.ThinkingSignature))
+	if result.Thinking != "" || result.ThinkingSignature != "" {
+		sp := result.ThinkingSignatureProvider
+		if sp == "" && result.ThinkingSignature != "" {
+			sp = SignatureProviderFromUpstream(provider.ProviderType(providerType))
+		}
+		content = append(content, NewThinkingBlockWithProvider(result.Thinking, result.ThinkingSignature, sp))
 	}
 	for _, rt := range result.RedactedThinking {
 		content = append(content, NewRedactedThinkingBlock(rt))
@@ -486,9 +497,15 @@ type StreamConverter struct {
 	stopHandled              bool
 	stoppedBlockIndexes      map[int]bool  // 已发送 content_block_stop 的 block index 集合（防重复）
 	metadata                 *MessageDelta // 由 MetadataDelta 收集的元信息，在 handleStop 时输出
+	signatureProvider        string        // 当前上游协议的思考凭证血统，写入 thinking block / signature_delta
 }
 
 func NewStreamConverter() *StreamConverter { return &StreamConverter{} }
+
+// NewStreamConverterForProvider 创建带上游血统的流转换器，thinking 块会打上对应 SignatureProvider。
+func NewStreamConverterForProvider(pt provider.ProviderType) *StreamConverter {
+	return &StreamConverter{signatureProvider: SignatureProviderFromUpstream(pt)}
+}
 
 // Convert 将单个 provider.StreamEvent 转换为 bamboo.StreamEvent 列表。
 //
@@ -652,7 +669,7 @@ func (sc *StreamConverter) startThinkingBlock() StreamEvent {
 	return StreamEvent{
 		Type:         EventContentBlockStart,
 		Index:        idx,
-		ContentBlock: NewThinkingBlock("", ""),
+		ContentBlock: NewThinkingBlockWithProvider("", "", sc.signatureProvider),
 	}
 }
 
@@ -803,14 +820,17 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 			events = append(events, sc.stopForNewBlock(ContentBlockThinking)...)
 			events = append(events, sc.startThinkingBlock())
 		}
-		sigData, ok := delta.Data.(provider.SignatureData)
+		sig, sigProv, ok := signatureDeltaFields(delta.Data)
 		if !ok {
 			return events
+		}
+		if sigProv == "" {
+			sigProv = sc.signatureProvider
 		}
 		events = append(events, StreamEvent{
 			Type:  EventContentBlockDelta,
 			Index: sc.thinkingBlockIndex,
-			Delta: &StreamDelta{Type: DeltaSignature, Signature: string(sigData)},
+			Delta: &StreamDelta{Type: DeltaSignature, Signature: sig, SignatureProvider: sigProv},
 		})
 		return events
 	case provider.StreamDeltaTypeToolCall:
@@ -1038,4 +1058,17 @@ func (sc *StreamConverter) handleError(err *pkgErrors.BambooError) []StreamEvent
 		events = append(events, sc.handleStop()...)
 	}
 	return events
+}
+
+func signatureDeltaFields(data any) (signature, signatureProvider string, ok bool) {
+	switch v := data.(type) {
+	case provider.SignatureData:
+		return string(v), "", true
+	case provider.SignatureDeltaData:
+		return v.Signature, v.Provider, true
+	case string:
+		return v, "", true
+	default:
+		return "", "", false
+	}
 }

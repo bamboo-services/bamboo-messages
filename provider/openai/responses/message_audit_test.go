@@ -16,9 +16,10 @@ func TestBuildAssistantItem_ReasoningID_NoRsPrefix(t *testing.T) {
 	msg := provider.Message{
 		Role:              provider.RoleAssistant,
 		Content:           "response text",
-		ThinkingContent:   "thinking text",
-		ThinkingSignature: "gAAAAABp_encrypted_token",
-		ReasoningID:       "rs_real_id_123",
+		ThinkingContent:           "thinking text",
+		ThinkingSignature:         "gAAAAABp_encrypted_token",
+		ThinkingSignatureProvider: provider.SignatureProviderOpenAIResponses,
+		ReasoningID:               "rs_real_id_123",
 	}
 
 	items := p.buildAssistantItem(msg)
@@ -47,9 +48,10 @@ func TestBuildAssistantItem_EmptyReasoningID(t *testing.T) {
 	msg := provider.Message{
 		Role:              provider.RoleAssistant,
 		Content:           "response",
-		ThinkingContent:   "thinking",
-		ThinkingSignature: "encrypted",
-		ReasoningID:       "", // 空
+		ThinkingContent:           "thinking",
+		ThinkingSignature:         "encrypted",
+		ThinkingSignatureProvider: provider.SignatureProviderOpenAIResponses,
+		ReasoningID:               "", // 空
 	}
 
 	items := p.buildAssistantItem(msg) // 不应 panic
@@ -74,9 +76,10 @@ func TestBuildAssistantItem_EncryptedContent(t *testing.T) {
 	msg := provider.Message{
 		Role:              provider.RoleAssistant,
 		Content:           "text",
-		ThinkingContent:   "thinking",
-		ThinkingSignature: "gAAAAABp_test_encrypted",
-		ReasoningID:       "rs_123",
+		ThinkingContent:           "thinking",
+		ThinkingSignature:         "gAAAAABp_test_encrypted",
+		ThinkingSignatureProvider: provider.SignatureProviderOpenAIResponses,
+		ReasoningID:               "rs_123",
 	}
 
 	items := p.buildAssistantItem(msg)
@@ -190,6 +193,31 @@ func TestBuildAssistantItem_IgnoreEncryptedDropsEmptyReasoning(t *testing.T) {
 	}
 	if items[0]["role"] != "assistant" {
 		t.Fatalf("expected assistant message, got %v", items[0])
+	}
+}
+
+func TestBuildAssistantItem_ForeignSignatureNotEncrypted(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	msg := provider.Message{
+		Role:                      provider.RoleAssistant,
+		Content:                   "response text",
+		ThinkingContent:           "gemini think",
+		ThinkingSignature:         "google_thought_sig",
+		ThinkingSignatureProvider: provider.SignatureProviderGemini,
+		ReasoningID:               "rs_123",
+	}
+
+	items := p.buildAssistantItem(msg)
+	if len(items) < 1 {
+		t.Fatal("expected items")
+	}
+	reasoningItem := items[0]
+	if reasoningItem["type"] != "reasoning" {
+		t.Fatalf("expected reasoning item from id, got %v", reasoningItem["type"])
+	}
+	if _, ok := reasoningItem["encrypted_content"]; ok {
+		t.Errorf("foreign gemini signature must not be copied to encrypted_content: %v", reasoningItem["encrypted_content"])
 	}
 }
 

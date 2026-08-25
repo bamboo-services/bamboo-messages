@@ -117,7 +117,7 @@ func (p *ResponsesProvider) buildAssistantItem(msg provider.Message) []map[strin
 	//   summary           — 必填数组，无摘要时为空数组
 	//   encrypted_content — 仅在未忽略时透传上游签名/密文，不伪造
 	//   content           — 仅在显式允许时注入 reasoning_text；官方 OpenAI 的 content.maxItems = 0
-	hasEncrypted := !p.ignoreEncryptedContent && msg.ThinkingSignature != ""
+	hasEncrypted := !p.ignoreEncryptedContent && provider.NativeThinkingCredential(msg.ThinkingSignature, msg.ThinkingSignatureProvider, provider.SignatureProviderOpenAIResponses)
 	hasContent := p.includeReasoningContent && msg.ThinkingContent != ""
 	hasID := msg.ReasoningID != ""
 

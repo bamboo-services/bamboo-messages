@@ -141,5 +141,5 @@ func applyOptions(opts ...Option) *config {
 //
 // 返回 "gemini" 常量，用于识别协议类型。
 func (p *Provider) GetProviderType() provider.ProviderType {
-	return "gemini"
+	return provider.ProviderGemini
 }

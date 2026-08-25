@@ -65,6 +65,19 @@ func (p *CompletionsProvider) handleChoice(choice chatCompletionChunkChoice, tex
 			Delta: provider.NewThinkingDelta(reasoningStr),
 		})
 	}
+	if delta.ThinkingSignature != "" {
+		if !*thinkingBlockStarted {
+			events = append(events, provider.StreamEvent{
+				Type:  provider.StreamTypeDelta,
+				Delta: provider.NewBlockStartDelta("thinking"),
+			})
+			*thinkingBlockStarted = true
+		}
+		events = append(events, provider.StreamEvent{
+			Type:  provider.StreamTypeDelta,
+			Delta: provider.NewSignatureDeltaWithProvider(delta.ThinkingSignature, delta.ThinkingProvider),
+		})
+	}
 
 	if delta.Content != "" {
 		if stripper != nil {

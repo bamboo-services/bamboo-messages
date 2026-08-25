@@ -87,12 +87,16 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 			if id == "" {
 				id = fmt.Sprintf("rs_%d", resp.CreatedAt)
 			}
+			enc := ""
+			if bamboo.HasNativeThinkingCredential(b.Signature, b.SignatureProvider, bamboo.SignatureProviderOpenAIResponses) {
+				enc = b.Signature
+			}
 			reasoningItems = append(reasoningItems, outputItem{
 				Type:             "reasoning",
 				ID:               id,
 				Content:          buildReasoningContent(b.Thinking),
 				Summary:          buildReasoningSummary(b.Thinking),
-				EncryptedContent: b.Signature,
+				EncryptedContent: enc,
 			})
 
 		case *bamboo.ToolUseBlock:

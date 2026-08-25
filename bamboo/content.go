@@ -74,12 +74,24 @@ type TextBlock struct {
 
 func (b TextBlock) BlockType() ContentBlockType { return ContentBlockText }
 
+const (
+	SignatureProviderAnthropic       = provider.SignatureProviderAnthropic
+	SignatureProviderGemini          = provider.SignatureProviderGemini
+	SignatureProviderOpenAIResponses = provider.SignatureProviderOpenAIResponses
+)
+
+// SignatureProviderFromUpstream 将上游协议类型映射为思考凭证血统。
+func SignatureProviderFromUpstream(pt provider.ProviderType) string {
+	return provider.SignatureProviderFromUpstream(pt)
+}
+
 // ThinkingBlock 思考过程内容块（如 Claude Extended Thinking）。
 type ThinkingBlock struct {
-	Type         ContentBlockType       `json:"type"`
-	Thinking     string                 `json:"thinking,omitempty"`
-	Signature    string                 `json:"signature,omitempty"`
-	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
+	Type              ContentBlockType       `json:"type"`
+	Thinking          string                 `json:"thinking,omitempty"`
+	Signature         string                 `json:"signature,omitempty"`
+	SignatureProvider string                 `json:"signature_provider,omitempty"`
+	CacheControl      *provider.CacheControl `json:"cache_control,omitempty"`
 }
 
 func (b ThinkingBlock) BlockType() ContentBlockType { return ContentBlockThinking }
@@ -214,7 +226,19 @@ func NewTextBlockWithCache(text string, cc *provider.CacheControl) ContentBlock 
 //
 // thinking 为思考过程文本，signature 为用于验证的签名。
 func NewThinkingBlock(thinking, signature string) ContentBlock {
-	return &ThinkingBlock{Type: ContentBlockThinking, Thinking: thinking, Signature: signature}
+	return NewThinkingBlockWithProvider(thinking, signature, "")
+}
+
+// NewThinkingBlockWithProvider 创建带签名血统的思考块。
+//
+// signatureProvider 为 anthropic / gemini / openai-responses；无原生凭证时传空。
+func NewThinkingBlockWithProvider(thinking, signature, signatureProvider string) ContentBlock {
+	return &ThinkingBlock{
+		Type:              ContentBlockThinking,
+		Thinking:          thinking,
+		Signature:         signature,
+		SignatureProvider: signatureProvider,
+	}
 }
 
 // NewToolUseBlock 创建工具调用内容块。
@@ -283,6 +307,11 @@ func NewDocumentBlock(source ContentSource) ContentBlock {
 
 func NewThinkingBlockWithCache(thinking, signature string, cc *provider.CacheControl) ContentBlock {
 	return &ThinkingBlock{Type: ContentBlockThinking, Thinking: thinking, Signature: signature, CacheControl: cc}
+}
+
+// HasNativeThinkingCredential 判断思考块是否带有可注入目标上游的原生凭证。
+func HasNativeThinkingCredential(signature, signatureProvider, target string) bool {
+	return provider.NativeThinkingCredential(signature, signatureProvider, target)
 }
 
 func NewToolResultBlockWithCache(toolUseID, content string, isError bool, cc *provider.CacheControl) ContentBlock {

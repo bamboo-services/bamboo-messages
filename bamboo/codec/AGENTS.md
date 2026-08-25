@@ -77,7 +77,8 @@ bamboo/codec/
 - **bamboo 原生 codec 是恒等变换** — `bamboo/codec/bamboo` 的 `ParseRequest` 直接 `json.Unmarshal` 原生 `BambooMessage` / `RequestConfig` 到 `RelayRequest`，`SerializeResponse` 直接 `json.Marshal(*bamboo.Response)`，`Serialize` 直接 `json.Marshal(StreamEvent)` 并封装为 Anthropic 风格 SSE 帧（`event: ...\ndata: ...\n\n`），不引入任何中间 DTO
 - **bamboo 子包必须 import 别名** — 由于包名 `bamboo` 与门面层 `bamboo` 包名冲突，子包中 `github.com/bamboo-services/bamboo-messages/bamboo` 使用别名 `bmbamboo`，`bamboo/codec` 使用别名 `bmcodec`
 - **cache_creation_input_tokens 已知限制** — OpenAI / Responses / Gemini 协议无原生 `cache_creation_input_tokens` 字段，仅映射 `CacheReadInputTokens`；`CacheCreationInputTokens` 在跨协议转换（Anthropic→其他）中会丢失，此为已知限制
-- **DeltaSignature 跨协议映射** — `signature_delta` 对应 Bamboo `ThinkingBlock.Signature`。Anthropic 输出 `signature_delta`；Gemini 输出 `thoughtSignature`；Responses 写入 reasoning item 的 `encrypted_content`；OpenAI Chat Completions 无签名槽，流式序列化静默丢弃（返回 nil）
+- **DeltaSignature 跨协议映射** — `signature_delta` 对应 Bamboo `ThinkingBlock.Signature`。Anthropic 输出 `signature_delta`；Gemini 输出 `thoughtSignature`；Responses 仅在 `SignatureProvider=openai-responses` 时写入 `encrypted_content`。Chat Completions 作为 N2N 枢纽：非流式写入 `thinking_signature` / `thinking_provider` / `reasoning_id`，流式 `signature_delta` 打到 chunk 的同样扩展字段；`reasoning_content` 仍是明文 string
+- **思考凭证血统** — `ThinkingBlock.SignatureProvider` 为 `anthropic` / `gemini` / `openai-responses`。目标侧仅当 `signature != ""` 且血统匹配才注入签名槽；否则清洗（Gemini 禁止无签名 `thought: true`）
 - **ToolResultBlock 不应出现在响应中** — 所有协议的 `serializeResponse` 对 assistant 响应中的 `ToolResultBlock` 记录警告并跳过；同理 `ImageBlock` / `DocumentBlock` 在不支持的协议响应中也记录警告并跳过
 - **Anthropic tool_choice "tool" 类型保留** — `parseToolChoice` 解析 `{type:"tool", name:"xxx"}` 时返回 `"forced"` + `name`，forced tool name 存入 `ProviderExtra["forced_tool_name"]`，避免跨协议转换时丢失
 - **Anthropic document 块解析** — `convertContentBlock` 支持 `"document"` 类型，解析为 `DocumentBlock`（含 source 的 type/mediaType/data/url）
@@ -106,7 +107,8 @@ bamboo/codec/
 - **禁止** 忘记在子包 `init()` 中注册全局变量 — 否则 `registry.Get()` 返回 nil Codec
 - **禁止** 裸返回 error — 内部错误应包装为 `pkg/errors.BambooError` 以保留错误分类信息
 - **禁止** 在 Gemini codec 中将 safety_settings 存为原始 JSON 结构 — 必须转换为 `[]*genai.SafetySetting`，否则 relay→provider 路径类型断言失败导致静默丢弃
-- **禁止** 在 OpenAI Chat Completions 中输出 DeltaSignature — 该协议无签名槽，应返回 nil 静默丢弃；禁止把 Gemini `thoughtSignature` 当成无对应槽而丢弃
+- **禁止** 把 Gemini `thoughtSignature` 或 Claude `signature` 写进 Responses `encrypted_content` — 必须看 `SignatureProvider`
+- **禁止** 在 Gemini 出站编 `thought: true` 却不带合法 Gemini 签名 — 无血统或外来签名时丢掉 thought part，不要改成普通 text 前缀
 - **禁止** 在响应序列化中遗漏 ToolResultBlock/ImageBlock/DocumentBlock 的警告日志 — 不支持的 block 类型必须记录 warning 后跳过，不得静默丢弃
 - **禁止** 在 Responses reasoning item 的 `encrypted_content` 中填证明文 — 该字段是服务端加密的不透明 token（官方契约：原样回传、不可伪造），明文会导致真实 OpenAI 上游解密失败；无上游真值时留空
 - **禁止** 把 ThinkingBlock 全文同时流式推到 `reasoning_text` 与 `reasoning_summary_text` — summary 槽只承载摘要（item.done.summary），复制全文会让客户端把思考叠两遍

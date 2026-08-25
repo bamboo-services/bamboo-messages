@@ -274,8 +274,9 @@ func TestBuildMessages_AssistantWithThinking(t *testing.T) {
 		{
 			Role:              provider.RoleAssistant,
 			Content:           "The answer is 42.",
-			ThinkingContent:   "Let me think about this...",
-			ThinkingSignature: "sig_abc123",
+			ThinkingContent:           "Let me think about this...",
+			ThinkingSignature:         "sig_abc123",
+			ThinkingSignatureProvider: provider.SignatureProviderAnthropic,
 		},
 	}
 
@@ -351,9 +352,10 @@ func TestBuildMessages_AssistantWithThinkingAndRedactedThinking(t *testing.T) {
 		{
 			Role:                 provider.RoleAssistant,
 			Content:              "Answer.",
-			ThinkingContent:      "Let me think...",
-			ThinkingSignature:    "sig_abc",
-			RedactedThinkingData: "rt_data",
+			ThinkingContent:           "Let me think...",
+			ThinkingSignature:         "sig_abc",
+			ThinkingSignatureProvider: provider.SignatureProviderAnthropic,
+			RedactedThinkingData:      "rt_data",
 		},
 	}
 
@@ -473,8 +475,9 @@ func TestBuildMessages_AssistantCacheControlOnThinking(t *testing.T) {
 		{
 			Role:                 provider.RoleAssistant,
 			Content:              "response",
-			ThinkingContent:      "long thinking",
-			ThinkingSignature:    "sig123",
+			ThinkingContent:           "long thinking",
+			ThinkingSignature:         "sig123",
+			ThinkingSignatureProvider: provider.SignatureProviderAnthropic,
 			CacheControl:         provider.NewEphemeralCacheControl(),
 			CacheControlBlockType: "thinking",
 		},

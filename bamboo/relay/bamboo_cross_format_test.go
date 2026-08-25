@@ -108,9 +108,9 @@ func TestBambooRelay_ToAnthropic(t *testing.T) {
 	if !strings.Contains(outStr, "text response") {
 		t.Errorf("expected response text in output, got: %s", outStr)
 	}
-	// thinking 内容应出现
-	if !strings.Contains(outStr, "thinking content") {
-		t.Errorf("expected thinking content in output, got: %s", outStr)
+	// mock 思考无 Anthropic 原生 signature，出站必须清洗，禁止编成 thinking 块。
+	if strings.Contains(outStr, `"type":"thinking"`) {
+		t.Errorf("unsigned thinking must not serialize as Anthropic thinking block, got: %s", outStr)
 	}
 	// 工具调用应出现
 	if !strings.Contains(outStr, "get_weather") {
