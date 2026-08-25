@@ -9,8 +9,10 @@ import (
 // 在去 SDK 化重构后，不再嵌入 openai-go Client，
 // 而是统一持有 *provider.HTTPClient 进行 HTTP 通信。
 type ResponsesProvider struct {
-	httpClient     *provider.HTTPClient
-	degradedReason provider.DegradedReasonStrategy
+	httpClient              *provider.HTTPClient
+	degradedReason          provider.DegradedReasonStrategy
+	includeReasoningContent bool
+	ignoreEncryptedContent  bool
 }
 
 // ============================================
@@ -28,11 +30,13 @@ type Option func(*config)
 // 保存 ResponsesProvider 的配置信息，
 // 包括 API 密钥、自定义基础 URL 和附加请求头。
 type config struct {
-	apiKey         string
-	baseURL        string
-	headers        map[string]string
-	interceptors   []provider.RequestInterceptor
-	degradedReason provider.DegradedReasonStrategy
+	apiKey                  string
+	baseURL                 string
+	headers                 map[string]string
+	interceptors            []provider.RequestInterceptor
+	degradedReason          provider.DegradedReasonStrategy
+	includeReasoningContent bool
+	ignoreEncryptedContent  bool
 }
 
 // WithAPIKey 设置 API 密钥。
@@ -86,6 +90,21 @@ func WithDegradedReason(strategy provider.DegradedReasonStrategy) Option {
 	return func(c *config) { c.degradedReason = strategy }
 }
 
+// WithIncludeReasoningContent 设置是否在 input reasoning item 中携带 content 数组。
+//
+// 默认为 false（严格遵守 OpenAI 官方 OpenAPI Schema，content.maxItems = 0）。
+// 当上游为支持明文思考回传的第三方 Open Responses 网关（如 Grok / vLLM / SGLang）时可按需开启。
+func WithIncludeReasoningContent(include bool) Option {
+	return func(c *config) { c.includeReasoningContent = include }
+}
+
+// WithIgnoreEncryptedContent 设置是否在构建 input 时忽略 encrypted_content。
+//
+// 默认为 false（保留密文）。当存在多 Key 轮询或跨组织调用、防止解密失败导致 400 时可开启。
+func WithIgnoreEncryptedContent(ignore bool) Option {
+	return func(c *config) { c.ignoreEncryptedContent = ignore }
+}
+
 // ============================================
 // 构造函数
 // ============================================
@@ -121,8 +140,10 @@ func NewResponsesProviderWithOptions(opts ...Option) *ResponsesProvider {
 	)
 
 	return &ResponsesProvider{
-		httpClient:     httpClient,
-		degradedReason: cfg.degradedReason,
+		httpClient:              httpClient,
+		degradedReason:          cfg.degradedReason,
+		includeReasoningContent: cfg.includeReasoningContent,
+		ignoreEncryptedContent:  cfg.ignoreEncryptedContent,
 	}
 }
 

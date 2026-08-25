@@ -112,25 +112,30 @@ func (p *ResponsesProvider) buildUserItem(msg provider.Message) map[string]any {
 func (p *ResponsesProvider) buildAssistantItem(msg provider.Message) []map[string]any {
 	items := make([]map[string]any, 0, len(msg.ToolCalls)+2)
 
-	// Reasoning item — 按官方 schema 三槽位回传：
-	//   content           — reasoning_text 原文
-	//   summary           — 必填数组，无摘要时为空数组（Grok 回放样例）
-	//   encrypted_content — 仅透传上游签名/密文，不伪造
-	if msg.ThinkingContent != "" || msg.ThinkingSignature != "" || msg.ReasoningID != "" {
+	// Reasoning item — 官方 schema 三槽位，由双开关控制明文/密文回传：
+	//   id                — 上游 reasoning item id（rs_xxx）
+	//   summary           — 必填数组，无摘要时为空数组
+	//   encrypted_content — 仅在未忽略时透传上游签名/密文，不伪造
+	//   content           — 仅在显式允许时注入 reasoning_text；官方 OpenAI 的 content.maxItems = 0
+	hasEncrypted := !p.ignoreEncryptedContent && msg.ThinkingSignature != ""
+	hasContent := p.includeReasoningContent && msg.ThinkingContent != ""
+	hasID := msg.ReasoningID != ""
+
+	if hasID || hasEncrypted || hasContent {
 		reasoningItem := map[string]any{
 			"type":    "reasoning",
 			"summary": []map[string]any{},
 		}
-		if msg.ThinkingContent != "" {
+		if hasID {
+			reasoningItem["id"] = msg.ReasoningID
+		}
+		if hasEncrypted {
+			reasoningItem["encrypted_content"] = msg.ThinkingSignature
+		}
+		if hasContent {
 			reasoningItem["content"] = []map[string]any{
 				{"type": "reasoning_text", "text": msg.ThinkingContent},
 			}
-		}
-		if msg.ReasoningID != "" {
-			reasoningItem["id"] = msg.ReasoningID
-		}
-		if msg.ThinkingSignature != "" {
-			reasoningItem["encrypted_content"] = msg.ThinkingSignature
 		}
 		items = append(items, reasoningItem)
 	}

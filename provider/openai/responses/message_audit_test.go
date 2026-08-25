@@ -92,8 +92,135 @@ func TestBuildAssistantItem_EncryptedContent(t *testing.T) {
 	if len(summary) != 0 {
 		t.Errorf("summary = %v, want empty array", summary)
 	}
+	if _, ok := reasoningItem["content"]; ok {
+		t.Errorf("content = %v, want omitted by default (OpenAI content.maxItems=0)", reasoningItem["content"])
+	}
+}
+
+func TestBuildAssistantItem_DefaultOmitsPlaintextReasoning(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	msg := provider.Message{
+		Role:            provider.RoleAssistant,
+		Content:         "response text",
+		ThinkingContent: "plaintext thinking from grok",
+	}
+
+	items := p.buildAssistantItem(msg)
+	if len(items) != 1 {
+		t.Fatalf("expected only assistant message item, got %d items: %v", len(items), items)
+	}
+	if items[0]["role"] != "assistant" {
+		t.Fatalf("expected assistant message, got %v", items[0])
+	}
+}
+
+func TestBuildAssistantItem_IncludeReasoningContent(t *testing.T) {
+	p := NewResponsesProviderWithOptions(
+		WithAPIKey("test-api-key"),
+		WithIncludeReasoningContent(true),
+	)
+
+	msg := provider.Message{
+		Role:            provider.RoleAssistant,
+		Content:         "response text",
+		ThinkingContent: "plaintext thinking",
+		ReasoningID:     "rs_123",
+	}
+
+	items := p.buildAssistantItem(msg)
+	if len(items) < 1 {
+		t.Fatal("expected reasoning item")
+	}
+	reasoningItem := items[0]
+	if reasoningItem["type"] != "reasoning" {
+		t.Fatalf("expected first item type 'reasoning', got %v", reasoningItem["type"])
+	}
 	content, _ := reasoningItem["content"].([]map[string]any)
-	if len(content) != 1 || content[0]["type"] != "reasoning_text" || content[0]["text"] != "thinking" {
-		t.Errorf("content = %v, want reasoning_text", content)
+	if len(content) != 1 || content[0]["type"] != "reasoning_text" || content[0]["text"] != "plaintext thinking" {
+		t.Errorf("content = %v, want reasoning_text plaintext thinking", content)
+	}
+}
+
+func TestBuildAssistantItem_IgnoreEncryptedContent(t *testing.T) {
+	p := NewResponsesProviderWithOptions(
+		WithAPIKey("test-api-key"),
+		WithIgnoreEncryptedContent(true),
+	)
+
+	msg := provider.Message{
+		Role:              provider.RoleAssistant,
+		Content:           "response text",
+		ThinkingSignature: "gAAAAABp_encrypted_token",
+		ReasoningID:       "rs_123",
+	}
+
+	items := p.buildAssistantItem(msg)
+	if len(items) < 1 {
+		t.Fatal("expected reasoning item")
+	}
+	reasoningItem := items[0]
+	if reasoningItem["type"] != "reasoning" {
+		t.Fatalf("expected first item type 'reasoning', got %v", reasoningItem["type"])
+	}
+	if _, ok := reasoningItem["encrypted_content"]; ok {
+		t.Errorf("encrypted_content = %v, want omitted when ignore is enabled", reasoningItem["encrypted_content"])
+	}
+	id, _ := reasoningItem["id"].(string)
+	if id != "rs_123" {
+		t.Errorf("id = %q, want rs_123", id)
+	}
+}
+
+func TestBuildAssistantItem_IgnoreEncryptedDropsEmptyReasoning(t *testing.T) {
+	p := NewResponsesProviderWithOptions(
+		WithAPIKey("test-api-key"),
+		WithIgnoreEncryptedContent(true),
+	)
+
+	msg := provider.Message{
+		Role:              provider.RoleAssistant,
+		Content:           "response text",
+		ThinkingSignature: "gAAAAABp_encrypted_token",
+	}
+
+	items := p.buildAssistantItem(msg)
+	if len(items) != 1 {
+		t.Fatalf("expected only assistant message item after dropping ciphertext-only reasoning, got %d items: %v", len(items), items)
+	}
+	if items[0]["role"] != "assistant" {
+		t.Fatalf("expected assistant message, got %v", items[0])
+	}
+}
+
+func TestBuildAssistantItem_DualSwitchIndependent(t *testing.T) {
+	p := NewResponsesProviderWithOptions(
+		WithAPIKey("test-api-key"),
+		WithIncludeReasoningContent(true),
+		WithIgnoreEncryptedContent(true),
+	)
+
+	msg := provider.Message{
+		Role:              provider.RoleAssistant,
+		Content:           "response text",
+		ThinkingContent:   "plaintext thinking",
+		ThinkingSignature: "gAAAAABp_encrypted_token",
+		ReasoningID:       "rs_123",
+	}
+
+	items := p.buildAssistantItem(msg)
+	if len(items) < 1 {
+		t.Fatal("expected reasoning item")
+	}
+	reasoningItem := items[0]
+	if reasoningItem["type"] != "reasoning" {
+		t.Fatalf("expected first item type 'reasoning', got %v", reasoningItem["type"])
+	}
+	content, _ := reasoningItem["content"].([]map[string]any)
+	if len(content) != 1 || content[0]["text"] != "plaintext thinking" {
+		t.Errorf("content = %v, want plaintext thinking", content)
+	}
+	if _, ok := reasoningItem["encrypted_content"]; ok {
+		t.Errorf("encrypted_content = %v, want omitted", reasoningItem["encrypted_content"])
 	}
 }
