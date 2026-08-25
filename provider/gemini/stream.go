@@ -65,16 +65,22 @@ func (p *Provider) handleCandidate(candidate *geminiCandidate, textBlockStarted 
 
 // handlePart 处理单个 geminiPart。
 //
-// 根据 part.Thought 和 part.FunctionCall 字段分发：
+// 根据 part.Thought、part.ThoughtSignature 和 part.FunctionCall 字段分发：
 //   - Thought==true && Text!=""  → 推理增量（thinking block）
+//   - ThoughtSignature!=""       → 思考签名增量（signature delta）
 //   - Thought==false && Text!="" → 文本增量（text block）
 //   - FunctionCall != nil        → 工具调用增量（tool_call + tool_call_delta）
 //
-// 工具调用不发送 BlockStartDelta，由 StreamConverter 的 ToolCall 处理自动管理 block 生命周期。
+// 注意：Gemini 在调用工具时，FunctionCall part 经常同时附带 ThoughtSignature。
+// 不能使用互斥的 early return，必须确保 FunctionCall 与 ThoughtSignature 均被正常处理。
 func (p *Provider) handlePart(part *geminiPart, textBlockStarted *bool, thinkingBlockStarted *bool) []provider.StreamEvent {
+	if part == nil {
+		return nil
+	}
 	var events []provider.StreamEvent
 
-	if part.Thought || part.ThoughtSignature != "" {
+	// 1. 推理内容增量（Thought == true 且 Text != ""）
+	if part.Thought && part.Text != "" {
 		if !*thinkingBlockStarted {
 			events = append(events, provider.StreamEvent{
 				Type:  provider.StreamTypeDelta,
@@ -82,22 +88,21 @@ func (p *Provider) handlePart(part *geminiPart, textBlockStarted *bool, thinking
 			})
 			*thinkingBlockStarted = true
 		}
-		if part.Text != "" {
-			events = append(events, provider.StreamEvent{
-				Type:  provider.StreamTypeDelta,
-				Delta: provider.NewThinkingDelta(part.Text),
-			})
-		}
-		if part.ThoughtSignature != "" {
-			events = append(events, provider.StreamEvent{
-				Type:  provider.StreamTypeDelta,
-				Delta: provider.NewSignatureDelta(part.ThoughtSignature),
-			})
-		}
-		return events
+		events = append(events, provider.StreamEvent{
+			Type:  provider.StreamTypeDelta,
+			Delta: provider.NewThinkingDelta(part.Text),
+		})
 	}
 
-	// 文本内容增量
+	// 2. 思考签名增量（ThoughtSignature != ""）
+	if part.ThoughtSignature != "" {
+		events = append(events, provider.StreamEvent{
+			Type:  provider.StreamTypeDelta,
+			Delta: provider.NewSignatureDelta(part.ThoughtSignature),
+		})
+	}
+
+	// 3. 文本内容增量（!Thought 且 Text != ""）
 	if !part.Thought && part.Text != "" {
 		if !*textBlockStarted {
 			events = append(events, provider.StreamEvent{
@@ -110,10 +115,9 @@ func (p *Provider) handlePart(part *geminiPart, textBlockStarted *bool, thinking
 			Type:  provider.StreamTypeDelta,
 			Delta: provider.NewTextDelta(part.Text),
 		})
-		return events
 	}
 
-	// 工具调用（FunctionCall）
+	// 4. 工具调用（FunctionCall != nil）
 	// 不发送 BlockStartDelta，由 StreamConverter 的 ToolCall 处理自动管理 block 生命周期。
 	// 与 Anthropic/OpenAI 适配器保持一致：仅发送 ToolCallDelta + ToolCallDeltaData。
 	if part.FunctionCall != nil {
@@ -130,10 +134,9 @@ func (p *Provider) handlePart(part *geminiPart, textBlockStarted *bool, thinking
 			Type:  provider.StreamTypeDelta,
 			Delta: provider.NewToolCallDeltaData(argsStr),
 		})
-		return events
 	}
 
-	return nil
+	return events
 }
 
 // mapFinishReason 将 Gemini FinishReason 字符串映射为统一的 FinishReason。

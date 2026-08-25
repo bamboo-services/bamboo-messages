@@ -81,3 +81,56 @@ func TestHandlePart_ThinkingBlockStartType(t *testing.T) {
 		t.Errorf("BlockStart type = %q, want thinking", data.BlockType)
 	}
 }
+
+// TestHandlePart_FunctionCallWithThoughtSignature 验证当 Gemini 返回携带 ThoughtSignature 的 FunctionCall 时，
+// handlePart 不会因为 signature early return 而丢弃工具调用。
+func TestHandlePart_FunctionCallWithThoughtSignature(t *testing.T) {
+	p := NewProvider("test-key")
+
+	part := &geminiPart{
+		ThoughtSignature: "sig_abc123",
+		FunctionCall: &functionCall{
+			ID:   "call_1",
+			Name: "run_command",
+			Args: []byte(`{"command":"git status"}`),
+		},
+	}
+
+	textStarted := false
+	thinkingStarted := false
+	events := p.handlePart(part, &textStarted, &thinkingStarted)
+
+	var hasSig, hasToolCall, hasToolData bool
+	for _, e := range events {
+		switch e.Delta.Type {
+		case provider.StreamDeltaTypeSignature:
+			hasSig = true
+			sigData, ok := e.Delta.Data.(provider.SignatureData)
+			if !ok || string(sigData) != "sig_abc123" {
+				t.Errorf("unexpected signature delta: %v", e.Delta.Data)
+			}
+		case provider.StreamDeltaTypeToolCall:
+			hasToolCall = true
+			tcData, ok := e.Delta.Data.(provider.ToolCallData)
+			if !ok || tcData.Name != "run_command" {
+				t.Errorf("unexpected tool call data: %v", e.Delta.Data)
+			}
+		case provider.StreamDeltaTypeToolCallDelta:
+			hasToolData = true
+			tcDelta, ok := e.Delta.Data.(provider.ToolCallDeltaData)
+			if !ok || string(tcDelta) != `{"command":"git status"}` {
+				t.Errorf("unexpected tool call delta data: %v", e.Delta.Data)
+			}
+		}
+	}
+
+	if !hasSig {
+		t.Error("expected signature delta event, but got none")
+	}
+	if !hasToolCall {
+		t.Error("expected tool call delta event, but function call was swallowed")
+	}
+	if !hasToolData {
+		t.Error("expected tool call data event, but was not emitted")
+	}
+}
