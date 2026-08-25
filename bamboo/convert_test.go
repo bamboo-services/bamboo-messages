@@ -173,6 +173,9 @@ func TestConvertToolResultMessage(t *testing.T) {
 	if result[1].ToolCallID != "call_123" {
 		t.Errorf("ToolCallID = %q, want %q", result[1].ToolCallID, "call_123")
 	}
+	if result[1].ToolName != "get_weather" {
+		t.Errorf("ToolName = %q, want %q", result[1].ToolName, "get_weather")
+	}
 }
 
 func TestConvertUnsupportedImage(t *testing.T) {

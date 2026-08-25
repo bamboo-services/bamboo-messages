@@ -19,6 +19,17 @@ import (
 //   - RoleTool:     role="function"，parts 包含 functionResponse
 func (p *Provider) buildMessages(messages []provider.Message) []map[string]any {
 	result := make([]map[string]any, 0, len(messages))
+	toolCallMap := make(map[string]string)
+	for _, msg := range messages {
+		if msg.Role == provider.RoleAssistant {
+			for _, tc := range msg.ToolCalls {
+				if tc.ID != "" && tc.Function.Name != "" {
+					toolCallMap[tc.ID] = tc.Function.Name
+				}
+			}
+		}
+	}
+
 	for _, msg := range messages {
 		switch msg.Role {
 		case provider.RoleUser:
@@ -26,7 +37,7 @@ func (p *Provider) buildMessages(messages []provider.Message) []map[string]any {
 		case provider.RoleAssistant:
 			result = append(result, p.buildAssistantMessage(msg))
 		case provider.RoleTool:
-			result = append(result, p.buildToolMessage(msg))
+			result = append(result, p.buildToolMessage(msg, toolCallMap))
 		}
 	}
 	return result
@@ -128,10 +139,16 @@ func buildThoughtPart(msg provider.Message) map[string]any {
 // buildToolMessage 构建工具响应消息。
 //
 // Gemini 要求 FunctionResponse 放在 role="function" 的 Content 中。
-// 优先使用 ToolName（函数名），回退到 ToolCallID；两者都为空时使用 fallback。
+// 优先使用 ToolName（函数名），若为空则尝试从 toolCallMap 中根据 ToolCallID 反查函数名，
+// 回退到 ToolCallID；两者都为空时使用 fallback。
 // Response 使用 json.RawMessage 保留原始 JSON，避免在 DTO 层做类型假设。
-func (p *Provider) buildToolMessage(msg provider.Message) map[string]any {
+func (p *Provider) buildToolMessage(msg provider.Message, toolCallMap map[string]string) map[string]any {
 	name := msg.ToolName
+	if name == "" && msg.ToolCallID != "" && toolCallMap != nil {
+		if fnName, ok := toolCallMap[msg.ToolCallID]; ok && fnName != "" {
+			name = fnName
+		}
+	}
 	if name == "" {
 		name = msg.ToolCallID
 	}

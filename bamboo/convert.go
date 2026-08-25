@@ -28,6 +28,17 @@ var finishReasonMap = map[provider.FinishReason]FinishReason{
 // thinking block 的内容会被保留到 provider.Message 的 ThinkingContent/ThinkingSignature 字段。
 func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 	var result []provider.Message
+
+	// 预先建立 tool_use_id -> tool_name 映射，供 ToolResultBlock 在缺少 ToolName 时反查
+	toolNames := make(map[string]string)
+	for _, msg := range msgs {
+		for _, block := range msg.Content {
+			if tu, ok := block.(*ToolUseBlock); ok && tu.ID != "" && tu.Name != "" {
+				toolNames[tu.ID] = tu.Name
+			}
+		}
+	}
+
 	for _, msg := range msgs {
 		var textBuilder strings.Builder
 		var toolCalls []provider.ToolCall
@@ -101,11 +112,15 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 						"warning: tool_result block 缺少 tool_use_id，已忽略（废片，不向上传递）")
 					continue
 				}
+				toolName := b.ToolName
+				if toolName == "" && b.ToolUseID != "" {
+					toolName = toolNames[b.ToolUseID]
+				}
 				toolResults = append(toolResults, provider.Message{
 					Role:                  provider.RoleTool,
 					Content:               b.Content,
 					ToolCallID:            b.ToolUseID,
-					ToolName:              b.ToolName,
+					ToolName:              toolName,
 					CacheControl:          b.CacheControl,
 					CacheControlBlockType: "tool_result",
 				})
@@ -166,17 +181,17 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 					"warning: message has CacheControl but no content blocks were produced, cache_control will be lost")
 			}
 			result = append(result, provider.Message{
-				Role:                  providerRole(msg.Role),
-				Content:               content,
-				ContentBlocks:         contentBlocks,
+				Role:                      providerRole(msg.Role),
+				Content:                   content,
+				ContentBlocks:             contentBlocks,
 				ThinkingContent:           thinkingContent,
 				ThinkingSignature:         thinkingSignature,
 				ThinkingSignatureProvider: thinkingSignatureProvider,
 				RedactedThinkingData:      redactedThinkingData,
-				ReasoningID:           msg.ReasoningID,
-				ToolCalls:             toolCalls,
-				CacheControl:          msgCacheControl,
-				CacheControlBlockType: cacheControlBlockType,
+				ReasoningID:               msg.ReasoningID,
+				ToolCalls:                 toolCalls,
+				CacheControl:              msgCacheControl,
+				CacheControlBlockType:     cacheControlBlockType,
 			})
 		}
 		result = append(result, toolResults...)
