@@ -178,6 +178,61 @@ func TestSerializeResponse_ThinkingBlock_Serialized(t *testing.T) {
 	}
 }
 
+func TestSerializeResponse_SignatureOnlyThinkingAttachesToFunctionCall(t *testing.T) {
+	resp := &bamboo.Response{
+		ID:         "resp-fc",
+		Model:      "gemini-2.5-pro",
+		StopReason: bamboo.FinishReasonToolUse,
+		Content: []bamboo.ContentBlock{
+			bamboo.NewThinkingBlockWithProvider("", "sig_fc", bamboo.SignatureProviderGemini),
+			&bamboo.ToolUseBlock{
+				Type:  bamboo.ContentBlockToolUse,
+				ID:    "call-1",
+				Name:  "web_search",
+				Input: json.RawMessage(`{"query":"x"}`),
+			},
+		},
+	}
+
+	data, err := serializeResponse(resp)
+	if err != nil {
+		t.Fatalf("serializeResponse error = %v", err)
+	}
+	var out geminiResponse
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	parts := out.Candidates[0].Content.Parts
+	if len(parts) != 1 {
+		t.Fatalf("Parts len = %d, want 1 functionCall (no empty thought part)", len(parts))
+	}
+	if parts[0].Thought {
+		t.Fatalf("empty thought part would be rejected by Gemini: %#v", parts[0])
+	}
+	if parts[0].FunctionCall == nil || parts[0].FunctionCall.Name != "web_search" {
+		t.Fatalf("functionCall = %#v", parts[0].FunctionCall)
+	}
+	if parts[0].ThoughtSignature != "sig_fc" {
+		t.Errorf("thoughtSignature = %q, want sig_fc on functionCall", parts[0].ThoughtSignature)
+	}
+}
+
+func TestBuildInlineDataPart_DataURIUsesInlineData(t *testing.T) {
+	part := buildInlineDataPart(&bamboo.ContentSource{
+		Type: "url",
+		URL:  "data:image/png;base64,iVBORw0KGgo=",
+	})
+	if part == nil || part.InlineData == nil {
+		t.Fatalf("data URI should become inlineData, got %#v", part)
+	}
+	if part.FileData != nil {
+		t.Fatalf("data URI must not become fileData, got %#v", part.FileData)
+	}
+	if part.InlineData.MimeType != "image/png" || part.InlineData.Data != "iVBORw0KGgo=" {
+		t.Errorf("inlineData = %+v", part.InlineData)
+	}
+}
+
 func TestSerializeResponse_FinishReasonMapping(t *testing.T) {
 	tests := []struct {
 		reason bamboo.FinishReason

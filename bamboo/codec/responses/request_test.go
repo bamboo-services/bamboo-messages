@@ -842,8 +842,15 @@ func TestParseRequest_MultiTurnScreenshotFlow(t *testing.T) {
 	if _, ok := imgMsg.Content[0].(*bamboo.TextBlock); !ok {
 		t.Errorf("block[0] = %T, want *TextBlock", imgMsg.Content[0])
 	}
-	if _, ok := imgMsg.Content[1].(*bamboo.ImageBlock); !ok {
-		t.Errorf("block[1] = %T, want *ImageBlock", imgMsg.Content[1])
+	followUp, ok := imgMsg.Content[1].(*bamboo.ImageBlock)
+	if !ok {
+		t.Fatalf("block[1] = %T, want *ImageBlock", imgMsg.Content[1])
+	}
+	if followUp.Source == nil || followUp.Source.Type != "base64" {
+		t.Errorf("追问图片 Source = %+v, want base64", followUp.Source)
+	}
+	if followUp.Source.Data != "iVBORw0KGgo=" {
+		t.Errorf("追问图片 Data = %q", followUp.Source.Data)
 	}
 }
 
@@ -1059,10 +1066,38 @@ func TestParseRequest_InputImageURLAsObject(t *testing.T) {
 	if !ok {
 		t.Fatalf("block[1] = %T, want *ImageBlock", req.Messages[0].Content[1])
 	}
-	if imgBlock.Source == nil || imgBlock.Source.Type != "url" {
-		t.Fatalf("图片 Source = %+v, want url", imgBlock.Source)
+	if imgBlock.Source == nil || imgBlock.Source.Type != "base64" {
+		t.Fatalf("图片 Source = %+v, want base64 (data URI 必须拆成裸 base64)", imgBlock.Source)
 	}
-	if imgBlock.Source.URL != "data:image/png;base64,iVBORw0KGgo=" {
+	if imgBlock.Source.MediaType != "image/png" {
+		t.Errorf("MediaType = %q, want image/png", imgBlock.Source.MediaType)
+	}
+	if imgBlock.Source.Data != "iVBORw0KGgo=" {
+		t.Errorf("Data = %q, want raw base64 without data URI prefix", imgBlock.Source.Data)
+	}
+}
+
+func TestParseRequest_InputImageHTTPSStaysURL(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [
+			{"type": "message", "role": "user", "content": [
+				{"type": "input_image", "image_url": "https://example.com/cat.png"}
+			]}
+		]
+	}`)
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	imgBlock, ok := req.Messages[0].Content[0].(*bamboo.ImageBlock)
+	if !ok {
+		t.Fatalf("block[0] = %T, want *ImageBlock", req.Messages[0].Content[0])
+	}
+	if imgBlock.Source == nil || imgBlock.Source.Type != "url" {
+		t.Fatalf("HTTP 图 Source = %+v, want url", imgBlock.Source)
+	}
+	if imgBlock.Source.URL != "https://example.com/cat.png" {
 		t.Errorf("URL = %q", imgBlock.Source.URL)
 	}
 }

@@ -70,6 +70,8 @@ provider/gemini/
 - **工具调用不发 BlockStart** — `handlePart` 为 FunctionCall 仅发出 `ToolCallDelta` + `ToolCallDeltaData`，不再发出 `BlockStartDeltaWithID("tool_use")`。block 生命周期由 StreamConverter 统一管理，与 Anthropic/OpenAI 适配器保持一致
 - **双 Block 状态追踪** — `textBlockStarted` 和 `thinkingBlockStarted` 独立追踪，互不干扰（与 OpenAI 适配器模式一致）
 - **Thinking 非流式提取** — `complete.go` 遍历 `candidate.Content.Parts`，`part.Thought == true` 的内容收集到 `CompletionResult.Thinking`
+- **thoughtSignature 回灌** — Gemini 把签名打在 functionCall 同一 part 上。IR 会拆成空 ThinkingBlock + ToolUse；`buildAssistantMessage` 必须把签名挂回 functionCall，禁止发出只有 `thought`/`thoughtSignature`、没有 text/functionCall/inlineData 的 Part（上游 500：`Unsupported input part type: go/debugstr`）
+- **图片走 inlineData** — 粘贴图 / data URI / Type=base64 一律编成 `{inlineData:{mimeType, data}}`，data 是裸 base64。`fileData.fileUri` 只给真正的远程 URI（Files API / GCS / HTTP），不能塞 data URI
 - **ToolName/ToolCallID 分离** — `buildToolMessage` 优先使用 `msg.ToolName`（函数名），回退到 `msg.ToolCallID`；构建 `functionResponse` 时同时设置 `ID`（= ToolCallID）和 `Name`（= ToolName/ToolCallID），保留完整 ID 信息
 - **FinishReason 流式携带** — `handleCandidate` 在 `FinishReason` 非空且非 Unspecified 时，通过 `mapFinishReason` 映射并填充到 `StreamEvent.FinishReason`
 - **Gemini HTTP 后端** — 默认 BaseURL 为 `https://generativelanguage.googleapis.com`，请求路径为 `/v1beta/models/{model}:generateContent`（非流式）或 `/v1beta/models/{model}:streamGenerateContent`（流式）
@@ -92,6 +94,8 @@ provider/gemini/
 - **禁止** 在 `chat.go` 和 `complete.go` 中重复构建参数逻辑 — 必须统一调用 `params.go` 的 `buildContentConfig`
 - **禁止** 在 `handlePart` 中为 FunctionCall 发送 BlockStartDelta — block 生命周期由 StreamConverter 统一管理
 - **禁止** 在构建工具响应时丢失 `ToolCallID` — 必须同时设置 `functionResponse.ID`（= ToolCallID）和 `Name`（= ToolName/ToolCallID）
+- **禁止** 发出无 data oneof 的 thought part — `{"thought":true,"thoughtSignature":"..."}` 会被 Gemini 拒绝为 go/debugstr；签名必须挂在有正文的 thought/text 或 functionCall 上
+- **禁止** 把 data URI 写入 `fileData.fileUri` — Gemini 内联图只接受 `inlineData` 裸 base64
 
 ## 调试路径
 
@@ -109,6 +113,7 @@ provider/gemini/
 12. 模型不可用 → 检查 `models.go` 的模型常量是否与 Gemini API 当前支持的版本匹配
 13. Thinking 配置不生效 → 检查 `mapThinkingConfig` 中 effort 到 `thinkingConfig.ThinkingLevel` 的映射
 14. 请求参数不确定 → 设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
+15. `Unsupported input part type: go/debugstr` → 检查 hop2 是否发出了空 thought part，或把 data URI 写进了 `fileData.fileUri`
 
 ## 引用
 

@@ -403,10 +403,7 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 			switch p.Type {
 			case "input_image":
 				if url, ok := normalizeImageURL(p.ImageURL); ok {
-					blocks = append(blocks, bamboo.NewImageBlock(bamboo.ContentSource{
-						Type: "url",
-						URL:  url,
-					}))
+					blocks = append(blocks, imageBlockFromURL(url))
 				}
 			case "input_file":
 				if p.FileID != "" {
@@ -419,11 +416,7 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 					// 转为 ImageBlock，Chat Completions 上游才能以 image_url
 					// 识别；文档类型保持 DocumentBlock。
 					if strings.HasPrefix(p.MimeType, "image/") {
-						blocks = append(blocks, bamboo.NewImageBlock(bamboo.ContentSource{
-							Type:      "base64",
-							MediaType: p.MimeType,
-							Data:      p.FileData,
-						}))
+						blocks = append(blocks, imageBlockFromInlineFile(p.MimeType, p.FileData))
 					} else {
 						blocks = append(blocks, bamboo.NewDocumentBlock(bamboo.ContentSource{
 							Type: "base64",
@@ -448,10 +441,7 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 			switch p.Type {
 			case "input_image":
 				if url, ok := normalizeImageURL(p.ImageURL); ok {
-					blocks = append(blocks, bamboo.NewImageBlock(bamboo.ContentSource{
-						Type: "url",
-						URL:  url,
-					}))
+					blocks = append(blocks, imageBlockFromURL(url))
 				}
 			case "input_file":
 				if p.FileID != "" {
@@ -464,11 +454,7 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 					// 转为 ImageBlock，Chat Completions 上游才能以 image_url
 					// 识别；文档类型保持 DocumentBlock。
 					if strings.HasPrefix(p.MimeType, "image/") {
-						blocks = append(blocks, bamboo.NewImageBlock(bamboo.ContentSource{
-							Type:      "base64",
-							MediaType: p.MimeType,
-							Data:      p.FileData,
-						}))
+						blocks = append(blocks, imageBlockFromInlineFile(p.MimeType, p.FileData))
 					} else {
 						blocks = append(blocks, bamboo.NewDocumentBlock(bamboo.ContentSource{
 							Type: "base64",
@@ -651,6 +637,32 @@ func compactObjectText(obj map[string]json.RawMessage) string {
 	return string(data)
 }
 
+// imageBlockFromURL 将 input_image.image_url 转为 ImageBlock。
+//
+// data URI 必须拆成 base64 + mime_type：Gemini 只接受 inlineData 裸 base64，
+// 若把 data:image/...;base64,... 当作 fileData.fileUri 会 500。
+// 普通 http(s) URL 仍走 Type=url。
+func imageBlockFromURL(url string) bamboo.ContentBlock {
+	if img := imageFromDataURI(url); img != nil {
+		return img
+	}
+	return bamboo.NewImageBlock(bamboo.ContentSource{
+		Type: "url",
+		URL:  url,
+	})
+}
+
+func imageBlockFromInlineFile(mimeType, fileData string) bamboo.ContentBlock {
+	if img := imageFromDataURI(fileData); img != nil {
+		return img
+	}
+	return bamboo.NewImageBlock(bamboo.ContentSource{
+		Type:      "base64",
+		MediaType: mimeType,
+		Data:      fileData,
+	})
+}
+
 // imageFromDataURI 解析 data URI 形式的图片地址。
 //
 // 支持格式: data:image/png;base64,iVBOR... → 提取 MIME 类型与 base64 数据。
@@ -669,11 +681,15 @@ func imageFromDataURI(s string) *bamboo.ImageBlock {
 	if data == "" {
 		return nil
 	}
+	mediaType := strings.TrimPrefix(s[:idx], "data:")
+	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
+		mediaType = mediaType[:i]
+	}
 	return &bamboo.ImageBlock{
 		Type: bamboo.ContentBlockImage,
 		Source: &bamboo.ContentSource{
 			Type:      "base64",
-			MediaType: strings.TrimPrefix(s[:idx], "data:"),
+			MediaType: mediaType,
 			Data:      data,
 		},
 	}

@@ -3,6 +3,7 @@ package gemini
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
@@ -69,6 +70,9 @@ func (p *Provider) buildUserMessage(msg provider.Message) map[string]any {
 				}
 			}
 		}
+		if len(parts) == 0 {
+			parts = append(parts, map[string]any{"text": msg.Content})
+		}
 		return map[string]any{"role": "user", "parts": parts}
 	}
 	return map[string]any{
@@ -79,13 +83,32 @@ func (p *Provider) buildUserMessage(msg provider.Message) map[string]any {
 
 // buildAssistantMessage 构建助手消息。
 //
-// 当存在 ToolCalls 时，构建包含文本和 functionCall 的多 Part 消息；
-// 否则构建纯文本消息。FunctionCall 的 ID 在为空时合成。
+// Gemini Part.data 是 oneof：必须有 text / functionCall / inlineData / fileData 之一。
+// thought + thoughtSignature 只是 sidecar 字段，单独发出会被上游拒绝为
+// "Unsupported input part type: go/debugstr"。host-tool hop2 回灌时尤其常见——
+// Gemini 把 thoughtSignature 打在 functionCall 同一 part 上，IR 拆成空 ThinkingBlock
+// 后若再编成无正文的 thought part 就会 500。
 func (p *Provider) buildAssistantMessage(msg provider.Message) map[string]any {
 	parts := make([]map[string]any, 0, len(msg.ToolCalls)+2)
-	if thought := buildThoughtPart(msg); thought != nil {
+
+	nativeSig := ""
+	if provider.NativeThinkingCredential(msg.ThinkingSignature, msg.ThinkingSignatureProvider, provider.SignatureProviderGemini) {
+		nativeSig = msg.ThinkingSignature
+	}
+
+	// 无 Gemini 血统的思考不能编 thought:true。签名也只在有 data oneof 的 part 上挂。
+	if msg.ThinkingContent != "" && nativeSig != "" {
+		thought := map[string]any{
+			"text":    msg.ThinkingContent,
+			"thought": true,
+		}
+		if len(msg.ToolCalls) == 0 {
+			thought["thoughtSignature"] = nativeSig
+			nativeSig = ""
+		}
 		parts = append(parts, thought)
 	}
+
 	if len(msg.ToolCalls) > 0 {
 		if msg.Content != "" {
 			parts = append(parts, map[string]any{"text": msg.Content})
@@ -95,26 +118,31 @@ func (p *Provider) buildAssistantMessage(msg provider.Message) map[string]any {
 			if id == "" {
 				id = fmt.Sprintf("gemini_call_%s_%d", tc.Function.Name, i)
 			}
-			// Args 使用 json.RawMessage 保留原始 JSON，空参数时使用空对象
-			var args any = json.RawMessage("{}")
-			if tc.Function.Arguments != "" {
-				args = json.RawMessage(tc.Function.Arguments)
-			}
-			parts = append(parts, map[string]any{
+			part := map[string]any{
 				"functionCall": map[string]any{
 					"id":   id,
 					"name": tc.Function.Name,
-					"args": args,
+					"args": geminiFunctionArgs(tc.Function.Arguments),
 				},
-			})
+			}
+			if i == 0 && nativeSig != "" {
+				part["thoughtSignature"] = nativeSig
+				nativeSig = ""
+			}
+			parts = append(parts, part)
 		}
 		if len(parts) == 0 {
 			parts = append(parts, map[string]any{"text": msg.Content})
 		}
 		return map[string]any{"role": "model", "parts": parts}
 	}
+
 	if msg.Content != "" {
-		parts = append(parts, map[string]any{"text": msg.Content})
+		textPart := map[string]any{"text": msg.Content}
+		if nativeSig != "" {
+			textPart["thoughtSignature"] = nativeSig
+		}
+		parts = append(parts, textPart)
 	}
 	if len(parts) == 0 {
 		parts = append(parts, map[string]any{"text": msg.Content})
@@ -122,18 +150,13 @@ func (p *Provider) buildAssistantMessage(msg provider.Message) map[string]any {
 	return map[string]any{"role": "model", "parts": parts}
 }
 
-func buildThoughtPart(msg provider.Message) map[string]any {
-	if !provider.NativeThinkingCredential(msg.ThinkingSignature, msg.ThinkingSignatureProvider, provider.SignatureProviderGemini) {
-		return nil
+// geminiFunctionArgs 把工具参数规范成 Gemini FunctionCall.args（protobuf Struct = JSON object）。
+func geminiFunctionArgs(raw string) json.RawMessage {
+	s := strings.TrimSpace(raw)
+	if s == "" || s[0] != '{' || !json.Valid([]byte(s)) {
+		return json.RawMessage(`{}`)
 	}
-	part := map[string]any{
-		"thought":          true,
-		"thoughtSignature": msg.ThinkingSignature,
-	}
-	if msg.ThinkingContent != "" {
-		part["text"] = msg.ThinkingContent
-	}
-	return part
+	return json.RawMessage(s)
 }
 
 // buildToolMessage 构建工具响应消息。
@@ -177,47 +200,88 @@ func (p *Provider) buildToolMessage(msg provider.Message, toolCallMap map[string
 
 // buildImagePart 构建 image Part。
 //
-// 根据 Source.Type 选择 inline（base64 原样传递）或 file URI 方式。
-// 返回 nil 表示无法识别的图片来源，调用方应跳过。
+// Gemini generateContent 接受的图片形态：
+//   - inlineData：mimeType + 裸 base64（官方粘贴/内联图路径，data URI 前缀必须剥掉）
+//   - fileData：Files API / GCS / YouTube 等 fileUri，不是 data URI，也通常不是任意 HTTP 图
+//
+// data URI 若走 fileData.fileUri，上游会报 Unsupported input part type。
 func buildImagePart(img provider.ImageContentBlock) map[string]any {
-	if img.Source.Type == "base64" {
-		return map[string]any{
-			"inlineData": map[string]any{
-				"mimeType": img.Source.MediaType,
-				"data":     img.Source.Data,
-			},
-		}
-	}
-	if img.Source.Type == "url" {
-		return map[string]any{
-			"fileData": map[string]any{
-				"fileUri":  img.Source.URL,
-				"mimeType": img.Source.MediaType,
-			},
-		}
-	}
-	return nil
+	return buildBlobPart(img.Source.Type, img.Source.MediaType, img.Source.Data, img.Source.URL, "image/png")
 }
 
 // buildDocumentPart 构建 document Part。
 //
-// 与 buildImagePart 相同的策略，base64 → inlineData，url → fileData。
+// 与 buildImagePart 相同的策略，base64 / data URI → inlineData，普通 URL → fileData。
 func buildDocumentPart(doc provider.DocumentContentBlock) map[string]any {
-	if doc.Source.Type == "base64" {
-		return map[string]any{
-			"inlineData": map[string]any{
-				"mimeType": doc.Source.MediaType,
-				"data":     doc.Source.Data,
-			},
-		}
+	return buildBlobPart(doc.Source.Type, doc.Source.MediaType, doc.Source.Data, doc.Source.URL, "application/octet-stream")
+}
+
+func buildBlobPart(sourceType, mediaType, data, url, defaultMIME string) map[string]any {
+	if inline := geminiInlineData(sourceType, mediaType, data, url, defaultMIME); inline != nil {
+		return map[string]any{"inlineData": inline}
 	}
-	if doc.Source.Type == "url" {
-		return map[string]any{
-			"fileData": map[string]any{
-				"fileUri":  doc.Source.URL,
-				"mimeType": doc.Source.MediaType,
-			},
+	if sourceType == "url" && strings.TrimSpace(url) != "" && !strings.HasPrefix(strings.TrimSpace(url), "data:") {
+		fileData := map[string]any{"fileUri": strings.TrimSpace(url)}
+		if mime := strings.TrimSpace(mediaType); mime != "" {
+			fileData["mimeType"] = mime
 		}
+		return map[string]any{"fileData": fileData}
 	}
 	return nil
+}
+
+func geminiInlineData(sourceType, mediaType, data, url, defaultMIME string) map[string]any {
+	if mime, b64, ok := parseBase64DataURI(url); ok {
+		if strings.TrimSpace(mediaType) == "" {
+			mediaType = mime
+		}
+		return map[string]any{"mimeType": fallbackMIME(mediaType, defaultMIME), "data": b64}
+	}
+	if mime, b64, ok := parseBase64DataURI(data); ok {
+		if strings.TrimSpace(mediaType) == "" {
+			mediaType = mime
+		}
+		return map[string]any{"mimeType": fallbackMIME(mediaType, defaultMIME), "data": b64}
+	}
+	if sourceType == "base64" {
+		b64 := strings.TrimSpace(data)
+		if b64 == "" {
+			return nil
+		}
+		return map[string]any{"mimeType": fallbackMIME(mediaType, defaultMIME), "data": b64}
+	}
+	return nil
+}
+
+func fallbackMIME(mime, defaultMIME string) string {
+	if strings.TrimSpace(mime) == "" {
+		return defaultMIME
+	}
+	return mime
+}
+
+// parseBase64DataURI 解析 data:<mime>;base64,<payload>。
+// Gemini inlineData.data 只要裸 base64，不能带 data URI 头。
+func parseBase64DataURI(s string) (mime, data string, ok bool) {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "data:") {
+		return "", "", false
+	}
+	comma := strings.IndexByte(s, ',')
+	if comma < 0 {
+		return "", "", false
+	}
+	header := s[len("data:"):comma]
+	payload := s[comma+1:]
+	if payload == "" || !strings.Contains(header, "base64") {
+		return "", "", false
+	}
+	mime = header
+	if i := strings.IndexByte(mime, ';'); i >= 0 {
+		mime = mime[:i]
+	}
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	return mime, payload, true
 }

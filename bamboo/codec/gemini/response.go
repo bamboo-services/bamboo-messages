@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/bamboo"
@@ -100,11 +101,17 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 //   - ToolResultBlock → 不应出现在 assistant 响应中，记录警告并跳过
 func buildResponseParts(blocks []bamboo.ContentBlock) []geminiPartOut {
 	parts := make([]geminiPartOut, 0, len(blocks))
+	pendingSig := ""
 	for _, block := range blocks {
 		switch b := block.(type) {
 		case *bamboo.TextBlock:
 			if b.Text != "" {
-				parts = append(parts, geminiPartOut{Text: b.Text})
+				part := geminiPartOut{Text: b.Text}
+				if pendingSig != "" {
+					part.ThoughtSignature = pendingSig
+					pendingSig = ""
+				}
+				parts = append(parts, part)
 			}
 		case *bamboo.ToolUseBlock:
 			args := b.Input
@@ -120,12 +127,25 @@ func buildResponseParts(blocks []bamboo.ContentBlock) []geminiPartOut {
 			if b.ID != "" {
 				part.FunctionCall.ID = b.ID
 			}
+			if pendingSig != "" {
+				part.ThoughtSignature = pendingSig
+				pendingSig = ""
+			}
 			parts = append(parts, part)
 		case *bamboo.ThinkingBlock:
 			if !bamboo.HasNativeThinkingCredential(b.Signature, b.SignatureProvider, bamboo.SignatureProviderGemini) {
 				continue
 			}
-			parts = append(parts, geminiPartOut{Text: b.Thinking, Thought: true, ThoughtSignature: b.Signature})
+			if b.Thinking != "" {
+				parts = append(parts, geminiPartOut{Text: b.Thinking, Thought: true, ThoughtSignature: b.Signature})
+				pendingSig = ""
+				continue
+			}
+			// 无正文的签名不能单独成 Part（Gemini oneof 为空会报 go/debugstr），
+			// 挂到后续 functionCall / text part 上，对齐 Gemini 原生线格式。
+			if b.Signature != "" {
+				pendingSig = b.Signature
+			}
 		case *bamboo.ImageBlock:
 			// Gemini 原生支持 inlineData / fileData，映射为 inlineData part
 			if b.Source == nil {
@@ -160,6 +180,21 @@ func buildResponseParts(blocks []bamboo.ContentBlock) []geminiPartOut {
 //   - url 类型    → {fileData: {mimeType, fileUri}}
 //   - 其他类型    → 返回 nil
 func buildInlineDataPart(source *bamboo.ContentSource) *geminiPartOut {
+	if source == nil {
+		return nil
+	}
+	if mime, data, ok := splitBase64DataURI(source.URL); ok {
+		if source.MediaType != "" {
+			mime = source.MediaType
+		}
+		return &geminiPartOut{InlineData: &geminiInlineData{MimeType: mime, Data: data}}
+	}
+	if mime, data, ok := splitBase64DataURI(source.Data); ok {
+		if source.MediaType != "" {
+			mime = source.MediaType
+		}
+		return &geminiPartOut{InlineData: &geminiInlineData{MimeType: mime, Data: data}}
+	}
 	switch source.Type {
 	case "base64":
 		return &geminiPartOut{
@@ -169,6 +204,11 @@ func buildInlineDataPart(source *bamboo.ContentSource) *geminiPartOut {
 			},
 		}
 	case "url":
+		if strings.HasPrefix(strings.TrimSpace(source.URL), "data:") {
+			xLog.WithName("codec/gemini").SugarWarn(context.Background(),
+				"warning: data URI is not a valid Gemini fileUri, skipped")
+			return nil
+		}
 		return &geminiPartOut{
 			FileData: &geminiFileData{
 				MimeType: source.MediaType,
@@ -180,6 +220,30 @@ func buildInlineDataPart(source *bamboo.ContentSource) *geminiPartOut {
 			fmt.Sprintf("warning: unsupported ContentSource type %q for inline_data mapping, skipped", source.Type))
 		return nil
 	}
+}
+
+func splitBase64DataURI(s string) (mime, data string, ok bool) {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "data:") {
+		return "", "", false
+	}
+	comma := strings.IndexByte(s, ',')
+	if comma < 0 {
+		return "", "", false
+	}
+	header := s[len("data:"):comma]
+	payload := s[comma+1:]
+	if payload == "" || !strings.Contains(header, "base64") {
+		return "", "", false
+	}
+	mime = header
+	if i := strings.IndexByte(mime, ';'); i >= 0 {
+		mime = mime[:i]
+	}
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	return mime, payload, true
 }
 
 // mapFinishReasonToGemini 将 Bamboo FinishReason 映射为 Gemini finishReason。

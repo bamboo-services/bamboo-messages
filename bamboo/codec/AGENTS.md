@@ -90,7 +90,7 @@ bamboo/codec/
 - **Gemini model 在 URL 路径中** — Gemini 的 model 名称在 URL 路径中（如 `/v1beta/models/gemini-2.5-pro:generateContent`），不在请求 body 中，因此 `config.Model` 为空；relay 层需从 URL 路径提取
 - **Gemini IsStream 硬编码 false** — Gemini 的流式标识不在 body 中，由 URL 参数 `?alt=sse` 决定，`IsStream` 硬编码为 false；relay 层应根据实际 URL 覆盖
 - **Gemini ThinkingBlock 序列化** — `buildResponseParts` 将 `ThinkingBlock` 序列化为 `{text, thought: true, thoughtSignature}`；流式 `thinking_delta` → thought part，`signature_delta` → `thoughtSignature`
-- **Gemini inlineData / fileData 映射** — `buildInlineDataPart` 将 `ContentSource` 映射为 Gemini part：base64→`{inlineData}`、url→`{fileData}`
+- **Gemini inlineData / fileData 映射** — `buildInlineDataPart` 将 `ContentSource` 映射为 Gemini part：base64 / data URI→`{inlineData}`（裸 base64）、普通 url→`{fileData}`
 - **Gemini ToolResultBlock.ToolName** — 解析 `functionResponse` 时将 `Name` 写入 `ToolResultBlock.ToolName`
 - **Responses 流式序列器重大重写** — `responses/stream.go` 完全重写为 `responsesStreamSerializer` 状态机模型，追踪 output_item 生命周期（added/done）、自动注入 `sequence_number` 和 `response_id`。思考流式只发 `reasoning_text.*`（Bamboo Thinking 全文）；`output_item.done.summary` 才是启发式摘要槽，禁止把同一份全文再推到 `reasoning_summary_text.*`（客户端会叠两遍）。支持 `encrypted_content` 透传
 - **Responses SerializeResponse 签名变更** — `serializeResponse` 返回值从 `[]byte` 变为 `([]byte, error)`，与 Codec 接口保持一致；新增 `EncryptedContent` 和 `StopSequence` 字段支持
@@ -99,6 +99,8 @@ bamboo/codec/
 - **Responses assistant 轮次合并** — `parseInput` 将连续的 assistant 侧条目（`reasoning` / `message[assistant]` / `function_call`）合并为**单条** assistant 消息（thinking + text + tool_use blocks 同属一条），遇到 user 侧条目（`message[user]` / `function_call_output`）时结束当前轮次。Chat Completions 语义下单轮 assistant 消息同时携带 reasoning_content + content + tool_calls；若拆分为多条 assistant 消息，仅 reasoning 对应的消息携带 reasoning_content，DeepSeek 等思考模式强校验上游会以 "reasoning_content must be passed back" 拒绝请求，并行工具调用也会被错误拆分为多轮。reasoning item 的 `id` 保留为合并消息的 `ReasoningID`
 - **Responses output 内嵌截图提取** — `parseInput` 的 `function_call_output` 分支通过 `splitOutputTextAndImage` 提取 output 中内嵌的截图：object 的 `image_data` 字段（base64，默认 `image/png`）与 `image_url` 字段（data URI / URL），以及 string 形式的 data URI（`data:image/...;base64,...`）。图片提取为独立 `ImageBlock`，其余字段（尺寸等元数据）保留为工具结果文本。若整段 base64 以文本形式转发给 Chat Completions 上游，超大 base64 会被计入输入长度限制（如 GLM 的 "Range of input length should be [1, 983616]"）导致请求被拒，且截图无法被上游视觉模型识别。提取的图片缓冲为 `pendingImages`，在**所有 tool 消息之后**、下一条 user 消息之前补发为独立 user 消息——Chat Completions 语义下 tool 消息必须连续紧跟 assistant(tool_calls)，并行工具调用场景若在 tool 消息间插入 user 图片消息会破坏 tool 关联校验
 - **Responses input_image.image_url 双格式容错** — `parseInputMessage` 的 `input_image` 分支通过 `normalizeImageURL` 兼容 `image_url` 的两种序列化格式：标准 string（`https://...` 或 data URI）与 Chat Completions 风格 object（`{"url": "..."}`）。`inputContent.ImageURL` 使用 `json.RawMessage` 承接，避免非标准 object 导致整个 content 数组 `json.Unmarshal` 失败、消息被静默丢弃
+- **Responses input_image data URI → base64** — `imageBlockFromURL` 把 `data:image/...;base64,...` 拆成 `ImageBlock{Type:base64, MediaType, Data}`。不能把 data URI 留在 `Type=url`：Gemini 会把它编成 `fileData.fileUri` 并 500。普通 http(s) URL 仍走 `Type=url`
+- **Gemini 空 thought 回编** — `buildResponseParts` 对无正文的 ThinkingBlock 不单独出 Part，把 `thoughtSignature` 挂到后续 functionCall / text，避免 `{"thought":true}` 空 oneof
 
 ## 反模式
 
@@ -109,6 +111,7 @@ bamboo/codec/
 - **禁止** 在 Gemini codec 中将 safety_settings 存为原始 JSON 结构 — 必须转换为 `[]*genai.SafetySetting`，否则 relay→provider 路径类型断言失败导致静默丢弃
 - **禁止** 把 Gemini `thoughtSignature` 或 Claude `signature` 写进 Responses `encrypted_content` — 必须看 `SignatureProvider`
 - **禁止** 在 Gemini 出站编 `thought: true` 却不带合法 Gemini 签名 — 无血统或外来签名时丢掉 thought part，不要改成普通 text 前缀
+- **禁止** 把无正文的 Gemini thoughtSignature 编成独立 Part — 必须挂到 functionCall 或带 text 的 thought part
 - **禁止** 在响应序列化中遗漏 ToolResultBlock/ImageBlock/DocumentBlock 的警告日志 — 不支持的 block 类型必须记录 warning 后跳过，不得静默丢弃
 - **禁止** 在 Responses reasoning item 的 `encrypted_content` 中填证明文 — 该字段是服务端加密的不透明 token（官方契约：原样回传、不可伪造），明文会导致真实 OpenAI 上游解密失败；无上游真值时留空
 - **禁止** 把 ThinkingBlock 全文同时流式推到 `reasoning_text` 与 `reasoning_summary_text` — summary 槽只承载摘要（item.done.summary），复制全文会让客户端把思考叠两遍
