@@ -88,6 +88,37 @@ func TestParseRequest_InputArrayUserMessage(t *testing.T) {
 	}
 }
 
+func TestParseRequest_EasyInputMessagesWithoutType(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": [
+			{"role": "system", "content": "You are helpful."},
+			{"role": "user", "content": [{"type": "input_text", "text": "Hello world"}]}
+		]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if req.System != "You are helpful." {
+		t.Errorf("System = %q", req.System)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("Messages len = %d, want 1", len(req.Messages))
+	}
+	if req.Messages[0].Role != bamboo.RoleUser {
+		t.Errorf("Role = %q, want %q", req.Messages[0].Role, bamboo.RoleUser)
+	}
+	text, ok := req.Messages[0].Content[0].(*bamboo.TextBlock)
+	if !ok {
+		t.Fatalf("expected *TextBlock, got %T", req.Messages[0].Content[0])
+	}
+	if text.Text != "Hello world" {
+		t.Errorf("Text = %q, want %q", text.Text, "Hello world")
+	}
+}
+
 func TestParseRequest_InputArrayAssistantMessage(t *testing.T) {
 	body := []byte(`{
 		"model": "gpt-4o",

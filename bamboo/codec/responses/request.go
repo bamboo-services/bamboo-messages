@@ -300,7 +300,12 @@ func parseInput(raw json.RawMessage) ([]bamboo.BambooMessage, string, error) {
 	}
 
 	for _, item := range items {
-		switch item.Type {
+		// EasyInputMessage.type 在 Responses API 中可省略，role + content 足以识别消息。
+		itemType := item.Type
+		if itemType == "" && item.Role != "" && len(item.Content) > 0 {
+			itemType = "message"
+		}
+		switch itemType {
 		case "message":
 			if item.Role == "assistant" {
 				// assistant 消息条目并入当前轮次
