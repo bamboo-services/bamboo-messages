@@ -74,7 +74,6 @@ func TestAudit_MaxTokens_Int64ToInt32_NormalRange(t *testing.T) {
 	}
 }
 
-// TestAudit_SafetySettings_Passthrough 验证 safety_settings 从 ProviderExtra 提取并透传。
 func TestBuildContentConfig_ThinkingBudgetForGemini25(t *testing.T) {
 	p := NewProvider("test-key")
 	gc := p.buildContentConfig(&provider.ChatConfig{
@@ -114,7 +113,7 @@ func TestBuildContentConfig_ThinkingLevelForGemini3(t *testing.T) {
 	}
 }
 
-func TestAudit_SafetySettings_Passthrough(t *testing.T) {
+func TestAudit_SafetySettings_RequestTopLevel(t *testing.T) {
 	p := NewProvider("test-key")
 
 	settings := []map[string]string{
@@ -126,32 +125,48 @@ func TestAudit_SafetySettings_Passthrough(t *testing.T) {
 			"safety_settings": settings,
 		},
 	}
-	gc := p.buildContentConfig(config)
-
-	ss, ok := gc["safetySettings"]
-	if !ok {
-		t.Fatal("safetySettings not set in generationConfig")
+	if _, ok := p.buildContentConfig(config)["safetySettings"]; ok {
+		t.Fatal("safetySettings must not be set in generationConfig")
 	}
-	// safetySettings 通过 GetExtraAny 提取后原样存入
-	_ = ss
+	body := p.buildRequestBody(nil, "", config, false)
+	if _, ok := body["safetySettings"]; !ok {
+		t.Fatal("safetySettings not set at request top level")
+	}
 }
 
-// TestAudit_UserID_LabelsMapping 验证 UserID 映射到 labels["user_id"]。
-func TestAudit_UserID_LabelsMapping(t *testing.T) {
+func TestAudit_CachedContent_RequestTopLevel(t *testing.T) {
+	p := NewProvider("test-key")
+	config := &provider.ChatConfig{
+		Model: "gemini-2.5-pro",
+		ProviderExtra: map[string]any{
+			"cached_content": "cachedContents/abc",
+		},
+	}
+	if _, ok := p.buildContentConfig(config)["cachedContent"]; ok {
+		t.Fatal("cachedContent must not be set in generationConfig")
+	}
+	body := p.buildRequestBody(nil, "", config, false)
+	if body["cachedContent"] != "cachedContents/abc" {
+		t.Errorf("cachedContent = %v, want cachedContents/abc at request top level", body["cachedContent"])
+	}
+}
+
+// TestAudit_UserID_LabelsOmitted 验证 UserID 不再写入 generationConfig.labels。
+func TestAudit_UserID_LabelsOmitted(t *testing.T) {
 	p := NewProvider("test-key")
 
 	config := &provider.ChatConfig{
-		Model:  "gemini-2.5-pro",
-		UserID: "user-123",
+		Model:    "gemini-2.5-pro",
+		UserID:   "user-123",
+		Metadata: map[string]string{"session": "abc"},
 	}
 	gc := p.buildContentConfig(config)
-
-	labels, ok := gc["labels"].(map[string]string)
-	if !ok {
-		t.Fatal("labels not set in generationConfig")
+	if _, ok := gc["labels"]; ok {
+		t.Fatal("labels must not be set in generationConfig")
 	}
-	if labels["user_id"] != "user-123" {
-		t.Errorf("labels[user_id] = %q, want %q", labels["user_id"], "user-123")
+	body := p.buildRequestBody(nil, "", config, false)
+	if _, ok := body["labels"]; ok {
+		t.Fatal("labels must not be set at request top level either (Gemini Developer API 无此字段)")
 	}
 }
 

@@ -12,20 +12,19 @@ type generateContentRequest struct {
 	GenerationConfig  *generationConfig `json:"generationConfig,omitempty"`
 	Tools             []geminiTool      `json:"tools,omitempty"`
 	ToolConfig        *toolConfig       `json:"toolConfig,omitempty"`
+	SafetySettings    []safetySetting   `json:"safetySettings,omitempty"`
+	CachedContent     string            `json:"cachedContent,omitempty"`
 }
 
 // generationConfig 是 Gemini 的生成配置，控制采样、输出长度、思考模式与安全策略等。
 type generationConfig struct {
-	Temperature      *float64          `json:"temperature,omitempty"`
-	TopP             *float64          `json:"topP,omitempty"`
-	TopK             *float64          `json:"topK,omitempty"`
-	MaxOutputTokens  *int              `json:"maxOutputTokens,omitempty"`
-	StopSequences    []string          `json:"stopSequences,omitempty"`
-	ThinkingConfig   *thinkingConfig   `json:"thinkingConfig,omitempty"`
-	ResponseMimeType string            `json:"responseMimeType,omitempty"`
-	SafetySettings   []safetySetting   `json:"safetySettings,omitempty"`
-	Labels           map[string]string `json:"labels,omitempty"`
-	CachedContent    string            `json:"cachedContent,omitempty"`
+	Temperature      *float64        `json:"temperature,omitempty"`
+	TopP             *float64        `json:"topP,omitempty"`
+	TopK             *float64        `json:"topK,omitempty"`
+	MaxOutputTokens  *int            `json:"maxOutputTokens,omitempty"`
+	StopSequences    []string        `json:"stopSequences,omitempty"`
+	ThinkingConfig   *thinkingConfig `json:"thinkingConfig,omitempty"`
+	ResponseMimeType string          `json:"responseMimeType,omitempty"`
 }
 
 // thinkingConfig 是 Gemini 思考 / 推理配置。

@@ -7,6 +7,232 @@ import (
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
+func TestBuildMessages_ParallelToolsMergedIntoOneUserContent(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "do both"},
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "id_read", Type: "function", Function: provider.FunctionCall{Name: "read_file", Arguments: `{"path":"a"}`}},
+				{ID: "id_run", Type: "function", Function: provider.FunctionCall{Name: "run_terminal_command", Arguments: `{"cmd":"ls"}`}},
+			},
+		},
+		{Role: provider.RoleTool, ToolCallID: "id_read", Content: "file contents"},
+		{Role: provider.RoleTool, ToolCallID: "id_run", Content: "ok"},
+	})
+
+	if len(contents) != 3 {
+		t.Fatalf("contents len = %d, want 3 (user + model + merged FR)", len(contents))
+	}
+	assertRole(t, contents[1], "model")
+	assertRole(t, contents[2], "user")
+
+	fcs := functionCalls(t, contents[1])
+	if len(fcs) != 2 {
+		t.Fatalf("functionCall count = %d, want 2", len(fcs))
+	}
+	if fcs[0]["name"] != "read_file" || fcs[1]["name"] != "run_terminal_command" {
+		t.Errorf("functionCall names = %v, %v", fcs[0]["name"], fcs[1]["name"])
+	}
+
+	frs := functionResponses(t, contents[2])
+	if len(frs) != 2 {
+		t.Fatalf("functionResponse count = %d, want 2 (merged into one content)", len(frs))
+	}
+	if frs[0]["name"] != "read_file" || frs[1]["name"] != "run_terminal_command" {
+		t.Errorf("functionResponse names = %v, %v; must match functionCall order", frs[0]["name"], frs[1]["name"])
+	}
+	if frs[0]["id"] != "id_read" || frs[1]["id"] != "id_run" {
+		t.Errorf("functionResponse ids = %v, %v", frs[0]["id"], frs[1]["id"])
+	}
+}
+
+func TestBuildMessages_ReordersOutOfOrderToolResults(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "id_read", Type: "function", Function: provider.FunctionCall{Name: "read_file"}},
+				{ID: "id_run", Type: "function", Function: provider.FunctionCall{Name: "run_terminal_command"}},
+			},
+		},
+		{Role: provider.RoleTool, ToolCallID: "id_run", ToolName: "run_terminal_command", Content: "ok"},
+		{Role: provider.RoleTool, ToolCallID: "id_read", ToolName: "read_file", Content: "file"},
+	})
+
+	if len(contents) != 2 {
+		t.Fatalf("contents len = %d, want 2", len(contents))
+	}
+	frs := functionResponses(t, contents[1])
+	if len(frs) != 2 {
+		t.Fatalf("functionResponse count = %d, want 2", len(frs))
+	}
+	if frs[0]["name"] != "read_file" {
+		t.Errorf("parts[0].name = %v, want read_file (FC order, not arrival order)", frs[0]["name"])
+	}
+	if frs[1]["name"] != "run_terminal_command" {
+		t.Errorf("parts[1].name = %v, want run_terminal_command", frs[1]["name"])
+	}
+}
+
+func TestBuildMessages_MissingToolResultInjectsDummy(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "id_read", Type: "function", Function: provider.FunctionCall{Name: "read_file"}},
+				{ID: "id_run", Type: "function", Function: provider.FunctionCall{Name: "run_terminal_command"}},
+			},
+		},
+		{Role: provider.RoleTool, ToolCallID: "id_run", Content: "ok"},
+	})
+
+	frs := functionResponses(t, contents[1])
+	if len(frs) != 2 {
+		t.Fatalf("functionResponse count = %d, want 2", len(frs))
+	}
+	if frs[0]["name"] != "read_file" {
+		t.Errorf("dummy FR name = %v, want read_file", frs[0]["name"])
+	}
+	resp := unmarshalResponse(t, frs[0])
+	if resp["error"] != "tool result missing" {
+		t.Errorf("dummy FR error = %v, want tool result missing", resp["error"])
+	}
+	if _, hasOutput := resp["output"]; hasOutput {
+		t.Error("dummy FR should not include output")
+	}
+
+	real := unmarshalResponse(t, frs[1])
+	if real["output"] != "ok" {
+		t.Errorf("kept FR output = %v, want ok", real["output"])
+	}
+}
+
+func TestBuildMessages_AdjacentAssistantFunctionCallsAreClosed(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "id_read", Type: "function", Function: provider.FunctionCall{Name: "read_file"}},
+			},
+		},
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "id_run", Type: "function", Function: provider.FunctionCall{Name: "run_terminal_command"}},
+			},
+		},
+		{Role: provider.RoleTool, ToolCallID: "id_read", Content: "file"},
+		{Role: provider.RoleTool, ToolCallID: "id_run", Content: "ok"},
+	})
+
+	if len(contents) != 4 {
+		t.Fatalf("contents len = %d, want 4 (model, user, model, user)", len(contents))
+	}
+	assertRole(t, contents[0], "model")
+	assertRole(t, contents[1], "user")
+	assertRole(t, contents[2], "model")
+	assertRole(t, contents[3], "user")
+
+	fr1 := functionResponses(t, contents[1])
+	fr2 := functionResponses(t, contents[3])
+	if len(fr1) != 1 || fr1[0]["name"] != "read_file" {
+		t.Errorf("first FR = %v, want read_file", fr1)
+	}
+	if len(fr2) != 1 || fr2[0]["name"] != "run_terminal_command" {
+		t.Errorf("second FR = %v, want run_terminal_command", fr2)
+	}
+}
+
+func TestBuildMessages_EmptyToolNameUsesFunctionNameNotCallID(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "toolu_01abc", Type: "function", Function: provider.FunctionCall{Name: "read_file"}},
+			},
+		},
+		{Role: provider.RoleTool, ToolCallID: "toolu_01abc", Content: "file"},
+	})
+
+	frs := functionResponses(t, contents[1])
+	if frs[0]["name"] != "read_file" {
+		t.Errorf("functionResponse.name = %v, want read_file (not tool_use_id)", frs[0]["name"])
+	}
+	if frs[0]["id"] != "toolu_01abc" {
+		t.Errorf("functionResponse.id = %v, want toolu_01abc", frs[0]["id"])
+	}
+}
+
+func TestBuildMessages_DropsOrphanToolResult(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "hello"},
+		{Role: provider.RoleTool, ToolCallID: "orphan", ToolName: "read_file", Content: "nope"},
+	})
+
+	if len(contents) != 1 {
+		t.Fatalf("contents len = %d, want 1 (orphan FR dropped)", len(contents))
+	}
+	assertRole(t, contents[0], "user")
+	if _, ok := contents[0]["parts"].([]map[string]any)[0]["text"]; !ok {
+		t.Error("expected remaining user text content")
+	}
+}
+
+func TestBuildMessages_UserTextDoesNotSplitFunctionTurn(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "id_read", Type: "function", Function: provider.FunctionCall{Name: "read_file"}},
+			},
+		},
+		{Role: provider.RoleUser, Content: "please continue"},
+		{Role: provider.RoleTool, ToolCallID: "id_read", Content: "file"},
+	})
+
+	if len(contents) != 3 {
+		t.Fatalf("contents len = %d, want 3", len(contents))
+	}
+	assertRole(t, contents[0], "model")
+	assertRole(t, contents[1], "user")
+	assertRole(t, contents[2], "user")
+
+	frs := functionResponses(t, contents[1])
+	if len(frs) != 1 || frs[0]["name"] != "read_file" {
+		t.Errorf("FR must immediately follow model FC, got %v", contents[1])
+	}
+	textParts := contents[2]["parts"].([]map[string]any)
+	if textParts[0]["text"] != "please continue" {
+		t.Errorf("trailing user text = %v", textParts[0]["text"])
+	}
+}
+
+func TestBuildMessages_ErrorToolResultKeepsErrorFlag(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "id_run", Type: "function", Function: provider.FunctionCall{Name: "run_terminal_command"}},
+			},
+		},
+		{Role: provider.RoleTool, ToolCallID: "id_run", Content: "boom", IsError: true},
+	})
+
+	resp := unmarshalResponse(t, functionResponses(t, contents[1])[0])
+	if resp["output"] != "boom" || resp["error"] != "boom" {
+		t.Errorf("error FR = %v, want output+error", resp)
+	}
+}
+
 func TestBuildThoughtPart_RequiresGeminiCredential(t *testing.T) {
 	p := NewProvider("test-api-key")
 
@@ -56,8 +282,7 @@ func TestBuildThoughtPart_RequiresGeminiCredential(t *testing.T) {
 }
 
 // TestBuildMessages_ToolResponseNameFallbackFromToolCallID 验证当 RoleTool 的 ToolName 为空时，
-// buildMessages 能自动根据 ToolCallID 反查前序 Assistant 的 ToolCall 函数名，
-// 避免出现 functionResponse.name="call_xxx" 与 functionCall.name 不匹配导致 Gemini 报错。
+// 仍从对应 ToolCall.Function.Name 取 functionResponse.name，且 FR 紧跟 model 合成一条 user content。
 func TestBuildMessages_ToolResponseNameFallbackFromToolCallID(t *testing.T) {
 	p := NewProvider("test-api-key")
 
@@ -88,14 +313,13 @@ func TestBuildMessages_ToolResponseNameFallbackFromToolCallID(t *testing.T) {
 		t.Fatalf("expected 2 messages, got %d", len(result))
 	}
 
-	// 检查 function 消息
 	funcMsg := result[1]
-	if funcMsg["role"] != "function" {
-		t.Errorf("expected role=function, got %v", funcMsg["role"])
+	if funcMsg["role"] != "user" {
+		t.Errorf("expected role=user, got %v", funcMsg["role"])
 	}
 	parts, ok := funcMsg["parts"].([]map[string]any)
 	if !ok || len(parts) == 0 {
-		t.Fatalf("expected parts in function message, got %#v", funcMsg)
+		t.Fatalf("expected parts in function response content, got %#v", funcMsg)
 	}
 
 	funcResp, ok := parts[0]["functionResponse"].(map[string]any)
@@ -103,7 +327,6 @@ func TestBuildMessages_ToolResponseNameFallbackFromToolCallID(t *testing.T) {
 		t.Fatalf("expected functionResponse in part, got %#v", parts[0])
 	}
 
-	// 验证 name 必须是函数名 "run_terminal_command"，绝不能是 "call_226596"
 	if funcResp["name"] != "run_terminal_command" {
 		t.Errorf("functionResponse.name = %q, want %q", funcResp["name"], "run_terminal_command")
 	}
@@ -276,4 +499,51 @@ func TestGeminiFunctionArgs_NonObjectFallsBack(t *testing.T) {
 	if string(geminiFunctionArgs(`{"q":1}`)) != `{"q":1}` {
 		t.Errorf("object args = %s", geminiFunctionArgs(`{"q":1}`))
 	}
+}
+
+func assertRole(t *testing.T, content map[string]any, want string) {
+	t.Helper()
+	if content["role"] != want {
+		t.Fatalf("role = %v, want %s", content["role"], want)
+	}
+}
+
+func functionCalls(t *testing.T, content map[string]any) []map[string]any {
+	t.Helper()
+	parts, _ := content["parts"].([]map[string]any)
+	out := make([]map[string]any, 0)
+	for _, part := range parts {
+		if fc, ok := part["functionCall"].(map[string]any); ok {
+			out = append(out, fc)
+		}
+	}
+	return out
+}
+
+func functionResponses(t *testing.T, content map[string]any) []map[string]any {
+	t.Helper()
+	parts, _ := content["parts"].([]map[string]any)
+	out := make([]map[string]any, 0)
+	for _, part := range parts {
+		if fr, ok := part["functionResponse"].(map[string]any); ok {
+			out = append(out, fr)
+		}
+	}
+	if len(out) == 0 {
+		t.Fatalf("expected functionResponse parts, got %v", content)
+	}
+	return out
+}
+
+func unmarshalResponse(t *testing.T, fr map[string]any) map[string]any {
+	t.Helper()
+	raw, ok := fr["response"].(json.RawMessage)
+	if !ok {
+		t.Fatalf("response type = %T, want json.RawMessage", fr["response"])
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	return out
 }

@@ -2826,6 +2826,32 @@ func TestSanitizeToolMessages_DuplicateResponseDropped(t *testing.T) {
 	}
 }
 
+// TestSanitizeToolMessages_BackfillsToolName 验证配对成功时从 ToolCall 回填空的 ToolName。
+func TestSanitizeToolMessages_BackfillsToolName(t *testing.T) {
+	msgs := []provider.Message{
+		toolCallMsg("tc1", "read_file", ""),
+		toolResultMsg("tc1", "file contents"),
+	}
+	result := sanitizeToolMessages(msgs)
+	if len(result) != 2 {
+		t.Fatalf("期望 2 条消息, 实际 %d", len(result))
+	}
+	if result[1].ToolName != "read_file" {
+		t.Errorf("ToolName = %q, 期望从 ToolCall.Function.Name 回填 read_file", result[1].ToolName)
+	}
+}
+
+func TestSanitizeToolMessages_PreservesExplicitToolName(t *testing.T) {
+	msgs := []provider.Message{
+		toolCallMsg("tc1", "read_file", ""),
+		{Role: provider.RoleTool, ToolCallID: "tc1", ToolName: "custom_name", Content: "ok"},
+	}
+	result := sanitizeToolMessages(msgs)
+	if result[1].ToolName != "custom_name" {
+		t.Errorf("ToolName = %q, 期望保留显式值 custom_name", result[1].ToolName)
+	}
+}
+
 // TestSanitizeToolMessages_OutOfOrderBothDropped 验证 tool 响应出现在其声明 assistant 之前时两侧都丢弃。
 func TestSanitizeToolMessages_OutOfOrderBothDropped(t *testing.T) {
 	msgs := []provider.Message{

@@ -1,12 +1,20 @@
 package gemini
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
+
+// toolResultRecord 缓存一条 RoleTool 的函数响应，供按 tool_call_id 回填。
+type toolResultRecord struct {
+	content string
+	isError bool
+}
 
 // ==============================
 // 内部方法
@@ -14,34 +22,52 @@ import (
 
 // buildMessages 将内部消息格式转换为 Gemini REST API 消息格式。
 //
-// 根据 Role 构建对应的 map[string]any（对应 Gemini Content 结构）：
+// Gemini 对 function call 历史是强校验：一轮 model 的 N 个 functionCall，
+// 必须紧跟一条 role="user" content，内含 N 个同序同名的 functionResponse。
+// 并行工具结果不能拆成多条 content，也不能让两条带 functionCall 的 model
+// content 相邻（流式中断切分 assistant 时会出现）。
+//
+// 组装策略：
 //   - RoleUser:     role="user"，parts 包含文本或图片/文档
-//   - RoleAssistant: role="model"，parts 包含文本和/或 functionCall
-//   - RoleTool:     role="function"，parts 包含 functionResponse
+//   - RoleAssistant: role="model"；若含 ToolCalls，立刻再追加一条闭合的
+//     functionResponse user content（缺失结果时注入 dummy error）
+//   - RoleTool:     不单独成条，按 tool_call_id 收集后挂到声明它的 assistant 后面
 func (p *Provider) buildMessages(messages []provider.Message) []map[string]any {
+	results := collectToolResults(messages)
 	result := make([]map[string]any, 0, len(messages))
-	toolCallMap := make(map[string]string)
-	for _, msg := range messages {
-		if msg.Role == provider.RoleAssistant {
-			for _, tc := range msg.ToolCalls {
-				if tc.ID != "" && tc.Function.Name != "" {
-					toolCallMap[tc.ID] = tc.Function.Name
-				}
-			}
-		}
-	}
-
 	for _, msg := range messages {
 		switch msg.Role {
 		case provider.RoleUser:
 			result = append(result, p.buildUserMessage(msg))
 		case provider.RoleAssistant:
 			result = append(result, p.buildAssistantMessage(msg))
+			if len(msg.ToolCalls) > 0 {
+				result = append(result, buildFunctionResponseContent(msg.ToolCalls, results))
+			}
 		case provider.RoleTool:
-			result = append(result, p.buildToolMessage(msg, toolCallMap))
+			// 已由 collectToolResults 收集，挂到对应 assistant 之后。
 		}
 	}
 	return result
+}
+
+// collectToolResults 按 tool_call_id 收集 RoleTool 响应，同一 id 仅保留第一条。
+func collectToolResults(messages []provider.Message) map[string]toolResultRecord {
+	results := make(map[string]toolResultRecord)
+	for _, msg := range messages {
+		if msg.Role != provider.RoleTool {
+			continue
+		}
+		id := msg.ToolCallID
+		if id == "" {
+			continue
+		}
+		if _, exists := results[id]; exists {
+			continue
+		}
+		results[id] = toolResultRecord{content: msg.Content, isError: msg.IsError}
+	}
+	return results
 }
 
 // buildUserMessage 构建用户消息。
@@ -114,13 +140,9 @@ func (p *Provider) buildAssistantMessage(msg provider.Message) map[string]any {
 			parts = append(parts, map[string]any{"text": msg.Content})
 		}
 		for i, tc := range msg.ToolCalls {
-			id := tc.ID
-			if id == "" {
-				id = fmt.Sprintf("gemini_call_%s_%d", tc.Function.Name, i)
-			}
 			part := map[string]any{
 				"functionCall": map[string]any{
-					"id":   id,
+					"id":   functionCallID(tc, i),
 					"name": tc.Function.Name,
 					"args": geminiFunctionArgs(tc.Function.Arguments),
 				},
@@ -159,43 +181,55 @@ func geminiFunctionArgs(raw string) json.RawMessage {
 	return json.RawMessage(s)
 }
 
-// buildToolMessage 构建工具响应消息。
+// buildFunctionResponseContent 将一轮 ToolCalls 闭合为单条 user content。
 //
-// Gemini 要求 FunctionResponse 放在 role="function" 的 Content 中。
-// 优先使用 ToolName（函数名），若为空则尝试从 toolCallMap 中根据 ToolCallID 反查函数名，
-// 回退到 ToolCallID；两者都为空时使用 fallback。
-// Response 使用 json.RawMessage 保留原始 JSON，避免在 DTO 层做类型假设。
-func (p *Provider) buildToolMessage(msg provider.Message, toolCallMap map[string]string) map[string]any {
-	name := msg.ToolName
-	if name == "" && msg.ToolCallID != "" && toolCallMap != nil {
-		if fnName, ok := toolCallMap[msg.ToolCallID]; ok && fnName != "" {
-			name = fnName
-		}
+// parts 顺序与 functionCall 声明顺序一致；name 始终取函数名。
+// 缺失的工具结果注入 dummy error，避免 Gemini 因历史不完整拒绝请求。
+func buildFunctionResponseContent(calls []provider.ToolCall, results map[string]toolResultRecord) map[string]any {
+	parts := make([]map[string]any, 0, len(calls))
+	for i, tc := range calls {
+		parts = append(parts, buildFunctionResponsePart(tc, i, results))
 	}
-	if name == "" {
-		name = msg.ToolCallID
+	return map[string]any{
+		"role":  "user",
+		"parts": parts,
 	}
+}
+
+func buildFunctionResponsePart(tc provider.ToolCall, index int, results map[string]toolResultRecord) map[string]any {
+	name := tc.Function.Name
 	if name == "" {
 		name = "tool_response"
 	}
+	id := functionCallID(tc, index)
 
-	// 构建响应体：{output: content} 或 {output: content, error: content}
-	responseMap := map[string]any{"output": msg.Content}
-	if msg.IsError {
-		responseMap["error"] = msg.Content
+	responseMap := map[string]any{}
+	if rec, ok := results[tc.ID]; ok && tc.ID != "" {
+		responseMap["output"] = rec.content
+		if rec.isError {
+			responseMap["error"] = rec.content
+		}
+	} else {
+		xLog.WithName("provider/gemini").SugarWarn(context.Background(),
+			fmt.Sprintf("tool_call(id=%q name=%q) 缺少 tool_result，已注入 dummy functionResponse", tc.ID, name))
+		responseMap["error"] = "tool result missing"
 	}
 	responseBytes, _ := json.Marshal(responseMap)
 
 	return map[string]any{
-		"role": "function",
-		"parts": []map[string]any{{
-			"functionResponse": map[string]any{
-				"id":       msg.ToolCallID,
-				"name":     name,
-				"response": json.RawMessage(responseBytes),
-			},
-		}},
+		"functionResponse": map[string]any{
+			"id":       id,
+			"name":     name,
+			"response": json.RawMessage(responseBytes),
+		},
 	}
+}
+
+func functionCallID(tc provider.ToolCall, index int) string {
+	if tc.ID != "" {
+		return tc.ID
+	}
+	return fmt.Sprintf("gemini_call_%s_%d", tc.Function.Name, index)
 }
 
 // buildImagePart 构建 image Part。

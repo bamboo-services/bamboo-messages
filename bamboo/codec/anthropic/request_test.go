@@ -176,6 +176,31 @@ func TestParseRequest_ToolResultContentBlock(t *testing.T) {
 	}
 }
 
+func TestParseRequest_ToolResultWithName(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"max_tokens": 1024,
+		"messages": [{
+			"role": "user",
+			"content": [
+				{"type": "tool_result", "tool_use_id": "call_abc", "name": "get_weather", "content": "Sunny, 72F"}
+			]
+		}]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	trBlock, ok := req.Messages[0].Content[0].(*bamboo.ToolResultBlock)
+	if !ok {
+		t.Fatalf("expected *ToolResultBlock, got %T", req.Messages[0].Content[0])
+	}
+	if trBlock.ToolName != "get_weather" {
+		t.Errorf("ToolName = %q, want get_weather", trBlock.ToolName)
+	}
+}
+
 func TestParseRequest_ToolResultWithError(t *testing.T) {
 	body := []byte(`{
 		"model": "claude-sonnet-4-20250514",

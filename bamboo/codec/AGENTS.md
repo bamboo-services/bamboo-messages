@@ -92,6 +92,7 @@ bamboo/codec/
 - **Gemini ThinkingBlock 序列化** — `buildResponseParts` 将 `ThinkingBlock` 序列化为 `{text, thought: true, thoughtSignature}`；流式 `thinking_delta` → thought part，`signature_delta` → `thoughtSignature`
 - **Gemini inlineData / fileData 映射** — `buildInlineDataPart` 将 `ContentSource` 映射为 Gemini part：base64 / data URI→`{inlineData}`（裸 base64）、普通 url→`{fileData}`
 - **Gemini ToolResultBlock.ToolName** — 解析 `functionResponse` 时将 `Name` 写入 `ToolResultBlock.ToolName`
+- **Anthropic tool_result.name** — 解析 `tool_result` 时将 `name` 写入 `ToolResultBlock.ToolName`（客户端可选字段；缺失时由 `sanitizeToolMessages` 从对应 tool_use 回填）
 - **Responses 流式序列器重大重写** — `responses/stream.go` 完全重写为 `responsesStreamSerializer` 状态机模型，追踪 output_item 生命周期（added/done）、自动注入 `sequence_number` 和 `response_id`。思考流式只发 `reasoning_text.*`（Bamboo Thinking 全文）；`output_item.done.summary` 才是启发式摘要槽，禁止把同一份全文再推到 `reasoning_summary_text.*`（客户端会叠两遍）。支持 `encrypted_content` 透传
 - **Responses SerializeResponse 签名变更** — `serializeResponse` 返回值从 `[]byte` 变为 `([]byte, error)`，与 Codec 接口保持一致；新增 `EncryptedContent` 和 `StopSequence` 字段支持
 - **Responses reasoning item 三槽位语义** — 序列化 ThinkingBlock 时按官方 schema 分工：`content: [{type: "reasoning_text"}]` 承载原始思考全文；`summary: [{type: "summary_text"}]` 承载 `summarizeThinking`（`responses/summary.go`）启发式提取的摘要（首行/首句 + Markdown 剥离 + 超长截断），提取不出则为空数组；`encrypted_content` 仅透传上游签名/加密值（ThinkingBlock.Signature），绝不伪造明文。流式 done 事件（`reasoning_text.done` / `reasoning_summary_text.done`）保持原始全文作为实时展示轨道，最终 item 才做槽位分流

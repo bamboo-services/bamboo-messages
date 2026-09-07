@@ -29,7 +29,7 @@ func (p *Provider) buildRequestBody(messages []provider.Message, systemPrompt st
 		}
 	}
 
-	// 生成配置
+	// 生成配置（仅 GenerationConfig 白名单字段）
 	if gc := p.buildContentConfig(config); len(gc) > 0 {
 		body["generationConfig"] = gc
 	}
@@ -44,6 +44,15 @@ func (p *Provider) buildRequestBody(messages []provider.Message, systemPrompt st
 		body["toolConfig"] = tc
 	}
 
+	// safetySettings / cachedContent 是 GenerateContentRequest 顶层字段，
+	// 不能放进 generationConfig，否则 protobuf 校验会报 Unknown name。
+	if settings, ok := provider.GetExtraAny(config.ProviderExtra, "safety_settings"); ok {
+		body["safetySettings"] = settings
+	}
+	if cc, ok := provider.GetExtraString(config.ProviderExtra, "cached_content"); ok && cc != "" {
+		body["cachedContent"] = cc
+	}
+
 	return body
 }
 
@@ -56,9 +65,10 @@ func (p *Provider) buildRequestBody(messages []provider.Message, systemPrompt st
 //   - Stop → stopSequences
 //   - ThinkingConfig.Effort → thinkingConfig {includeThoughts, thinkingLevel}
 //   - ResponseFormat → responseMimeType
-//   - SafetySettings → 从 ProviderExtra 提取
-//   - Labels → UserID 映射到 labels["user_id"] + Metadata 合并
-//   - CachedContent → 从 ProviderExtra 提取（Gemini 外部缓存引用）
+//
+// safetySettings / cachedContent 属于请求顶层字段，由 buildRequestBody 提取。
+// UserID / Metadata 不映射：Gemini Developer API 的 GenerationConfig 无 labels，
+// 写入会触发 protobuf "Unknown name labels at request.generation_config"。
 func (p *Provider) buildContentConfig(config *provider.ChatConfig) map[string]any {
 	if config == nil {
 		config = &provider.ChatConfig{}
@@ -104,36 +114,20 @@ func (p *Provider) buildContentConfig(config *provider.ChatConfig) map[string]an
 		gc["responseMimeType"] = "application/json"
 	}
 
-	// SafetySettings — 从 ProviderExtra 提取（Gemini 特有参数）
-	if settings, ok := provider.GetExtraAny(config.ProviderExtra, "safety_settings"); ok {
-		gc["safetySettings"] = settings
+	// UserID / Metadata — Gemini Developer API 无对应字段，忽略以免写入非法 labels
+	if config.UserID != "" && provider.DebugEnabled {
+		xLog.WithName("provider/gemini").SugarWarn(context.Background(),
+			fmt.Sprintf("UserID=%q 已被忽略（Gemini GenerationConfig 无 labels 字段）", config.UserID))
 	}
-
-	// Labels — UserID 映射到 labels["user_id"]，合并 Metadata
-	labels := map[string]string{}
-	if config.UserID != "" {
-		labels["user_id"] = config.UserID
-		if provider.DebugEnabled {
-			xLog.WithName("provider/gemini").SugarWarn(context.Background(),
-				fmt.Sprintf("UserID=%q 已映射到 Labels[user_id]（Gemini 无原生 UserID 支持）", config.UserID))
-		}
-	}
-	for k, v := range config.Metadata {
-		labels[k] = v
-	}
-	if len(labels) > 0 {
-		gc["labels"] = labels
+	if len(config.Metadata) > 0 && provider.DebugEnabled {
+		xLog.WithName("provider/gemini").SugarWarn(context.Background(),
+			"Metadata 已被忽略（Gemini GenerationConfig 无 labels 字段）")
 	}
 
 	// ParallelToolCalls — Gemini 不支持此参数，仅记录 debug 日志
 	if config.ParallelToolCalls && provider.DebugEnabled {
 		xLog.WithName("provider/gemini").SugarWarn(context.Background(),
 			"ParallelToolCalls=true 不被 Gemini 协议支持，已忽略")
-	}
-
-	// CachedContent — Gemini 外部缓存资源引用（从 ProviderExtra 提取）
-	if cc, ok := provider.GetExtraString(config.ProviderExtra, "cached_content"); ok && cc != "" {
-		gc["cachedContent"] = cc
 	}
 
 	return gc

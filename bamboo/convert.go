@@ -213,6 +213,8 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 //   - tool 响应出现在其声明 assistant 之前 → 丢弃（乱序，无法还原）
 //   - 同一 tool_call_id 的重复响应 → 仅保留第一个
 //   - assistant 消息过滤后无任何内容（无文本/思考/内容块）→ 整体跳过
+//   - 配对成功的 tool 响应若 ToolName 为空，从对应 ToolCall.Function.Name 回填
+//     （Anthropic tool_result 通常不带 name，Gemini FunctionResponse 需要函数名）
 //
 // 丢弃后各消息保持原始相对顺序。仅处理含 tool 相关的消息，纯文本消息原样透传。
 func sanitizeToolMessages(msgs []provider.Message) []provider.Message {
@@ -300,6 +302,14 @@ func sanitizeToolMessages(msgs []provider.Message) []provider.Message {
 			// 注意：必须用 ok 模式判断存在性，避免 key 缺失时
 			// map 零值 0 与位置 0 的 tool 消息误匹配。
 			if pos, ok := respondedPos[m.ToolCallID]; ok && pos == i {
+				if m.ToolName == "" {
+					if d := declared[m.ToolCallID]; d != nil {
+						calls := msgs[d.msgIdx].ToolCalls
+						if d.callIdx >= 0 && d.callIdx < len(calls) {
+							m.ToolName = calls[d.callIdx].Function.Name
+						}
+					}
+				}
 				result = append(result, m)
 			}
 		default:

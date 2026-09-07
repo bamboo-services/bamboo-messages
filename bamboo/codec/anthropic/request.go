@@ -340,6 +340,7 @@ func convertContentBlock(rb rawContentBlock) bamboo.ContentBlock {
 		return &bamboo.ToolResultBlock{
 			Type:         bamboo.ContentBlockToolResult,
 			ToolUseID:    rb.ToolUseID,
+			ToolName:     rb.Name,
 			Content:      content,
 			IsError:      rb.IsError,
 			CacheControl: cc,

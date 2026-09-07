@@ -9,19 +9,20 @@ Google Gemini 协议适配器，将 Google Gemini API 转换为统一的 `provid
 ```text
 provider/gemini/
 ├── provider.go      # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithInterceptor) + 类型别名 + 拦截器 HTTPClient 注入
-├── params.go        # buildContentConfig — 共享参数构建（Chat/Complete 统一入口）+ mapThinkingConfig/mapToolChoice + MaxTokens 溢出保护 + UserID→Labels
+├── params.go        # buildContentConfig — 共享参数构建（Chat/Complete 统一入口）+ mapThinkingConfig/mapToolChoice + MaxTokens 溢出保护；safetySettings/cachedContent 在请求顶层
 ├── chat.go          # 流式对话实现 (Chat/ChatWithSystem) — GenerateContentStream
 ├── complete.go      # 非流式对话实现 (Complete/CompleteWithSystem) — 含 thinking parts 提取
 ├── stream.go        # 流式响应 → StreamEvent 转换 + handleStreamEvent + FinishReason 携带
 ├── stream_test.go   # 流式事件单元测试
-├── message.go       # 消息格式双向转换 (buildMessages) — ToolName/ToolCallID 分离映射
+├── message.go       # 消息格式转换 (buildMessages) — function call 历史整形（同轮 FR 合并 / dummy 闭合）
 ├── models.go        # 模型常量 (gemini-2.5 系列等)
 ├── option.go        # GeminiOption + WithAPIKey/WithBaseURL/WithHeader
 ├── tools.go         # 工具定义转换 (buildTools)
 ├── types.go         # Gemini 协议原生请求/响应 DTO
 ├── mock_test.go     # httptest mock server 测试辅助工具
+├── message_test.go  # function call 历史整形单元测试
 ├── audit_test.go    # 工具调用 BlockStart + Thinking BlockStart 审计测试
-└── params_audit_test.go  # MaxTokens 溢出 + SafetySettings + UserID + ParallelToolCalls + ResponseFormat 审计测试
+└── params_audit_test.go  # MaxTokens 溢出 + SafetySettings 顶层 + UserID 忽略 + ParallelToolCalls + ResponseFormat 审计测试
 ```
 
 ## 导航指南
@@ -57,7 +58,7 @@ provider/gemini/
 | `handlePart` | 方法 | stream.go | 处理单个 Part（text/thinking/function_call）— 工具调用不再发 BlockStart |
 | `handleCandidate` | 方法 | stream.go | 处理 Candidate + FinishReason |
 | `mapFinishReason` | 函数 | stream.go | Gemini `finishReason` 字符串 → provider.FinishReason 映射 |
-| `buildToolMessage` | 方法 | message.go | 构建工具响应 — 优先使用 ToolName，回退到 ToolCallID |
+| `buildFunctionResponseContent` | 函数 | message.go | 将一轮 ToolCalls 闭合为单条 user content（同序同名 functionResponse；缺失则 dummy） |
 
 ## 约定
 
@@ -65,14 +66,16 @@ provider/gemini/
 - **统一 HTTP 传输** — 通过 `provider.NewHTTPClient` 创建 `*provider.HTTPClient`，认证使用 `x-goog-api-key` 模式；流式响应通过 `provider.NewSSEScanner` 解析 SSE 帧
 - **本地 DTO 模型** — 请求/响应结构通过 `types.go` 本地定义（`generateContentRequest`、`generateContentResponse`、`geminiContent` 等），不依赖外部 SDK
 - **MaxTokens 溢出保护** — `config.MaxTokens`（int64）转 `generationConfig.MaxOutputTokens`（int）时，超过 `math.MaxInt32` 的值被截断为 `math.MaxInt32`，避免静默溢出导致负数或截断值
-- **UserID → Labels 映射** — Gemini 无原生 UserID 字段，`config.UserID` 存入请求 DTO 的 `generationConfig.Labels["user_id"]`，并在 debug 模式下输出日志
+- **UserID / Metadata 忽略** — Gemini Developer API 的 `GenerationConfig` 无 `labels` 字段，写入会触发 protobuf `Unknown name "labels"`。`UserID` / `Metadata` 静默忽略，debug 模式下输出日志
+- **generationConfig 白名单** — `safetySettings` / `cachedContent` 是请求顶层字段，由 `buildRequestBody` 提取；禁止写入 `generationConfig`
+- **function call 历史整形** — 一轮 model 的 N 个 `functionCall` 必须紧跟一条 `role=user` content，内含 N 个同序同名 `functionResponse`。并行 `RoleTool` 合并为一条；相邻 assistant FC 各自闭合；缺失结果注入 dummy `{"error":"tool result missing"}`。`functionResponse.name` 取自 `ToolCall.Function.Name`，禁止用 `ToolCallID` 当 name
 - **BlockStart 合成** — Gemini 没有原生 `content_block_start` 事件，通过 `textBlockStarted` / `thinkingBlockStarted` 两个独立布尔标志在首个文本/推理增量前合成
 - **工具调用不发 BlockStart** — `handlePart` 为 FunctionCall 仅发出 `ToolCallDelta` + `ToolCallDeltaData`，不再发出 `BlockStartDeltaWithID("tool_use")`。block 生命周期由 StreamConverter 统一管理，与 Anthropic/OpenAI 适配器保持一致
 - **双 Block 状态追踪** — `textBlockStarted` 和 `thinkingBlockStarted` 独立追踪，互不干扰（与 OpenAI 适配器模式一致）
 - **Thinking 非流式提取** — `complete.go` 遍历 `candidate.Content.Parts`，`part.Thought == true` 的内容收集到 `CompletionResult.Thinking`
 - **thoughtSignature 回灌** — Gemini 把签名打在 functionCall 同一 part 上。IR 会拆成空 ThinkingBlock + ToolUse；`buildAssistantMessage` 必须把签名挂回 functionCall，禁止发出只有 `thought`/`thoughtSignature`、没有 text/functionCall/inlineData 的 Part（上游 500：`Unsupported input part type: go/debugstr`）
 - **图片走 inlineData** — 粘贴图 / data URI / Type=base64 一律编成 `{inlineData:{mimeType, data}}`，data 是裸 base64。`fileData.fileUri` 只给真正的远程 URI（Files API / GCS / HTTP），不能塞 data URI
-- **ToolName/ToolCallID 分离** — `buildToolMessage` 优先使用 `msg.ToolName`（函数名），回退到 `msg.ToolCallID`；构建 `functionResponse` 时同时设置 `ID`（= ToolCallID）和 `Name`（= ToolName/ToolCallID），保留完整 ID 信息
+- **ToolName/ToolCallID 分离** — `functionResponse.ID` = `ToolCall.ID`，`functionResponse.name` = `ToolCall.Function.Name`；二者不得混用
 - **FinishReason 流式携带** — `handleCandidate` 在 `FinishReason` 非空且非 Unspecified 时，通过 `mapFinishReason` 映射并填充到 `StreamEvent.FinishReason`
 - **Gemini HTTP 后端** — 默认 BaseURL 为 `https://generativelanguage.googleapis.com`，请求路径为 `/v1beta/models/{model}:generateContent`（非流式）或 `/v1beta/models/{model}:streamGenerateContent`（流式）
 - **Options 模式** — `WithAPIKey` / `WithBaseURL` / `WithHeader`，与其他适配器保持一致的 Functional Options 接口
@@ -81,7 +84,7 @@ provider/gemini/
 - **ThinkingLevel 映射** — `Effort: low/medium/high` → 请求 DTO `thinkingConfig.IncludeThoughts: true` + `ThinkingLevel"low"/"medium"/"high"`；`none` → 不设置 thinkingConfig
 - **ToolChoice 映射** — `auto→AUTO`、`none→NONE`、`required/forced/any→ANY`
 - **ResponseFormat 映射** — `"json_object"` → 请求 DTO `generationConfig.ResponseMIMEType: "application/json"`
-- **TopK / SafetySettings / CachedContent** — 通过 ProviderExtra 提取（Gemini 特有参数），合并到请求 DTO
+- **TopK / SafetySettings / CachedContent** — 通过 ProviderExtra 提取（Gemini 特有参数）；TopK 进入 `generationConfig`，SafetySettings / CachedContent 进入请求顶层
 - **ParallelToolCalls 不支持** — Gemini 不支持此参数，当设置时仅输出 debug 日志，不报错
 - **Debug 日志** — 通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client
@@ -93,7 +96,10 @@ provider/gemini/
 - **禁止** 裸类型断言访问 `ProviderExtra` — 必须使用 `provider.GetExtra*` helper
 - **禁止** 在 `chat.go` 和 `complete.go` 中重复构建参数逻辑 — 必须统一调用 `params.go` 的 `buildContentConfig`
 - **禁止** 在 `handlePart` 中为 FunctionCall 发送 BlockStartDelta — block 生命周期由 StreamConverter 统一管理
-- **禁止** 在构建工具响应时丢失 `ToolCallID` — 必须同时设置 `functionResponse.ID`（= ToolCallID）和 `Name`（= ToolName/ToolCallID）
+- **禁止** 在构建工具响应时丢失 `ToolCallID` — 必须同时设置 `functionResponse.ID`（= ToolCallID）和 `name`（= 函数名）
+- **禁止** 将 `functionResponse.name` 回退为 `ToolCallID` — Gemini 按函数名校验历史配对
+- **禁止** 把并行 functionResponse 拆成多条 content — 必须与对应 functionCall 同轮同序合并
+- **禁止** 将 `labels` / `safetySettings` / `cachedContent` 写入 `generationConfig`
 - **禁止** 发出无 data oneof 的 thought part — `{"thought":true,"thoughtSignature":"..."}` 会被 Gemini 拒绝为 go/debugstr；签名必须挂在有正文的 thought/text 或 functionCall 上
 - **禁止** 把 data URI 写入 `fileData.fileUri` — Gemini 内联图只接受 `inlineData` 裸 base64
 
@@ -105,15 +111,17 @@ provider/gemini/
 4. BlockStart 重复或缺失 → 检查 `textBlockStarted` / `thinkingBlockStarted` 状态管理
 5. 工具调用 BlockStart 多余 → 确认 `handlePart` 不再为 FunctionCall 发送 BlockStart（由 StreamConverter 处理）
 6. FinishReason 缺失 → 检查 `handleCandidate` 是否在 FinishReason 非空时正确映射
-7. 工具响应 name 错误 → 检查 `buildToolMessage` 是否正确使用 `msg.ToolName`（优先）和 `msg.ToolCallID`（回退）
+7. 工具响应 name 错误 → 检查 `buildFunctionResponsePart` 是否使用 `ToolCall.Function.Name`（禁止用 ToolCallID）
 8. Thinking 内容丢失 → 非流式：检查 `complete.go` 是否正确处理 `part.Thought == true`
-9. UserID 丢失 → 检查 `buildContentConfig` 中 UserID → Labels 映射
+9. UserID 被上游拒绝 → 确认 `generationConfig` 中没有 `labels`（UserID 对 Gemini 应被忽略）
 10. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成 `geminiTool` 结构
 11. 认证失败 → 确认 API Key 有效，或检查 `WithBaseURL` 是否指向正确的 Gemini 兼容端点
 12. 模型不可用 → 检查 `models.go` 的模型常量是否与 Gemini API 当前支持的版本匹配
 13. Thinking 配置不生效 → 检查 `mapThinkingConfig` 中 effort 到 `thinkingConfig.ThinkingLevel` 的映射
 14. 请求参数不确定 → 设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
-15. `Unsupported input part type: go/debugstr` → 检查 hop2 是否发出了空 thought part，或把 data URI 写进了 `fileData.fileUri`
+15. function call history 校验失败 → 检查 `buildMessages` 是否将并行 FR 合并为一条 user content，且相邻 model FC 已用 dummy/真实 FR 闭合
+16. Unknown name at generation_config → 确认 labels/safetySettings/cachedContent 未写入 generationConfig
+17. `Unsupported input part type: go/debugstr` → 检查 hop2 是否发出了空 thought part，或把 data URI 写进了 `fileData.fileUri`
 
 ## 引用
 
