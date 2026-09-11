@@ -501,6 +501,71 @@ func TestGeminiFunctionArgs_NonObjectFallsBack(t *testing.T) {
 	}
 }
 
+func TestBuildMessages_TrailingAssistantWithPrefillAppendsContinueUserTurn(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "hello"},
+		{Role: provider.RoleAssistant, Content: "【关键记忆】"},
+	})
+
+	if len(contents) != 3 {
+		t.Fatalf("contents len = %d, want 3 (user, model, user:continue)", len(contents))
+	}
+	assertRole(t, contents[0], "user")
+	assertRole(t, contents[1], "model")
+	assertRole(t, contents[2], "user")
+
+	parts, ok := contents[2]["parts"].([]map[string]any)
+	if !ok || len(parts) == 0 {
+		t.Fatalf("expected parts in continue message, got %#v", contents[2])
+	}
+	if parts[0]["text"] != "continue" {
+		t.Errorf("continue turn text = %v, want continue", parts[0]["text"])
+	}
+}
+
+func TestBuildMessages_TrailingAssistantEmptyIsDropped(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "hello"},
+		{Role: provider.RoleAssistant, Content: ""},
+	})
+
+	if len(contents) != 1 {
+		t.Fatalf("contents len = %d, want 1 (trailing empty assistant dropped)", len(contents))
+	}
+	assertRole(t, contents[0], "user")
+}
+
+func TestBuildMessages_TrailingAssistantWhitespaceIsDropped(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "hello"},
+		{Role: provider.RoleAssistant, Content: "   \n\t  "},
+	})
+
+	if len(contents) != 1 {
+		t.Fatalf("contents len = %d, want 1 (trailing whitespace assistant dropped)", len(contents))
+	}
+	assertRole(t, contents[0], "user")
+}
+
+func TestBuildMessages_NormalConversationEndingWithUserUntouched(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "hello"},
+		{Role: provider.RoleAssistant, Content: "hi there"},
+		{Role: provider.RoleUser, Content: "how are you?"},
+	})
+
+	if len(contents) != 3 {
+		t.Fatalf("contents len = %d, want 3", len(contents))
+	}
+	assertRole(t, contents[0], "user")
+	assertRole(t, contents[1], "model")
+	assertRole(t, contents[2], "user")
+}
+
 func assertRole(t *testing.T, content map[string]any, want string) {
 	t.Helper()
 	if content["role"] != want {

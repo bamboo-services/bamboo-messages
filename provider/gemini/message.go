@@ -48,7 +48,51 @@ func (p *Provider) buildMessages(messages []provider.Message) []map[string]any {
 			// 已由 collectToolResults 收集，挂到对应 assistant 之后。
 		}
 	}
+
+	// Gemini API 约束：请求严禁以 model 轮次结尾（"Requests ending with a model turn are not supported"）。
+	// 当消息以 assistant/model 结尾时：
+	//   1. 若末尾 model 无有效内容（空文本或纯空白占位）：直接剔除，由前序 user 轮次收尾；
+	//   2. 若末尾 model 包含有效预填内容（prefill）：自动在末尾追加虚拟 user: "continue"，
+	//      使最后的 turn 始终满足 Gemini 必须以 user 收尾的协议契约。
+	for len(result) > 0 {
+		last := result[len(result)-1]
+		if last["role"] != "model" {
+			break
+		}
+		if hasModelContent(last) {
+			result = append(result, map[string]any{
+				"role":  "user",
+				"parts": []map[string]any{{"text": "continue"}},
+			})
+			break
+		}
+		result = result[:len(result)-1]
+	}
+
 	return result
+}
+
+// hasModelContent 检查一条 model 消息是否包含非空的有效正文或工具调用。
+func hasModelContent(msg map[string]any) bool {
+	parts, ok := msg["parts"].([]map[string]any)
+	if !ok || len(parts) == 0 {
+		return false
+	}
+	for _, part := range parts {
+		if fc, ok := part["functionCall"]; ok && fc != nil {
+			return true
+		}
+		if text, ok := part["text"].(string); ok && strings.TrimSpace(text) != "" {
+			return true
+		}
+		if id, ok := part["inlineData"]; ok && id != nil {
+			return true
+		}
+		if fd, ok := part["fileData"]; ok && fd != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // collectToolResults 按 tool_call_id 收集 RoleTool 响应，同一 id 仅保留第一条。

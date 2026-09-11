@@ -69,6 +69,7 @@ provider/gemini/
 - **UserID / Metadata 忽略** — Gemini Developer API 的 `GenerationConfig` 无 `labels` 字段，写入会触发 protobuf `Unknown name "labels"`。`UserID` / `Metadata` 静默忽略，debug 模式下输出日志
 - **generationConfig 白名单** — `safetySettings` / `cachedContent` 是请求顶层字段，由 `buildRequestBody` 提取；禁止写入 `generationConfig`
 - **function call 历史整形** — 一轮 model 的 N 个 `functionCall` 必须紧跟一条 `role=user` content，内含 N 个同序同名 `functionResponse`。并行 `RoleTool` 合并为一条；相邻 assistant FC 各自闭合；缺失结果注入 dummy `{"error":"tool result missing"}`。`functionResponse.name` 取自 `ToolCall.Function.Name`，禁止用 `ToolCallID` 当 name
+- **末尾 model 轮次保护** — Gemini API 严禁以 model 轮次收尾（"Requests ending with a model turn are not supported"）。当输入消息以 assistant 结尾时：若末尾 model 纯空则丢弃；若含预填正文则自动追加虚拟 user "continue"，确保对话始终以 user 收尾
 - **BlockStart 合成** — Gemini 没有原生 `content_block_start` 事件，通过 `textBlockStarted` / `thinkingBlockStarted` 两个独立布尔标志在首个文本/推理增量前合成
 - **工具调用不发 BlockStart** — `handlePart` 为 FunctionCall 仅发出 `ToolCallDelta` + `ToolCallDeltaData`，不再发出 `BlockStartDeltaWithID("tool_use")`。block 生命周期由 StreamConverter 统一管理，与 Anthropic/OpenAI 适配器保持一致
 - **双 Block 状态追踪** — `textBlockStarted` 和 `thinkingBlockStarted` 独立追踪，互不干扰（与 OpenAI 适配器模式一致）
