@@ -129,9 +129,12 @@ func TestChat_TextStream(t *testing.T) {
 		t.Errorf("text = %q, want %q", string(textData), "Hello")
 	}
 
-	// 验证 Stop 事件（finishReason=STOP 在 handleCandidate 中不触发 Stop，由 chat.go 补发）
-	if findEventType(events, provider.StreamTypeStop) < 0 {
+	// 验证 Stop 事件携带 FinishReasonStop
+	stopIdx := findEventType(events, provider.StreamTypeStop)
+	if stopIdx < 0 {
 		t.Error("expected StreamTypeStop event")
+	} else if events[stopIdx].FinishReason != provider.FinishReasonStop {
+		t.Errorf("Stop event FinishReason = %v, want FinishReasonStop", events[stopIdx].FinishReason)
 	}
 
 	// 验证 Done 事件
@@ -256,6 +259,14 @@ func TestChat_FunctionCall(t *testing.T) {
 				t.Error("BlockStart('tool_use') should not be emitted for FunctionCall (StreamConverter handles lifecycle)")
 			}
 		}
+	}
+
+	// 验证 Stop 事件携带 FinishReasonToolCalls
+	stopIdx := findEventType(events, provider.StreamTypeStop)
+	if stopIdx < 0 {
+		t.Fatal("expected StreamTypeStop event")
+	} else if events[stopIdx].FinishReason != provider.FinishReasonToolCalls {
+		t.Errorf("Stop event FinishReason = %v, want FinishReasonToolCalls", events[stopIdx].FinishReason)
 	}
 }
 

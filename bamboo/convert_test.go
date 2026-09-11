@@ -1684,6 +1684,56 @@ func TestStreamConverter_ToolCall(t *testing.T) {
 	if toolDelta.PartialJSON != `{"query":"golang"}` {
 		t.Errorf("Delta.PartialJSON = %q, 期望 %q", toolDelta.PartialJSON, `{"query":"golang"}`)
 	}
+
+	// 验证 message_delta 的 StopReason 为 FinishReasonToolUse
+	msgDeltaEvent := allEvents[7]
+	msgDelta, ok := msgDeltaEvent.Delta.(*MessageDelta)
+	if !ok {
+		t.Fatal("message_delta Delta 类型不匹配")
+	}
+	if msgDelta.StopReason != FinishReasonToolUse {
+		t.Errorf("StopReason = %q, 期望 %q", msgDelta.StopReason, FinishReasonToolUse)
+	}
+}
+
+// TestStreamConverter_ToolCallWithStopReasonStopOverriddenToToolUse 验证上游发送 StopReasonStop 时，
+// 如果流中包含工具调用，StopReason 依然保持为 ToolUse，不被 Stop 覆盖。
+func TestStreamConverter_ToolCallWithStopReasonStopOverriddenToToolUse(t *testing.T) {
+	sc := NewStreamConverter()
+	var allEvents []StreamEvent
+
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStart})...)
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewToolCallDelta("call_001", "bash"),
+	})...)
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:  provider.StreamTypeDelta,
+		Delta: provider.NewToolCallDeltaData(`{"cmd":"ls"}`),
+	})...)
+
+	// 模拟上游（如 Gemini）发出 STOP 完成原因
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{
+		Type:         provider.StreamTypeStop,
+		FinishReason: provider.FinishReasonStop,
+	})...)
+	allEvents = append(allEvents, sc.Convert(provider.StreamEvent{Type: provider.StreamTypeDone})...)
+
+	var msgDelta *MessageDelta
+	for _, ev := range allEvents {
+		if ev.Type == EventMessageDelta {
+			if md, ok := ev.Delta.(*MessageDelta); ok {
+				msgDelta = md
+				break
+			}
+		}
+	}
+	if msgDelta == nil {
+		t.Fatal("未收到 EventMessageDelta 事件")
+	}
+	if msgDelta.StopReason != FinishReasonToolUse {
+		t.Errorf("StopReason = %q, 期望 %q (工具调用应有最高优先级)", msgDelta.StopReason, FinishReasonToolUse)
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────

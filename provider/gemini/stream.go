@@ -9,7 +9,7 @@ import (
 // 遍历 Candidates 的 Content.Parts，根据 Part 类型分发到对应处理函数。
 // 通过 textBlockStarted / thinkingBlockStarted 两个独立标志合成 BlockStart 事件，
 // 与 OpenAI Completions 适配器保持一致的模式。
-func (p *Provider) handleStreamEvent(resp *generateContentResponse, textBlockStarted *bool, thinkingBlockStarted *bool) []provider.StreamEvent {
+func (p *Provider) handleStreamEvent(resp *generateContentResponse, textBlockStarted *bool, thinkingBlockStarted *bool, sawToolCall *bool) []provider.StreamEvent {
 	if resp == nil {
 		return nil
 	}
@@ -33,7 +33,7 @@ func (p *Provider) handleStreamEvent(resp *generateContentResponse, textBlockSta
 
 	// 处理 Candidates
 	for i := range resp.Candidates {
-		events = append(events, p.handleCandidate(&resp.Candidates[i], textBlockStarted, thinkingBlockStarted)...)
+		events = append(events, p.handleCandidate(&resp.Candidates[i], textBlockStarted, thinkingBlockStarted, sawToolCall)...)
 	}
 
 	return events
@@ -42,21 +42,30 @@ func (p *Provider) handleStreamEvent(resp *generateContentResponse, textBlockSta
 // handleCandidate 处理单个 geminiCandidate 的 Content 数据。
 //
 // 遍历 Content.Parts 提取文本、推理、工具调用，合成 BlockStart 事件。
-// 若 FinishReason 非空且不为 STOP，映射为统一的 FinishReason 并发送 Stop 事件。
-func (p *Provider) handleCandidate(candidate *geminiCandidate, textBlockStarted *bool, thinkingBlockStarted *bool) []provider.StreamEvent {
+// 若 FinishReason 非空，映射为统一的 FinishReason 并发送 Stop 事件。
+// 当收到 STOP 且当前流已出现工具调用时，FinishReason 自动映射为 ToolCalls（对齐 complete.go）。
+func (p *Provider) handleCandidate(candidate *geminiCandidate, textBlockStarted *bool, thinkingBlockStarted *bool, sawToolCall *bool) []provider.StreamEvent {
 	var events []provider.StreamEvent
 
 	if candidate.Content != nil {
 		for i := range candidate.Content.Parts {
-			events = append(events, p.handlePart(&candidate.Content.Parts[i], textBlockStarted, thinkingBlockStarted)...)
+			part := &candidate.Content.Parts[i]
+			if part.FunctionCall != nil {
+				*sawToolCall = true
+			}
+			events = append(events, p.handlePart(part, textBlockStarted, thinkingBlockStarted)...)
 		}
 	}
 
-	// 处理 FinishReason — 非空且不为 STOP/FINISH_REASON_STOP 表示生成结束
-	if candidate.FinishReason != "" && candidate.FinishReason != "STOP" && candidate.FinishReason != "FINISH_REASON_STOP" {
+	// 处理 FinishReason
+	if candidate.FinishReason != "" {
+		finishReason := mapFinishReason(candidate.FinishReason)
+		if (candidate.FinishReason == "STOP" || candidate.FinishReason == "FINISH_REASON_STOP") && *sawToolCall {
+			finishReason = provider.FinishReasonToolCalls
+		}
 		events = append(events, provider.StreamEvent{
 			Type:         provider.StreamTypeStop,
-			FinishReason: mapFinishReason(candidate.FinishReason),
+			FinishReason: finishReason,
 		})
 	}
 

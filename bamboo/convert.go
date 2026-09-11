@@ -722,6 +722,7 @@ func (sc *StreamConverter) startToolBlock(data provider.ToolCallData) []StreamEv
 	idx := sc.nextIndex()
 	sc.currentToolBlockIndex = idx
 	sc.toolBlockStarted = true
+	sc.recordFinishReason(provider.FinishReasonToolCalls)
 	sc.openToolBlockIndexes = append(sc.openToolBlockIndexes, idx)
 	if data.HasIndex {
 		sc.toolBlockByProviderIndex[data.Index] = idx
@@ -1011,7 +1012,7 @@ func (sc *StreamConverter) handleStop() []StreamEvent {
 	// openToolBlockIndexes 非空 → 推断为 tool_use，避免 agent loop 误判为正常结束。
 	stopReason := sc.finishReason
 	if stopReason == "" {
-		if len(sc.openToolBlockIndexes) > 0 {
+		if len(sc.openToolBlockIndexes) > 0 || sc.toolBlockStarted {
 			stopReason = FinishReasonToolUse
 		} else {
 			stopReason = FinishReasonEndTurn

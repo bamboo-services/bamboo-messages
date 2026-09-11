@@ -70,6 +70,7 @@ provider/gemini/
 - **generationConfig 白名单** — `safetySettings` / `cachedContent` 是请求顶层字段，由 `buildRequestBody` 提取；禁止写入 `generationConfig`
 - **function call 历史整形** — 一轮 model 的 N 个 `functionCall` 必须紧跟一条 `role=user` content，内含 N 个同序同名 `functionResponse`。并行 `RoleTool` 合并为一条；相邻 assistant FC 各自闭合；缺失结果注入 dummy `{"error":"tool result missing"}`。`functionResponse.name` 取自 `ToolCall.Function.Name`，禁止用 `ToolCallID` 当 name
 - **末尾 model 轮次保护** — Gemini API 严禁以 model 轮次收尾（"Requests ending with a model turn are not supported"）。当输入消息以 assistant 结尾时：若末尾 model 纯空则丢弃；若含预填正文则自动追加虚拟 user "continue"，确保对话始终以 user 收尾
+- **流式 ToolCalls FinishReason 纠正** — Gemini 上游流式结束时 candidate.FinishReason 始终为 STOP（无单独 tool_calls 原因）。流式处理中追踪是否产生了 FunctionCall：若有工具调用且收到 STOP，自动将 FinishReason 纠正为 ToolCalls（对齐 complete.go），使出口 message_delta 正确输出 stop_reason=tool_use
 - **BlockStart 合成** — Gemini 没有原生 `content_block_start` 事件，通过 `textBlockStarted` / `thinkingBlockStarted` 两个独立布尔标志在首个文本/推理增量前合成
 - **工具调用不发 BlockStart** — `handlePart` 为 FunctionCall 仅发出 `ToolCallDelta` + `ToolCallDeltaData`，不再发出 `BlockStartDeltaWithID("tool_use")`。block 生命周期由 StreamConverter 统一管理，与 Anthropic/OpenAI 适配器保持一致
 - **双 Block 状态追踪** — `textBlockStarted` 和 `thinkingBlockStarted` 独立追踪，互不干扰（与 OpenAI 适配器模式一致）

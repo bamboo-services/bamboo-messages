@@ -92,6 +92,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 
 		textBlockStarted := false
 		thinkingBlockStarted := false
+		sawToolCall := false
 		startSent := false
 		stopSent := false
 
@@ -140,7 +141,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			}
 
 			// 处理响应 → 事件
-			events := p.handleStreamEvent(&geminiResp, &textBlockStarted, &thinkingBlockStarted)
+			events := p.handleStreamEvent(&geminiResp, &textBlockStarted, &thinkingBlockStarted, &sawToolCall)
 			for _, e := range events {
 				if e.Type == provider.StreamTypeStop {
 					stopSent = true
@@ -155,10 +156,15 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 
 		// 流正常结束或降级结束但未收到 FinishReason，补发 Stop 事件
 		if !stopSent {
-			finishReason := provider.ResolveDegradedReason(
-				p.degradedReason,
-				config != nil && len(config.Tools) > 0,
-			)
+			var finishReason provider.FinishReason
+			if sawToolCall {
+				finishReason = provider.FinishReasonToolCalls
+			} else {
+				finishReason = provider.ResolveDegradedReason(
+					p.degradedReason,
+					config != nil && len(config.Tools) > 0,
+				)
+			}
 			select {
 			case eventCh <- provider.StreamEvent{
 				Type:         provider.StreamTypeStop,
