@@ -12,11 +12,12 @@ provider/gemini/
 ├── params.go        # buildContentConfig — 共享参数构建（Chat/Complete 统一入口）+ mapThinkingConfig/mapToolChoice + MaxTokens 溢出保护；safetySettings/cachedContent 在请求顶层
 ├── chat.go          # 流式对话实现 (Chat/ChatWithSystem) — GenerateContentStream
 ├── complete.go      # 非流式对话实现 (Complete/CompleteWithSystem) — 含 thinking parts 提取
-├── stream.go        # 流式响应 → StreamEvent 转换 + handleStreamEvent + FinishReason 携带
+├── stream.go        # 流式响应 → StreamEvent 转换 + handleStreamEvent + FinishReason 携带 + streamState（请求级状态）
 ├── stream_test.go   # 流式事件单元测试
 ├── message.go       # 消息格式转换 (buildMessages) — function call 历史整形（同轮 FR 合并 / dummy 闭合）
 ├── models.go        # 模型常量 (gemini-2.5 系列等)
 ├── option.go        # GeminiOption + WithAPIKey/WithBaseURL/WithHeader
+├── tool_call_id.go  # toolCallIDs — 每次响应独立的调用 ID 分配（随机命名空间 + 序号 + 历史排除集）
 ├── tools.go         # 工具定义转换 (buildTools)
 ├── types.go         # Gemini 协议原生请求/响应 DTO
 ├── mock_test.go     # httptest mock server 测试辅助工具
@@ -36,6 +37,8 @@ provider/gemini/
 | 修改非流式请求构建 | `complete.go` | `CompleteWithSystem` → 通过 `httpClient` 发起 `/v1beta/models/{model}:generateContent` 同步请求 |
 | 修改流式事件解析 | `stream.go` | `handleStreamEvent` 处理 `candidates` / `contents` |
 | 修改消息格式映射 | `message.go` | `buildMessages` (provider.Message → `geminiContent`) |
+| 修改出站调用 ID 生成 | `tool_call_id.go` | `newToolCallIDs` / `next` — 每响应随机命名空间 + 单调序号 + 历史 ID 排除 |
+| 修改流式终止/错误帧 | `stream.go` / `chat.go` | UNSPECIFIED 不终止；SSE 错误对象优先于 candidates，code 非法保留 0 |
 | 修改 Thinking 映射 | `params.go` | `mapThinkingConfig` (effort → `thinkingConfig`) |
 | 修改 ToolChoice 映射 | `params.go` | `mapToolChoice` (字符串 → `functionCallingConfig`) |
 | 添加支持的模型 | `models.go` | 在 `GetAvailableModels` 中追加 Gemini 模型常量 |
@@ -56,6 +59,8 @@ provider/gemini/
 | `mapThinkingConfig` | 函数 | params.go | Effort → `thinkingConfig` 映射 |
 | `mapToolChoice` | 函数 | params.go | 字符串 → `functionCallingConfig` 映射 |
 | `handlePart` | 方法 | stream.go | 处理单个 Part（text/thinking/function_call）— 工具调用不再发 BlockStart |
+| `toolCallIDs` | 结构体 | tool_call_id.go | 响应级调用 ID 分配器（namespace + ordinal + used 排除集） |
+| `newToolCallIDs` | 函数 | tool_call_id.go | 从输入消息历史构建排除集 |
 | `handleCandidate` | 方法 | stream.go | 处理 Candidate + FinishReason |
 | `mapFinishReason` | 函数 | stream.go | Gemini `finishReason` 字符串 → provider.FinishReason 映射 |
 | `buildFunctionResponseContent` | 函数 | message.go | 将一轮 ToolCalls 闭合为单条 user content（同序同名 functionResponse；缺失则 dummy） |
@@ -71,6 +76,10 @@ provider/gemini/
 - **function call 历史整形** — 一轮 model 的 N 个 `functionCall` 必须紧跟一条 `role=user` content，内含 N 个同序同名 `functionResponse`。并行 `RoleTool` 合并为一条；相邻 assistant FC 各自闭合；缺失结果注入 dummy `{"error":"tool result missing"}`。`functionResponse.name` 取自 `ToolCall.Function.Name`，禁止用 `ToolCallID` 当 name
 - **末尾 model 轮次保护** — Gemini API 严禁以 model 轮次收尾（"Requests ending with a model turn are not supported"）。当输入消息以 assistant 结尾时：若末尾 model 纯空则丢弃；若含预填正文则自动追加虚拟 user "continue"，确保对话始终以 user 收尾
 - **流式 ToolCalls FinishReason 纠正** — Gemini 上游流式结束时 candidate.FinishReason 始终为 STOP（无单独 tool_calls 原因）。流式处理中追踪是否产生了 FunctionCall：若有工具调用且收到 STOP，自动将 FinishReason 纠正为 ToolCalls（对齐 complete.go），使出口 message_delta 正确输出 stop_reason=tool_use
+- **每响应调用 ID 分配** — `toolCallIDs` 为每次 Chat/Complete 响应独立抽取随机命名空间（`crypto/rand.Text()`，懒初始化）+ 单调序号，形态 `gemini_call_<命名空间>_<序号>`；输入历史中出现过的调用 ID（含 `ToolCallID`）进入排除集，合成 ID 永不与之重复；上游显式 ID 原样透传。计数器归单次请求所有，Provider 上不存跨请求可变状态。独立抽取的命名空间提供抗碰撞性而非跨无关响应的数学唯一性保证
+- **FINISH_REASON_UNSPECIFIED 不终止** — 空 finishReason 与 `FINISH_REASON_UNSPECIFIED` 不产生 Stop 事件，避免提前截断有效流
+- **SSE 错误帧优先** — HTTP 200 SSE 帧**成功解码出错误信封且 `error` 为非空对象**（含 `{}`，区别于 `error:null`）时优先于同帧 `candidates`：该帧发出携带上游 code/message 的错误事件后直接结束，自身不创建新 Start、不排空响应体、不补成功 Stop/Done；此前帧可能已发出 Start/增量，本错误帧不产生后续成功终止。code 缺失或非法（非 400-599 数字）时状态码保留 0。可选 `status` 字段不参与存在性判断，其 JSON 类型不能否决合法错误。不兼容的 `message` 类型（数字/布尔/对象/数组）会导致整个 `geminiErrorResponse` 解码失败，不进入显式错误分支；`message` 缺失或为 JSON null 会被接受为空消息，不妨碍错误分支
+- **请求级流状态** — `streamState` 随每次 Chat 创建并经 handleStreamEvent/handleCandidate/handlePart 传递，不在 Provider 上存可变计数器
 - **BlockStart 合成** — Gemini 没有原生 `content_block_start` 事件，通过 `textBlockStarted` / `thinkingBlockStarted` 两个独立布尔标志在首个文本/推理增量前合成
 - **工具调用不发 BlockStart** — `handlePart` 为 FunctionCall 仅发出 `ToolCallDelta` + `ToolCallDeltaData`，不再发出 `BlockStartDeltaWithID("tool_use")`。block 生命周期由 StreamConverter 统一管理，与 Anthropic/OpenAI 适配器保持一致
 - **双 Block 状态追踪** — `textBlockStarted` 和 `thinkingBlockStarted` 独立追踪，互不干扰（与 OpenAI 适配器模式一致）
@@ -98,11 +107,16 @@ provider/gemini/
 - **禁止** 裸类型断言访问 `ProviderExtra` — 必须使用 `provider.GetExtra*` helper
 - **禁止** 在 `chat.go` 和 `complete.go` 中重复构建参数逻辑 — 必须统一调用 `params.go` 的 `buildContentConfig`
 - **禁止** 在 `handlePart` 中为 FunctionCall 发送 BlockStartDelta — block 生命周期由 StreamConverter 统一管理
+- **禁止** 故意跨响应复用命名空间或重置计数器 — 每次响应独立抽取随机命名空间并单调递增序号，合成 ID 不得与输入历史 ID 或本响应已注册 ID 重复。独立抽取的命名空间是抗碰撞的，不是跨响应数学上保证唯一；不引入全局注册表，未来上游显式 ID 无法跨流 chunk 预占
+- **禁止** 在 Provider 结构体上保存请求级 ID 计数器 — 状态必须归单次请求所有（`streamState` / 局部变量）
+- **禁止** 把 `FINISH_REASON_UNSPECIFIED` 当作终止信号 — 它不得产生 Stop 事件
+- **禁止** 因可选错误字段（如 `status`）解码失败而放行同帧 candidates — 错误对象的存在性独立于可选字段类型；但不兼容的 `message` 类型（数字/布尔/对象/数组）会导致整个 `geminiErrorResponse` 解码失败，不进入显式错误分支；`message` 缺失或为 JSON null 会被接受为空消息，不妨碍错误分支（`{}` 空对象仍被接受）
+- **禁止** 显式 SSE 错误后补发成功 Stop/Done 或排空响应体 — 错误路径直接结束。"不发 Start"指错误优先帧自身不创建新 Start；此前帧可能已发出 Start，本错误帧不产生后续成功终止
 - **禁止** 在构建工具响应时丢失 `ToolCallID` — 必须同时设置 `functionResponse.ID`（= ToolCallID）和 `name`（= 函数名）
 - **禁止** 将 `functionResponse.name` 回退为 `ToolCallID` — Gemini 按函数名校验历史配对
 - **禁止** 把并行 functionResponse 拆成多条 content — 必须与对应 functionCall 同轮同序合并
 - **禁止** 将 `labels` / `safetySettings` / `cachedContent` 写入 `generationConfig`
-- **禁止** 发出无 data oneof 的 thought part — `{"thought":true,"thoughtSignature":"..."}` 会被 Gemini 拒绝为 go/debugstr；签名必须挂在有正文的 thought/text 或 functionCall 上
+- **禁止** 发出无 data oneof 的 thought part — 只有 `thought`/`thoughtSignature`、连显式 `text:""` 都没有的 Part 会被 Gemini 拒绝为 go/debugstr。本 provider 侧把签名挂回有正文的 thought/text 或 functionCall；这与 codec 出站终止时允许的"显式空文本 Part（`text:""` 且携带非空原生签名）"不同：前者缺整个 data 字段，后者 text 字段显式存在
 - **禁止** 把 data URI 写入 `fileData.fileUri` — Gemini 内联图只接受 `inlineData` 裸 base64
 
 ## 调试路径

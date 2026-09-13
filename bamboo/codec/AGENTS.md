@@ -34,6 +34,7 @@ bamboo/codec/
 │   └── usage_regression_test.go # Usage 透传回归测试
 └── gemini/                 # Google Gemini 协议编解码（结构同 anthropic/）
     ├── codec.go / request.go / response.go / stream.go / error.go
+    ├── tool_history.go      # correlateToolHistory — 请求局部工具调用/结果轮次内关联
     ├── request_test.go / response_test.go
     ├── request_audit_test.go  # N-to-N 转换安全性审计测试（含 thinkingConfig、model、IsStream 测试）
     └── safety_settings_audit_test.go  # safety_settings 类型转换审计测试
@@ -102,6 +103,9 @@ bamboo/codec/
 - **Responses input_image.image_url 双格式容错** — `parseInputMessage` 的 `input_image` 分支通过 `normalizeImageURL` 兼容 `image_url` 的两种序列化格式：标准 string（`https://...` 或 data URI）与 Chat Completions 风格 object（`{"url": "..."}`）。`inputContent.ImageURL` 使用 `json.RawMessage` 承接，避免非标准 object 导致整个 content 数组 `json.Unmarshal` 失败、消息被静默丢弃
 - **Responses input_image data URI → base64** — `imageBlockFromURL` 把 `data:image/...;base64,...` 拆成 `ImageBlock{Type:base64, MediaType, Data}`。不能把 data URI 留在 `Type=url`：Gemini 会把它编成 `fileData.fileUri` 并 500。普通 http(s) URL 仍走 `Type=url`
 - **Gemini 空 thought 回编** — `buildResponseParts` 对无正文的 ThinkingBlock 不单独出 Part，把 `thoughtSignature` 挂到后续 functionCall / text，避免 `{"thought":true}` 空 oneof
+- **Gemini 工具历史轮次内关联** — `gemini/tool_history.go` 的 `correlateToolHistory` 在单次请求内配对调用与结果：完整连续结果段内显式 ID 优先（要求名字一致，缺省名字回填，绝不按名回退错误显式 ID），缺省 ID 结果按声明顺序按名位置配对；只匹配最近一个 model 组，历史/未来声明不参与；非法结果产出空 `ToolUseID` 由门面过滤；无任何 model content 时显式孤儿 ID 保留（仍为孤儿）；合成 ID 保持 `gemini_call_<名字>_<序号>` 形态并避开全请求显式 ID；状态请求局部，Codec 单例无跨请求状态
+- **Gemini 流式按 Index 隔离调用** — `gemini/stream.go` 的 `geminiStreamSerializer` 按 Bamboo `event.Index` 独立缓冲每个调用，完成调用按首次出现顺序各发一次；非空参数必须是合法 JSON 对象，否则走 codec 错误；未知 Index 的**参数增量**报错；首个错误置粘性失败并清空待处理调用/签名，之后幂等抑制成功帧
+- **Gemini 签名作用域** — 紧邻调用之前的已完结空 ThinkingBlock 签名挂到下一调用（无调用时挂下一文本 Part）一次；原生非空带签名 thinking 保留自身签名；迟到签名保留为末尾显式空文本签名 Part；外来签名省略；不承诺任意原始 Part 保真，不跨序列化器携带签名。非流式路径仅保留既有"调用前纯签名挂 functionCall"行为（`response.go` 标量 `pendingSig`），不是任意非流式终末签名保真
 
 ## 反模式
 
@@ -112,7 +116,11 @@ bamboo/codec/
 - **禁止** 在 Gemini codec 中将 safety_settings 存为原始 JSON 结构 — 必须转换为 `[]*genai.SafetySetting`，否则 relay→provider 路径类型断言失败导致静默丢弃
 - **禁止** 把 Gemini `thoughtSignature` 或 Claude `signature` 写进 Responses `encrypted_content` — 必须看 `SignatureProvider`
 - **禁止** 在 Gemini 出站编 `thought: true` 却不带合法 Gemini 签名 — 无血统或外来签名时丢掉 thought part，不要改成普通 text 前缀
-- **禁止** 把无正文的 Gemini thoughtSignature 编成独立 Part — 必须挂到 functionCall 或带 text 的 thought part
+- **禁止** 把无正文的 Gemini thoughtSignature 编成缺 data oneof 的 Part — 即只有 `thought`/`thoughtSignature`、连显式 `text:""` 都没有的 Part（上游 500：go/debugstr）。待挂签名应挂到 functionCall 或带 text 的 thought part；序列化器终止时未挂出的纯签名以显式空文本 Part（`text:""` 且带非空原生签名、不伪造 `thought=true`）发出一次，这与"缺 data oneof"不同。空签名值本身被忽略（`stream.go` 对 `Signature == ""` 直接返回），不要发携带空签名值的 Part
+- **禁止** 在 Gemini 解析中对错误显式结果 ID 按名回退 — 未匹配/重复/名字不符的结果必须产出空 `ToolUseID`
+- **禁止** 跨 model 轮次或向未来声明匹配 Gemini 工具结果 — 只配对最近活动 model 组
+- **禁止** 在 Gemini 流式序列化中把参数增量指派到其他 Index，或把畸形 JSON 参数编成可执行调用
+- **禁止** 在 Gemini 签名处理中声明空文本 Part 携带非空原生签名一律无效，或承诺任意原始 Part 完全保真
 - **禁止** 在响应序列化中遗漏 ToolResultBlock/ImageBlock/DocumentBlock 的警告日志 — 不支持的 block 类型必须记录 warning 后跳过，不得静默丢弃
 - **禁止** 在 Responses reasoning item 的 `encrypted_content` 中填证明文 — 该字段是服务端加密的不透明 token（官方契约：原样回传、不可伪造），明文会导致真实 OpenAI 上游解密失败；无上游真值时留空
 - **禁止** 把 ThinkingBlock 全文同时流式推到 `reasoning_text` 与 `reasoning_summary_text` — summary 槽只承载摘要（item.done.summary），复制全文会让客户端把思考叠两遍
