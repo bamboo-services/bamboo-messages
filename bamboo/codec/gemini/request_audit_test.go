@@ -1,10 +1,29 @@
 package gemini
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 )
+
+func TestGeminiToolHistoryMalformedIDTypes(t *testing.T) {
+	// Given
+	for _, raw := range []string{`{"functionCall":{"id":42,"name":"inspect"}}`, `{"functionResponse":{"id":[],"name":"inspect"}}`, `{"functionResponse":{"id":{},"name":"inspect"}}`} {
+		t.Run(raw, func(t *testing.T) {
+			body := []byte(`{"contents":[{"role":"user","parts":[` + raw + `]}]}`)
+			if !json.Valid(body) {
+				t.Fatal("invalid test fixture")
+			}
+			// When
+			_, err := Codec.ParseRequest(body)
+			// Then
+			if err == nil {
+				t.Fatal("malformed ID type accepted")
+			}
+		})
+	}
+}
 
 // ── Gemini Codec Audit Tests ──
 // Tests for issues found during N-to-N conversion safety audit.
@@ -88,7 +107,7 @@ func TestAudit_Gemini_ThinkingConfigParsed(t *testing.T) {
 	}
 }
 
-// TestAudit_Gemini_FunctionResponseIDFallback verifies function response ID fallback to name.
+// TestAudit_Gemini_FunctionResponseIDFallback 验证无调用声明时结果保持未关联。
 func TestAudit_Gemini_FunctionResponseIDFallback(t *testing.T) {
 	body := []byte(`{
 		"contents": [{
@@ -111,9 +130,8 @@ func TestAudit_Gemini_FunctionResponseIDFallback(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *ToolResultBlock, got %T", req.Messages[0].Content[0])
 	}
-	// When ID is empty, falls back to name
-	if trBlock.ToolUseID != "get_weather" {
-		t.Errorf("ToolUseID = %q, want %q (fallback to name)", trBlock.ToolUseID, "get_weather")
+	if trBlock.ToolUseID != "" {
+		t.Errorf("ToolUseID = %q, want empty for orphan result", trBlock.ToolUseID)
 	}
 }
 

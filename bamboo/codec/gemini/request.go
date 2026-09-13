@@ -2,7 +2,6 @@ package gemini
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/bamboo-services/bamboo-messages/bamboo"
@@ -206,14 +205,13 @@ func extractSystemText(content *geminiContent) string {
 //   - "model" → assistant
 //   - "function" → user + ToolResultBlock
 func parseContents(contents []geminiContent) ([]bamboo.BambooMessage, error) {
-	// 全局 functionCall 序号计数器，用于合成 ID
-	callIndex := 0
+	history := correlateToolHistory(contents)
 	result := make([]bamboo.BambooMessage, 0, len(contents))
 
 	for _, content := range contents {
 		switch content.Role {
-		case "user":
-			blocks, err := parseParts(content.Parts, &callIndex)
+		case "user", "function":
+			blocks, err := parseParts(content.Parts, history)
 			if err != nil {
 				return nil, err
 			}
@@ -224,7 +222,7 @@ func parseContents(contents []geminiContent) ([]bamboo.BambooMessage, error) {
 			}
 
 		case "model":
-			blocks, err := parseParts(content.Parts, &callIndex)
+			blocks, err := parseParts(content.Parts, history)
 			if err != nil {
 				return nil, err
 			}
@@ -234,30 +232,9 @@ func parseContents(contents []geminiContent) ([]bamboo.BambooMessage, error) {
 				result = append(result, bamboo.NewAssistantMessageBlocks(blocks...))
 			}
 
-		case "function":
-			// Gemini "function" 角色 → user + ToolResultBlock
-			blocks := make([]bamboo.ContentBlock, 0, len(content.Parts))
-			for _, part := range content.Parts {
-				if part.FunctionResponse != nil {
-					toolUseID := part.FunctionResponse.ID
-					if toolUseID == "" {
-						toolUseID = part.FunctionResponse.Name
-					}
-					contentStr := serializeFuncResponse(part.FunctionResponse.Response)
-					trb := bamboo.NewToolResultBlock(toolUseID, contentStr, false).(*bamboo.ToolResultBlock)
-					trb.ToolName = part.FunctionResponse.Name
-					blocks = append(blocks, trb)
-				}
-			}
-			if len(blocks) == 0 {
-				result = append(result, bamboo.BambooMessage{Role: bamboo.RoleUser})
-			} else {
-				result = append(result, bamboo.NewUserMessageBlocks(blocks...))
-			}
-
 		default:
 			// 未知角色按 user 处理
-			blocks, _ := parseParts(content.Parts, &callIndex)
+			blocks, _ := parseParts(content.Parts, history)
 			if len(blocks) == 0 {
 				result = append(result, bamboo.BambooMessage{Role: bamboo.RoleUser})
 			} else {
@@ -271,8 +248,8 @@ func parseContents(contents []geminiContent) ([]bamboo.BambooMessage, error) {
 
 // parseParts 解析 Gemini Parts 为 Bamboo ContentBlock 列表。
 //
-// callIndex 用于为无 ID 的 functionCall 合成全局唯一 ID。
-func parseParts(parts []geminiPart, callIndex *int) ([]bamboo.ContentBlock, error) {
+// history 保存本次请求的调用 ID 和轮次内结果关联，不修改输入 DTO。
+func parseParts(parts []geminiPart, history geminiToolHistory) ([]bamboo.ContentBlock, error) {
 	blocks := make([]bamboo.ContentBlock, 0, len(parts))
 	for _, part := range parts {
 		// functionCall 与 thoughtSignature 可同 part。对齐 Anthropic：
@@ -283,7 +260,7 @@ func parseParts(parts []geminiPart, callIndex *int) ([]bamboo.ContentBlock, erro
 			} else if part.ThoughtSignature != "" {
 				blocks = append(blocks, bamboo.NewThinkingBlockWithProvider("", part.ThoughtSignature, bamboo.SignatureProviderGemini))
 			}
-			blocks = append(blocks, newGeminiToolUseBlock(part.FunctionCall, callIndex))
+			blocks = append(blocks, newGeminiToolUseBlock(part.FunctionCall, history.calls[part.FunctionCall]))
 			continue
 		}
 
@@ -316,13 +293,12 @@ func parseParts(parts []geminiPart, callIndex *int) ([]bamboo.ContentBlock, erro
 		}
 
 		if part.FunctionResponse != nil {
-			toolUseID := part.FunctionResponse.ID
-			if toolUseID == "" {
-				toolUseID = part.FunctionResponse.Name
-			}
+			identity := history.results[part.FunctionResponse]
 			contentStr := serializeFuncResponse(part.FunctionResponse.Response)
-			trb := bamboo.NewToolResultBlock(toolUseID, contentStr, false).(*bamboo.ToolResultBlock)
-			trb.ToolName = part.FunctionResponse.Name
+			trb := &bamboo.ToolResultBlock{Type: bamboo.ContentBlockToolResult, ToolUseID: identity.id, Content: contentStr, ToolName: part.FunctionResponse.Name}
+			if identity.id != "" {
+				trb.ToolName = identity.name
+			}
 			blocks = append(blocks, trb)
 			continue
 		}
@@ -330,12 +306,7 @@ func parseParts(parts []geminiPart, callIndex *int) ([]bamboo.ContentBlock, erro
 	return blocks, nil
 }
 
-func newGeminiToolUseBlock(call *geminiFunctionCall, callIndex *int) *bamboo.ToolUseBlock {
-	id := call.ID
-	if id == "" {
-		id = fmt.Sprintf("gemini_call_%s_%d", call.Name, *callIndex)
-	}
-	*callIndex++
+func newGeminiToolUseBlock(call *geminiFunctionCall, id string) *bamboo.ToolUseBlock {
 	input := call.Args
 	if len(input) == 0 {
 		input = json.RawMessage(`{}`)
