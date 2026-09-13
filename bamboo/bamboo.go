@@ -130,6 +130,9 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 		defer pingTicker.Stop()
 
 		writeEvent := func(be StreamEvent) bool {
+			if ctx.Err() != nil {
+				return false
+			}
 			select {
 			case out <- be:
 				pingTicker.Reset(pingIdleInterval)
@@ -160,11 +163,6 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 				}
 
 			case event, ok := <-providerCh:
-				if !ok {
-					writeAll(converter.Convert(provider.StreamEvent{Type: provider.StreamTypeDone}))
-					return
-				}
-
 				select {
 				case <-ctx.Done():
 					cancelErr := pkgErrors.NewBambooErrorWithCause("SDK", "对话已取消: "+ctx.Err().Error(), 0, ctx.Err())
@@ -174,6 +172,11 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 					}))
 					return
 				default:
+				}
+
+				if !ok {
+					writeAll(converter.Convert(provider.StreamEvent{Type: provider.StreamTypeDone}))
+					return
 				}
 
 				if !writeAll(converter.Convert(event)) {
