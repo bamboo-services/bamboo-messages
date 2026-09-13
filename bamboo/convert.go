@@ -121,6 +121,7 @@ func messagesToProvider(msgs []BambooMessage) ([]provider.Message, error) {
 					Content:               b.Content,
 					ToolCallID:            b.ToolUseID,
 					ToolName:              toolName,
+					IsError:               b.IsError,
 					CacheControl:          b.CacheControl,
 					CacheControlBlockType: "tool_result",
 				})
