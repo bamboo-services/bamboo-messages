@@ -85,12 +85,13 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	}
 
 	// 遍历响应内容
+	callIDs := newToolCallIDs(messages)
 	if len(geminiResp.Candidates) > 0 {
 		candidate := &geminiResp.Candidates[0]
 		result.FinishReason = mapFinishReason(candidate.FinishReason)
 
 		if candidate.Content != nil {
-			for i, part := range candidate.Content.Parts {
+			for _, part := range candidate.Content.Parts {
 				// 推理内容（Thought 标记）
 				if part.Thought && part.Text != "" {
 					result.Thinking += part.Text
@@ -105,10 +106,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 				}
 				// 工具调用
 				if part.FunctionCall != nil {
-					id := part.FunctionCall.ID
-					if id == "" {
-						id = fmt.Sprintf("gemini_call_%s_%d", part.FunctionCall.Name, i)
-					}
+					id := callIDs.next(part.FunctionCall.ID)
 					argsStr := string(part.FunctionCall.Args)
 					if argsStr == "" {
 						argsStr = "{}"

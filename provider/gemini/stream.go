@@ -4,12 +4,19 @@ import (
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
+type streamState struct {
+	textBlockStarted     bool
+	thinkingBlockStarted bool
+	sawToolCall          bool
+	callIDs              toolCallIDs
+}
+
 // handleStreamEvent 处理单个 Gemini generateContentResponse，提取增量数据转换为统一事件。
 //
 // 遍历 Candidates 的 Content.Parts，根据 Part 类型分发到对应处理函数。
 // 通过 textBlockStarted / thinkingBlockStarted 两个独立标志合成 BlockStart 事件，
 // 与 OpenAI Completions 适配器保持一致的模式。
-func (p *Provider) handleStreamEvent(resp *generateContentResponse, textBlockStarted *bool, thinkingBlockStarted *bool, sawToolCall *bool) []provider.StreamEvent {
+func (p *Provider) handleStreamEvent(resp *generateContentResponse, state *streamState) []provider.StreamEvent {
 	if resp == nil {
 		return nil
 	}
@@ -33,7 +40,7 @@ func (p *Provider) handleStreamEvent(resp *generateContentResponse, textBlockSta
 
 	// 处理 Candidates
 	for i := range resp.Candidates {
-		events = append(events, p.handleCandidate(&resp.Candidates[i], textBlockStarted, thinkingBlockStarted, sawToolCall)...)
+		events = append(events, p.handleCandidate(&resp.Candidates[i], state)...)
 	}
 
 	return events
@@ -44,23 +51,20 @@ func (p *Provider) handleStreamEvent(resp *generateContentResponse, textBlockSta
 // 遍历 Content.Parts 提取文本、推理、工具调用，合成 BlockStart 事件。
 // 若 FinishReason 非空，映射为统一的 FinishReason 并发送 Stop 事件。
 // 当收到 STOP 且当前流已出现工具调用时，FinishReason 自动映射为 ToolCalls（对齐 complete.go）。
-func (p *Provider) handleCandidate(candidate *geminiCandidate, textBlockStarted *bool, thinkingBlockStarted *bool, sawToolCall *bool) []provider.StreamEvent {
+func (p *Provider) handleCandidate(candidate *geminiCandidate, state *streamState) []provider.StreamEvent {
 	var events []provider.StreamEvent
 
 	if candidate.Content != nil {
 		for i := range candidate.Content.Parts {
 			part := &candidate.Content.Parts[i]
-			if part.FunctionCall != nil {
-				*sawToolCall = true
-			}
-			events = append(events, p.handlePart(part, textBlockStarted, thinkingBlockStarted)...)
+			events = append(events, p.handlePart(part, state)...)
 		}
 	}
 
 	// 处理 FinishReason
-	if candidate.FinishReason != "" {
+	if candidate.FinishReason != "" && candidate.FinishReason != "FINISH_REASON_UNSPECIFIED" {
 		finishReason := mapFinishReason(candidate.FinishReason)
-		if (candidate.FinishReason == "STOP" || candidate.FinishReason == "FINISH_REASON_STOP") && *sawToolCall {
+		if (candidate.FinishReason == "STOP" || candidate.FinishReason == "FINISH_REASON_STOP") && state.sawToolCall {
 			finishReason = provider.FinishReasonToolCalls
 		}
 		events = append(events, provider.StreamEvent{
@@ -82,7 +86,7 @@ func (p *Provider) handleCandidate(candidate *geminiCandidate, textBlockStarted 
 //
 // 注意：Gemini 在调用工具时，FunctionCall part 经常同时附带 ThoughtSignature。
 // 不能使用互斥的 early return，必须确保 FunctionCall 与 ThoughtSignature 均被正常处理。
-func (p *Provider) handlePart(part *geminiPart, textBlockStarted *bool, thinkingBlockStarted *bool) []provider.StreamEvent {
+func (p *Provider) handlePart(part *geminiPart, state *streamState) []provider.StreamEvent {
 	if part == nil {
 		return nil
 	}
@@ -90,12 +94,12 @@ func (p *Provider) handlePart(part *geminiPart, textBlockStarted *bool, thinking
 
 	// 1. 推理内容增量（Thought == true 且 Text != ""）
 	if part.Thought && part.Text != "" {
-		if !*thinkingBlockStarted {
+		if !state.thinkingBlockStarted {
 			events = append(events, provider.StreamEvent{
 				Type:  provider.StreamTypeDelta,
 				Delta: provider.NewBlockStartDelta("thinking"),
 			})
-			*thinkingBlockStarted = true
+			state.thinkingBlockStarted = true
 		}
 		events = append(events, provider.StreamEvent{
 			Type:  provider.StreamTypeDelta,
@@ -113,12 +117,12 @@ func (p *Provider) handlePart(part *geminiPart, textBlockStarted *bool, thinking
 
 	// 3. 文本内容增量（!Thought 且 Text != ""）
 	if !part.Thought && part.Text != "" {
-		if !*textBlockStarted {
+		if !state.textBlockStarted {
 			events = append(events, provider.StreamEvent{
 				Type:  provider.StreamTypeDelta,
 				Delta: provider.NewBlockStartDelta("text"),
 			})
-			*textBlockStarted = true
+			state.textBlockStarted = true
 		}
 		events = append(events, provider.StreamEvent{
 			Type:  provider.StreamTypeDelta,
@@ -130,9 +134,10 @@ func (p *Provider) handlePart(part *geminiPart, textBlockStarted *bool, thinking
 	// 不发送 BlockStartDelta，由 StreamConverter 的 ToolCall 处理自动管理 block 生命周期。
 	// 与 Anthropic/OpenAI 适配器保持一致：仅发送 ToolCallDelta + ToolCallDeltaData。
 	if part.FunctionCall != nil {
+		state.sawToolCall = true
 		events = append(events, provider.StreamEvent{
 			Type:  provider.StreamTypeDelta,
-			Delta: provider.NewToolCallDelta(part.FunctionCall.ID, part.FunctionCall.Name),
+			Delta: provider.NewToolCallDelta(state.callIDs.next(part.FunctionCall.ID), part.FunctionCall.Name),
 		})
 		// Args 为 json.RawMessage，直接转为字符串传递
 		argsStr := string(part.FunctionCall.Args)

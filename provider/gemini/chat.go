@@ -84,15 +84,16 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 		// 创建 SSE 扫描器
 		scanner := provider.NewSSEScanner(resp.Body)
 		provider.DebugSSEResponse("gemini", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header))
+		explicitError := false
 		defer func() {
-			_, _ = io.Copy(io.Discard, resp.Body)
+			if !explicitError {
+				_, _ = io.Copy(io.Discard, resp.Body)
+			}
 			_ = scanner.Close()
 			_ = resp.Body.Close()
 		}()
 
-		textBlockStarted := false
-		thinkingBlockStarted := false
-		sawToolCall := false
+		state := streamState{callIDs: newToolCallIDs(messages)}
 		startSent := false
 		stopSent := false
 
@@ -123,6 +124,25 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 				break
 			}
 
+			// 显式错误优先于同帧候选内容，且不进入成功结束或排空响应体路径。
+			var errResp geminiErrorResponse
+			if jsonErr := json.Unmarshal(data, &errResp); jsonErr == nil && errResp.Error != nil {
+				explicitError = true
+				code := 0
+				if err := json.Unmarshal(errResp.Error.Code, &code); err != nil || code < 400 || code > 599 {
+					code = 0
+				}
+				select {
+				case eventCh <- provider.StreamEvent{
+					Type:       provider.StreamTypeError,
+					Err:        pkgErrors.NewBambooError("上游", "Gemini: "+errResp.Error.Message, code),
+					StatusCode: code,
+				}:
+				case <-ctx.Done():
+				}
+				return
+			}
+
 			// 发送 Start 事件（首个有效帧时）
 			if !startSent {
 				startSent = true
@@ -141,7 +161,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			}
 
 			// 处理响应 → 事件
-			events := p.handleStreamEvent(&geminiResp, &textBlockStarted, &thinkingBlockStarted, &sawToolCall)
+			events := p.handleStreamEvent(&geminiResp, &state)
 			for _, e := range events {
 				if e.Type == provider.StreamTypeStop {
 					stopSent = true
@@ -157,7 +177,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 		// 流正常结束或降级结束但未收到 FinishReason，补发 Stop 事件
 		if !stopSent {
 			var finishReason provider.FinishReason
-			if sawToolCall {
+			if state.sawToolCall {
 				finishReason = provider.FinishReasonToolCalls
 			} else {
 				finishReason = provider.ResolveDegradedReason(

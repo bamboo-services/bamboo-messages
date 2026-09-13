@@ -157,7 +157,6 @@ type geminiErrorResponse struct {
 
 // geminiErrorDetail 是 Gemini 错误响应的具体错误信息。
 type geminiErrorDetail struct {
-	Code    int    `json:"code,omitempty"`
-	Message string `json:"message,omitempty"`
-	Status  string `json:"status,omitempty"`
+	Code    json.RawMessage `json:"code,omitempty"`
+	Message string          `json:"message,omitempty"`
 }

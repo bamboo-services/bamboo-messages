@@ -25,9 +25,8 @@ func TestAudit_ToolUse_NoDoubleBlockStart(t *testing.T) {
 		},
 	}
 
-	textStarted := false
-	thinkingStarted := false
-	events := p.handlePart(part, &textStarted, &thinkingStarted)
+	state := streamState{}
+	events := p.handlePart(part, &state)
 
 	if len(events) == 0 {
 		t.Fatal("expected events for FunctionCall, got 0")
@@ -61,9 +60,8 @@ func TestAudit_ToolUse_StreamConverterSimulation(t *testing.T) {
 
 	// 先模拟文本
 	textPart := &geminiPart{Text: "Let me check."}
-	textStarted := false
-	thinkingStarted := false
-	textEvents := p.handlePart(textPart, &textStarted, &thinkingStarted)
+	state := streamState{}
+	textEvents := p.handlePart(textPart, &state)
 
 	// 再模拟工具调用
 	argsJSON, _ := json.Marshal(map[string]any{"city": "Tokyo"})
@@ -74,7 +72,7 @@ func TestAudit_ToolUse_StreamConverterSimulation(t *testing.T) {
 			Args: argsJSON,
 		},
 	}
-	toolEvents := p.handlePart(toolPart, &textStarted, &thinkingStarted)
+	toolEvents := p.handlePart(toolPart, &state)
 
 	allEvents := append(textEvents, toolEvents...)
 
@@ -119,9 +117,8 @@ func TestAudit_ThinkingBlockStart_DeltaType(t *testing.T) {
 		Text:    "Let me reason about this...",
 	}
 
-	textStarted := false
-	thinkingStarted := false
-	events := p.handlePart(part, &textStarted, &thinkingStarted)
+	state := streamState{}
+	events := p.handlePart(part, &state)
 
 	if len(events) < 2 {
 		t.Fatalf("expected at least 2 events (BlockStart + ThinkingDelta), got %d", len(events))

@@ -19,9 +19,8 @@ func TestHandlePart_ThinkingExtraction(t *testing.T) {
 		Thought: true,
 	}
 
-	textStarted := false
-	thinkingStarted := false
-	events := p.handlePart(part, &textStarted, &thinkingStarted)
+	state := streamState{}
+	events := p.handlePart(part, &state)
 
 	// 应该有 2 个事件: BlockStart("thinking") + ThinkingDelta
 	if len(events) < 2 {
@@ -48,7 +47,7 @@ func TestHandlePart_ThinkingExtraction(t *testing.T) {
 	}
 
 	// thinkingStarted 应该被设置为 true
-	if !thinkingStarted {
+	if !state.thinkingBlockStarted {
 		t.Error("thinkingBlockStarted should be true after thinking part")
 	}
 }
@@ -62,9 +61,8 @@ func TestHandlePart_ThinkingBlockStartType(t *testing.T) {
 		Thought: true,
 	}
 
-	textStarted := false
-	thinkingStarted := false
-	events := p.handlePart(part, &textStarted, &thinkingStarted)
+	state := streamState{}
+	events := p.handlePart(part, &state)
 
 	if len(events) < 2 {
 		t.Fatalf("expected at least 2 events, got %d", len(events))
@@ -96,9 +94,8 @@ func TestHandlePart_FunctionCallWithThoughtSignature(t *testing.T) {
 		},
 	}
 
-	textStarted := false
-	thinkingStarted := false
-	events := p.handlePart(part, &textStarted, &thinkingStarted)
+	state := streamState{}
+	events := p.handlePart(part, &state)
 
 	var hasSig, hasToolCall, hasToolData bool
 	for _, e := range events {
