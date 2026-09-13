@@ -215,9 +215,10 @@ func TestStreamSerializer_FunctionCallAccumulation(t *testing.T) {
 		t.Errorf("args.city = %v, want SF", args["city"])
 	}
 
-	// 验证累积器已重置
-	if s.accumulating {
-		t.Error("accumulating should be false after content_block_stop")
+	// 验证重复结束事件不会再次输出调用。
+	data, err = s.Serialize(bamboo.StreamEvent{Type: bamboo.EventContentBlockStop, Index: 0})
+	if err != nil || len(data) != 0 {
+		t.Fatalf("repeated stop = %s, %v", data, err)
 	}
 }
 
@@ -282,16 +283,20 @@ func TestStreamSerializer_SignatureDeltaEmitsThoughtSignature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Serialize(signature_delta) error = %v", err)
 	}
-	if data == nil {
-		t.Fatal("signature_delta should emit a Gemini thoughtSignature chunk")
+	if data != nil {
+		t.Fatal("signature_delta should wait for its target or termination")
+	}
+	data, err = s.Flush()
+	if err != nil {
+		t.Fatal(err)
 	}
 	chunk := parseGeminiSSE(t, data)
 	parts := chunk.Candidates[0].Content.Parts
 	if len(parts) != 1 {
 		t.Fatalf("Parts len = %d", len(parts))
 	}
-	if !parts[0].Thought {
-		t.Error("Thought should be true for signature_delta")
+	if parts[0].Thought {
+		t.Error("terminal signature must not invent thought=true")
 	}
 	if parts[0].ThoughtSignature != "sig_abc" {
 		t.Errorf("thoughtSignature = %q, want sig_abc", parts[0].ThoughtSignature)

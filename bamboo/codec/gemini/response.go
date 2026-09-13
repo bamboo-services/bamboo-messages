@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
+
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 )
 
@@ -36,12 +37,25 @@ type geminiContentOut struct {
 
 // geminiPartOut 输出方向的 Part（支持 text / functionCall / thought / inlineData / fileData）。
 type geminiPartOut struct {
+	explicitText     *string
 	Text             string             `json:"text,omitempty"`
 	Thought          bool               `json:"thought,omitempty"`
 	ThoughtSignature string             `json:"thoughtSignature,omitempty"`
 	FunctionCall     *geminiFuncCallOut `json:"functionCall,omitempty"`
 	InlineData       *geminiInlineData  `json:"inlineData,omitempty"`
 	FileData         *geminiFileData    `json:"fileData,omitempty"`
+}
+
+// MarshalJSON 仅为终端签名保留显式空文本，不改变普通 Part 的省略规则。
+func (p geminiPartOut) MarshalJSON() ([]byte, error) {
+	type part geminiPartOut
+	if p.explicitText != nil {
+		return json.Marshal(struct {
+			part
+			Text *string `json:"text"`
+		}{part: part(p), Text: p.explicitText})
+	}
+	return json.Marshal(part(p))
 }
 
 // geminiFuncCallOut 输出方向的 functionCall。
