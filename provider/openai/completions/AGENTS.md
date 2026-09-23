@@ -1,3 +1,5 @@
+<!-- deep-init:synced@fba6309 -->
+
 # completions 知识库
 
 ## 概述
@@ -139,4 +141,4 @@ BaseURL **必须包含 `/v1` 版本路径**（或 `/v4`、`/v3` 等其他版本�
 
 ## 引用
 
-无子级 AGENTS.md
+- [provider 父级知识库](../../AGENTS.md) — 核心抽象层总览

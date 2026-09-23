@@ -1,3 +1,5 @@
+<!-- deep-init:synced@fba6309 -->
+
 # responses 知识库
 
 ## 概述
@@ -98,4 +100,4 @@ provider/openai/responses/
 
 ## 引用
 
-无子级 AGENTS.md
+- [provider 父级知识库](../../AGENTS.md) — 核心抽象层总览

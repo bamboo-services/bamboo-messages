@@ -1,3 +1,5 @@
+<!-- deep-init:synced@fba6309 -->
+
 # bamboo 知识库
 
 ## 概述
@@ -186,5 +188,6 @@ bamboo/
 
 ## 引用
 
+- [根项目知识库](../AGENTS.md) — 项目总览
 - [codec](./codec/AGENTS.md) — N-to-N 协议编解码层
 - [relay](./relay/AGENTS.md) — 跨协议中继层

@@ -1,3 +1,5 @@
+<!-- deep-init:synced@fba6309 -->
+
 # bamboo 原生协议编解码知识库
 
 ## 概述

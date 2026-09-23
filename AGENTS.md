@@ -1,7 +1,9 @@
+<!-- deep-init:synced@fba6309 -->
+
 # 项目知识库
 
-**生成日期:** 2026-07-16
-**提交:** bcb1833
+**更新日期:** 2026-09-24
+**提交:** fba6309
 **分支:** master
 
 ## 概述
@@ -437,6 +439,16 @@ bamboo-messages/
 - **禁止** 在 `messagesToProvider` 中静默丢弃 ThinkingBlock — 必须保留到 `provider.Message.ThinkingContent/ThinkingSignature`
 - **禁止** 新增 ContentBlock 类型时不注册反序列化 — 必须通过 `RegisterBlockType` 注册
 - **禁止** 将 `ReasoningID` 与 `ThinkingSignature` 混用 — 前者是 OpenAI Responses reasoning item 标识，后者是加密内容
+
+## 调试路径
+
+全局问题排查顺序：
+1. **请求/响应协议格式错误** → 优先检查 `bamboo/codec/` 对应子包的请求解析与响应序列化逻辑；启用 `BAMBOO_DEBUG=1` 观察原始请求体与解析后的 `RelayRequest`。
+2. **Provider 适配异常** → 检查 `provider/` 下对应适配器的 `buildParams`（Gemini 为 `buildContentConfig`）与 `chat.go` / `complete.go`；确认端点 BaseURL 是否满足协议要求（如 OpenAI 必须带 `/v1`，Anthropic 不带 `/v1`）。
+3. **流式截断或乱序** → 检查 `provider/sse_scanner.go` 帧解析器容错逻辑；检查适配器 `stream.go` 的 BlockStart 合成状态追踪与 FinishReason 传递。
+4. **跨协议推理/思考内容丢失** → 检查 `ThinkingBlock` 在 codec 与 provider 双向转换中的 `ThinkingContent` / `ThinkingSignature` / `ReasoningID` 透传链路。
+5. **工具调用失败或状态未关联** → 检查 `ToolResultBlock` 与 `provider.Message` 的 `ToolName` / `ToolCallID` 分离映射，以及 Gemini / Responses 特有的历史整形。
+6. **网络与传输层改写** → 检查 `provider/interceptor.go` 拦截器链执行顺序与 `NewInterceptorHTTPClient` 注入状态。
 
 ## 独特风格
 

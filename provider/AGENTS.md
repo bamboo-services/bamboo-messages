@@ -1,3 +1,5 @@
+<!-- deep-init:synced@fba6309 -->
+
 # provider 知识库
 
 ## 概述
@@ -237,6 +239,7 @@ provider/
 
 ## 引用
 
+- [根项目知识库](../AGENTS.md) — 项目总览
 - [anthropic](./anthropic/AGENTS.md) — Anthropic Messages 协议适配器
 - [completions](./openai/completions/AGENTS.md) — OpenAI Chat Completions 协议适配器
 - [responses](./openai/responses/AGENTS.md) — OpenAI Responses 协议适配器

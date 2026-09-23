@@ -1,3 +1,5 @@
+<!-- deep-init:synced@fba6309 -->
+
 # codec 知识库
 
 ## 概述
@@ -149,4 +151,5 @@ bamboo/codec/
 
 ## 引用
 
+- [bamboo 父级知识库](../AGENTS.md) — 公共 SDK 层总览
 - [bamboo 原生编解码](./bamboo/AGENTS.md) — bamboo 原生协议恒等变换编解码知识库

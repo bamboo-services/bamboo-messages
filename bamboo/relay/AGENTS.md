@@ -1,3 +1,5 @@
+<!-- deep-init:synced@fba6309 -->
+
 # relay 知识库
 
 ## 概述
@@ -89,4 +91,5 @@ bamboo/relay/
 
 ## 引用
 
-无子级 AGENTS.md
+- [bamboo 父级知识库](../AGENTS.md) — 公共 SDK 层总览
+- [codec 知识库](../codec/AGENTS.md) — N-to-N 协议编解码层
