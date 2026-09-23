@@ -12,3 +12,5 @@
 
 | 编号 | 文档 | 状态 |
 | --- | --- | --- |
+| 0001 | [OpenAI Responses API WebSocket 模式技术调研](./engineering/research/0001-research-openai-websocket-mode.md) | 已核验修订；实测待补 |
+| 0002 | [Responses WebSocket 发布时间与双向 SSE 转换可行性](./engineering/research/0002-research-websocket-sse-transcoding.md) | 已核验修订；互操作待验证 |
