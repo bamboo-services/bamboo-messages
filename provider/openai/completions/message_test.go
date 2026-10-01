@@ -72,3 +72,32 @@ func TestBuildAssistantMessage_IncludesToolCallsWhenPresent(t *testing.T) {
 		t.Errorf("assistant message with tool calls should contain tool_calls field, got: %s", raw)
 	}
 }
+
+// TestBuildAssistantMessage_ToolCallsOnlyHasExplicitNullContent 验证纯工具调用消息
+// 显式包含 "content": null，满足 OpenAPI 规范对 content 必选字段的硬性约束。
+func TestBuildAssistantMessage_ToolCallsOnlyHasExplicitNullContent(t *testing.T) {
+	p := NewCompletionsProvider("test-api-key")
+	msg := provider.Message{
+		Role: provider.RoleAssistant,
+		ToolCalls: []provider.ToolCall{
+			{
+				ID:   "call-123",
+				Type: "function",
+				Function: provider.FunctionCall{
+					Name:      "get_weather",
+					Arguments: `{"location": "Tokyo"}`,
+				},
+			},
+		},
+	}
+
+	result := p.buildAssistantMessage(msg)
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("failed to marshal assistant message: %v", err)
+	}
+
+	if !strings.Contains(string(raw), `"content":null`) {
+		t.Errorf("assistant message with tool calls only must serialize 'content': null, got: %s", raw)
+	}
+}

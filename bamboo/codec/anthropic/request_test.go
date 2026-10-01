@@ -589,3 +589,58 @@ func TestParseRequest_NoOutputConfig(t *testing.T) {
 		t.Errorf("Effort = %q, want %q (parseThinking behavior unchanged)", req.Config.ThinkingConfig.Effort, "high")
 	}
 }
+
+// TestParseRequest_ToolResultWithImage 验证 tool_result 中携带图片（多模态工具结果）时，
+// 正确提取出 ToolResultBlock 和 ImageBlock，避免视觉截图被静默丢弃。
+func TestParseRequest_ToolResultWithImage(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-sonnet-4-20250514",
+		"max_tokens": 1024,
+		"messages": [{
+			"role": "user",
+			"content": [{
+				"type": "tool_result",
+				"tool_use_id": "call_screen",
+				"content": [
+					{"type": "text", "text": "Screenshot captured"},
+					{
+						"type": "image",
+						"source": {
+							"type": "base64",
+							"media_type": "image/png",
+							"data": "iVBORw0KGgoAAAANSUhEUg=="
+						}
+					}
+				]
+			}]
+		}]
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatalf("Messages len = %d, want 1", len(req.Messages))
+	}
+	blocks := req.Messages[0].Content
+	if len(blocks) != 2 {
+		t.Fatalf("blocks len = %d, want 2 (tool_result + image)", len(blocks))
+	}
+
+	trb, ok := blocks[0].(*bamboo.ToolResultBlock)
+	if !ok {
+		t.Fatalf("block[0] is %T, want *bamboo.ToolResultBlock", blocks[0])
+	}
+	if trb.ToolUseID != "call_screen" || trb.Content != "Screenshot captured" {
+		t.Errorf("unexpected tool_result: %+v", trb)
+	}
+
+	img, ok := blocks[1].(*bamboo.ImageBlock)
+	if !ok {
+		t.Fatalf("block[1] is %T, want *bamboo.ImageBlock", blocks[1])
+	}
+	if img.Source == nil || img.Source.Type != "base64" || img.Source.Data != "iVBORw0KGgoAAAANSUhEUg==" {
+		t.Errorf("unexpected image source: %+v", img.Source)
+	}
+}

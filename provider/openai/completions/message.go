@@ -192,12 +192,15 @@ func (p *CompletionsProvider) buildAssistantMessage(msg provider.Message) map[st
 		m["tool_calls"] = toolCalls
 	}
 
-	// OpenAI 要求 assistant 消息必须设置 content 或 tool_calls。
-	// 当消息仅携带 reasoning_content（如 Responses API 的 reasoning 项转换而来）
-	// 而无文本内容和工具调用时，补充空字符串 content 以满足上游校验，
-	// 避免 "Invalid assistant message: content or tool_calls must be set" 错误。
+	// 确保 content 字段始终存在：
+	// - 纯文本消息：有正文时为 string，无正文且无工具调用时为空字符串 ""
+	// - 工具调用消息：无文本时显式设为 nil（序列化为 "content": null），
+	//   满足 OpenAI 官方规范中 messages[].content 为必选字段（string | null）的硬性契约，
+	//   避免 strict 校验的第三方端点（如 Azure/DeepSeek/Ollama）报 400。
 	if _, hasContent := m["content"]; !hasContent {
-		if _, hasToolCalls := m["tool_calls"]; !hasToolCalls {
+		if _, hasToolCalls := m["tool_calls"]; hasToolCalls {
+			m["content"] = nil
+		} else {
 			m["content"] = ""
 		}
 	}

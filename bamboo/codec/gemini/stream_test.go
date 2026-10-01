@@ -497,3 +497,47 @@ func TestStreamSerializer_TextThenFunctionCall(t *testing.T) {
 		t.Errorf("functionCall = %+v", fc)
 	}
 }
+
+// TestStreamSerializer_ToolCallDeduplicatesRepeatedKeys 验证流式工具参数包含重复键时，
+// 序列化输出的 FunctionCall.args 会被重新序列化去重，防止 Google Protobuf 报 Repeated map key 错误。
+func TestStreamSerializer_ToolCallDeduplicatesRepeatedKeys(t *testing.T) {
+	s := newStreamSerializer("")
+	s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+	s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        0,
+		ContentBlock: bamboo.NewToolUseBlock("call-dup", "edit_file", nil),
+	})
+	// 分块传输包含重复键的 JSON
+	s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 0,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaInputJSON, PartialJSON: `{"path":"a.txt","desc":"1","desc":"2"}`},
+	})
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockStop,
+		Index: 0,
+	})
+	if err != nil {
+		t.Fatalf("content_block_stop error = %v", err)
+	}
+	chunk := parseGeminiSSE(t, data)
+	fc := chunk.Candidates[0].Content.Parts[0].FunctionCall
+	if fc == nil {
+		t.Fatal("expected functionCall")
+	}
+	rawArgs := string(fc.Args)
+	if strings.Count(rawArgs, `"desc"`) != 1 {
+		t.Errorf("desc key appeared %d times in args: %s", strings.Count(rawArgs, `"desc"`), rawArgs)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(fc.Args, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed["desc"] != "2" {
+		t.Errorf("parsed desc = %v, want 2", parsed["desc"])
+	}
+}

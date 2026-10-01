@@ -336,9 +336,13 @@ func isIdentifierField(key string) bool {
 
 // isSensitiveHeader 判断 header 是否为敏感字段（需要脱敏）。
 func isSensitiveHeader(key string) bool {
-	lk := strings.ToLower(key)
+	lk := strings.ToLower(strings.TrimSpace(key))
 	switch lk {
-	case "authorization", "x-api-key", "api-key", "x-goog-api-key":
+	case "authorization", "proxy-authorization", "x-api-key", "api-key", "x-goog-api-key",
+		"cookie", "set-cookie", "x-auth-token", "anthropic-api-key":
+		return true
+	}
+	if strings.Contains(lk, "auth") || strings.Contains(lk, "token") || strings.Contains(lk, "secret") || strings.Contains(lk, "password") || strings.Contains(lk, "api-key") {
 		return true
 	}
 	return false

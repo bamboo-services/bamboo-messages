@@ -14,8 +14,8 @@ import (
 // sseScannerBufferCapacity 初始缓冲容量。
 const sseScannerBufferCapacity = 64 * 1024
 
-// sseScannerMaxBufferSize 最大缓冲容量（1MB），防止单帧过大导致 OOM。
-const sseScannerMaxBufferSize = 1 << 20
+// sseScannerMaxBufferSize 最大缓冲容量（16MB），支持多模态（大尺寸图片 base64/大文件）单帧解析，防止 bufio.ErrTooLong 异常中断。
+const sseScannerMaxBufferSize = 16 << 20
 
 // SSEScanner 共享 SSE 帧解析器，内置 json.Valid 容错能力。
 //

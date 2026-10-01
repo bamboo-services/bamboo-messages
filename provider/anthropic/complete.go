@@ -26,14 +26,21 @@ func (p *Provider) Complete(ctx context.Context, messages []provider.Message, co
 // 通过 httpClient 发起同步 HTTP 请求，返回 CompletionResult。
 // 支持系统提示、温度、TopP、Stop 序列、工具调用、Thinking 配置、TopK、ToolChoice 等参数。
 func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
-	params := p.buildParams(systemPrompt, messages, config)
+	cfg := provider.ChatConfig{}
+	if config != nil {
+		cfg = *config
+	}
+	if cfg.MaxTokens <= 0 {
+		cfg.MaxTokens = 4096
+	}
+	params := p.buildParams(systemPrompt, messages, &cfg)
 
 	body, err := json.Marshal(params)
 	if err != nil {
 		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("Anthropic 请求参数序列化失败: %v", err), 0)
 	}
 
-	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, "/v1/messages", body, "anthropic", "POST /v1/messages (non-stream, model="+config.Model+")")
+	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, "/v1/messages", body, "anthropic", "POST /v1/messages (non-stream, model="+cfg.Model+")")
 	if err != nil {
 		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("Anthropic 非流式对话请求失败: %v", err), 0)
 	}

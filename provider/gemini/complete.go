@@ -3,7 +3,6 @@ package gemini
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
@@ -38,7 +37,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	}
 
 	// Gemini 非流式端点：/v1beta/models/{model}:generateContent
-	endpoint := fmt.Sprintf("/v1beta/models/%s:generateContent", config.Model)
+	endpoint := buildEndpoint(config.Model, false)
 
 	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, endpoint, bodyBytes, "gemini", endpoint)
 	if err != nil {

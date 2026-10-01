@@ -212,7 +212,11 @@ func (s *geminiStreamSerializer) handleContentBlockStop(event bamboo.StreamEvent
 	if err := json.Unmarshal([]byte(raw), &object); err != nil || object == nil {
 		return nil, pkgErrors.NewBambooError("下游", fmt.Sprintf("gemini arguments at index %d must be a JSON object", event.Index), 0)
 	}
-	call.args = json.RawMessage(raw)
+	deduped, err := json.Marshal(object)
+	if err != nil {
+		return nil, pkgErrors.NewBambooError("下游", fmt.Sprintf("failed to marshal gemini arguments at index %d: %v", event.Index, err), 0)
+	}
+	call.args = json.RawMessage(deduped)
 	call.completed = true
 	var parts []geminiPartOut
 	for s.nextCall < len(s.order) {

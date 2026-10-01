@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/url"
 	"strings"
 
 	xLog "github.com/bamboo-services/bamboo-base-go/common/log"
@@ -54,6 +55,27 @@ func (p *Provider) buildRequestBody(messages []provider.Message, systemPrompt st
 	}
 
 	return body
+}
+
+// buildEndpoint 构造 Gemini API 请求端点。
+//
+// 规则：
+//  1. 剥离首尾空白与可能携带的 "models/" 前缀，避免拼出 "/models/models/..." 报 404；
+//  2. 若模型名为空，安全回退到默认模型 ModelGemini25Flash；
+//  3. 使用 url.PathEscape 安全转义模型名称，防止路径跳出与参数注入。
+func buildEndpoint(model string, stream bool) string {
+	m := strings.TrimSpace(model)
+	m = strings.TrimPrefix(m, "/")
+	m = strings.TrimPrefix(m, "models/")
+	m = strings.TrimPrefix(m, "/")
+	if m == "" {
+		m = ModelGemini25Flash
+	}
+	escaped := url.PathEscape(m)
+	if stream {
+		return fmt.Sprintf("/v1beta/models/%s:streamGenerateContent?alt=sse", escaped)
+	}
+	return fmt.Sprintf("/v1beta/models/%s:generateContent", escaped)
 }
 
 // buildContentConfig 构建 Gemini generationConfig。

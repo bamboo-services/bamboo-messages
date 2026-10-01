@@ -33,8 +33,16 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 	go func() {
 		defer close(eventCh)
 
+		cfg := provider.ChatConfig{}
+		if config != nil {
+			cfg = *config
+		}
+		if cfg.MaxTokens <= 0 {
+			cfg.MaxTokens = 4096
+		}
+
 		// 构建请求参数
-		params := p.buildParams(systemPrompt, messages, config)
+		params := p.buildParams(systemPrompt, messages, &cfg)
 		params.Stream = true
 
 		body, err := json.Marshal(params)
@@ -49,7 +57,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			return
 		}
 
-		endpoint := "POST /v1/messages (streaming, model=" + config.Model + ")"
+		endpoint := "POST /v1/messages (streaming, model=" + cfg.Model + ")"
 		resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, "/v1/messages", body, "anthropic", endpoint)
 		if err != nil {
 			select {

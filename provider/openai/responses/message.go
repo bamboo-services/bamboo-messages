@@ -154,10 +154,14 @@ func (p *ResponsesProvider) buildAssistantItem(msg provider.Message) []map[strin
 	}
 
 	// 工具调用 → function_call items
-	for _, tc := range msg.ToolCalls {
+	for i, tc := range msg.ToolCalls {
+		callID := tc.ID
+		if callID == "" {
+			callID = fmt.Sprintf("call_%d", i)
+		}
 		items = append(items, map[string]any{
 			"type":      "function_call",
-			"call_id":   tc.ID,
+			"call_id":   callID,
 			"name":      tc.Function.Name,
 			"arguments": tc.Function.Arguments,
 		})

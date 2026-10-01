@@ -52,7 +52,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 		}
 
 		// Gemini 流式端点：/v1beta/models/{model}:streamGenerateContent?alt=sse
-		endpoint := fmt.Sprintf("/v1beta/models/%s:streamGenerateContent?alt=sse", config.Model)
+		endpoint := buildEndpoint(config.Model, true)
 
 		resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, endpoint, bodyBytes, "gemini", endpoint)
 		if err != nil {

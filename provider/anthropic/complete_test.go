@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -340,5 +341,45 @@ func TestComplete_MultipleRedactedThinkingBlocks(t *testing.T) {
 	}
 	if result.RedactedThinking[1] != "rt-data-2" {
 		t.Errorf("RedactedThinking[1] = %q, want 'rt-data-2'", result.RedactedThinking[1])
+	}
+}
+
+// TestComplete_ZeroMaxTokensDefaultsTo4096 验证跨协议未传 max_tokens（为 0）时，
+// Anthropic 适配器保护性回退为 4096，避免上游 400 拒绝。
+func TestComplete_ZeroMaxTokensDefaultsTo4096(t *testing.T) {
+	var capturedMaxTokens int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		capturedMaxTokens = body.MaxTokens
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"id": "msg_001",
+			"type": "message",
+			"role": "assistant",
+			"content": [{"type": "text", "text": "ok"}],
+			"model": "claude-sonnet-4-20250514",
+			"stop_reason": "end_turn",
+			"usage": {"input_tokens": 10, "output_tokens": 2}
+		}`))
+	}))
+	defer server.Close()
+
+	p := newMockProvider(t, server)
+	ctx := context.Background()
+	config := &provider.ChatConfig{Model: "claude-sonnet-4-20250514", MaxTokens: 0}
+	messages := []provider.Message{{Role: provider.RoleUser, Content: "Hi"}}
+
+	_, err := p.Complete(ctx, messages, config)
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+
+	if capturedMaxTokens != 4096 {
+		t.Errorf("capturedMaxTokens = %d, want default 4096", capturedMaxTokens)
 	}
 }

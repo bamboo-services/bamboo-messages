@@ -295,7 +295,12 @@ func parseParts(parts []geminiPart, history geminiToolHistory) ([]bamboo.Content
 		if part.FunctionResponse != nil {
 			identity := history.results[part.FunctionResponse]
 			contentStr := serializeFuncResponse(part.FunctionResponse.Response)
-			trb := &bamboo.ToolResultBlock{Type: bamboo.ContentBlockToolResult, ToolUseID: identity.id, Content: contentStr, ToolName: part.FunctionResponse.Name}
+			trb := &bamboo.ToolResultBlock{
+				Type:      bamboo.ContentBlockToolResult,
+				ToolUseID: identity.id,
+				Content:   contentStr,
+				ToolName:  part.FunctionResponse.Name,
+			}
 			if identity.id != "" {
 				trb.ToolName = identity.name
 			}

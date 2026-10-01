@@ -508,6 +508,41 @@ func TestDebugResponse_Off(t *testing.T) {
 	DebugResponse("anthropic", 200, nil, []byte(`{}`))
 }
 
+// TestFormatHeaders_SensitiveHeadersMasked 验证各类敏感凭据请求头（Cookie、Token、Proxy-Auth 等）均被脱敏。
+func TestFormatHeaders_SensitiveHeadersMasked(t *testing.T) {
+	headers := map[string]string{
+		"Authorization":       "Bearer secret-token-12345678",
+		"Proxy-Authorization": "Basic dXNlcjpwYXNzd29yZA==",
+		"Cookie":              "session=abcdef1234567890",
+		"X-Auth-Token":        "token-9988776655443322",
+		"Anthropic-Api-Key":   "sk-ant-1234567890123456",
+		"Normal-Header":       "regular-value",
+	}
+
+	formatted := formatHeaders(headers)
+
+	// 敏感值不应完整出现在输出中
+	if strings.Contains(formatted, "secret-token-12345678") {
+		t.Errorf("Authorization was not masked: %s", formatted)
+	}
+	if strings.Contains(formatted, "dXNlcjpwYXNzd29yZA==") {
+		t.Errorf("Proxy-Authorization was not masked: %s", formatted)
+	}
+	if strings.Contains(formatted, "session=abcdef1234567890") {
+		t.Errorf("Cookie was not masked: %s", formatted)
+	}
+	if strings.Contains(formatted, "token-9988776655443322") {
+		t.Errorf("X-Auth-Token was not masked: %s", formatted)
+	}
+	if strings.Contains(formatted, "sk-ant-1234567890123456") {
+		t.Errorf("Anthropic-Api-Key was not masked: %s", formatted)
+	}
+	// 普通 header 正常保留
+	if !strings.Contains(formatted, "Normal-Header: regular-value") {
+		t.Errorf("Normal-Header was not preserved: %s", formatted)
+	}
+}
+
 // ────────────────────────────────────────────────────────
 // 辅助函数
 // ────────────────────────────────────────────────────────

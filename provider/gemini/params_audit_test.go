@@ -223,3 +223,29 @@ func TestAudit_ResponseFormat_Mapping(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildEndpoint_ModelSanitization(t *testing.T) {
+	tests := []struct {
+		name       string
+		model      string
+		stream     bool
+		wantPath   string
+	}{
+		{"standard_model", "gemini-2.5-flash", false, "/v1beta/models/gemini-2.5-flash:generateContent"},
+		{"standard_model_stream", "gemini-2.5-pro", true, "/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse"},
+		{"with_models_prefix", "models/gemini-2.5-flash", false, "/v1beta/models/gemini-2.5-flash:generateContent"},
+		{"with_leading_slash", "/models/gemini-2.5-flash", true, "/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse"},
+		{"empty_model_fallback", "", false, "/v1beta/models/gemini-2.5-flash:generateContent"},
+		{"path_traversal_sanitized", "../../admin", false, "/v1beta/models/..%2F..%2Fadmin:generateContent"},
+		{"query_injection_sanitized", "gemini-pro?key=evil", true, "/v1beta/models/gemini-pro%3Fkey=evil:streamGenerateContent?alt=sse"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildEndpoint(tt.model, tt.stream)
+			if got != tt.wantPath {
+				t.Errorf("buildEndpoint(%q, %t) = %q, want %q", tt.model, tt.stream, got, tt.wantPath)
+			}
+		})
+	}
+}

@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -475,5 +476,29 @@ func TestSSEScanner_FrameConcatenationBeforeNormalFrame(t *testing.T) {
 
 	if v1["a"] != 1 || v2["b"] != 2 || v3["c"] != 3 {
 		t.Errorf("帧顺序或内容错误: v1=%v v2=%v v3=%v", v1, v2, v3)
+	}
+}
+
+// TestSSEScanner_LargeFrameAbove1MB 验证单帧大小超过 1MB（如 2MB 大文本/多模态 Base64）时能够正常解析，不报错 bufio.ErrTooLong。
+func TestSSEScanner_LargeFrameAbove1MB(t *testing.T) {
+	largePayload := strings.Repeat("A", 2*1024*1024)
+	input := fmt.Sprintf("data: {\"image\":\"%s\"}\n\n", largePayload)
+	s := newTestScanner(input)
+
+	events, _, err := readAll(t, s)
+	if err != nil && !errors.Is(err, io.EOF) {
+		t.Fatalf("意外错误: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("期望 1 个大事件，实际 %d", len(events))
+	}
+
+	var v map[string]string
+	if err := json.Unmarshal(events[0].Data, &v); err != nil {
+		t.Fatalf("反序列化 2MB JSON 失败: %v", err)
+	}
+	if len(v["image"]) != 2*1024*1024 {
+		t.Errorf("数据长度不符: %d", len(v["image"]))
 	}
 }

@@ -283,10 +283,8 @@ func parseMessage(msg anthropicMessage) (bamboo.BambooMessage, error) {
 
 	blocks := make([]bamboo.ContentBlock, 0, len(rawBlocks))
 	for _, rb := range rawBlocks {
-		block := convertContentBlock(rb)
-		if block != nil {
-			blocks = append(blocks, block)
-		}
+		cbs := convertContentBlocks(rb)
+		blocks = append(blocks, cbs...)
 	}
 
 	if role == bamboo.RoleUser {
@@ -295,16 +293,19 @@ func parseMessage(msg anthropicMessage) (bamboo.BambooMessage, error) {
 	return bamboo.NewAssistantMessageBlocks(blocks...), nil
 }
 
-// convertContentBlock 将 Anthropic content block JSON 转为 bamboo.ContentBlock。
-func convertContentBlock(rb rawContentBlock) bamboo.ContentBlock {
+// convertContentBlocks 将 Anthropic content block JSON 转为 bamboo.ContentBlock 列表。
+//
+// tool_result 的 content 字段若包含图片内容块（多模态工具结果），
+// 会同时解出 ToolResultBlock 与对应的 ImageBlock，避免视觉截图被静默丢弃。
+func convertContentBlocks(rb rawContentBlock) []bamboo.ContentBlock {
 	cc := parseCacheControlRaw(rb.CacheControl)
 	switch rb.Type {
 	case "text":
-		return &bamboo.TextBlock{
+		return []bamboo.ContentBlock{&bamboo.TextBlock{
 			Type:         bamboo.ContentBlockText,
 			Text:         rb.Text,
 			CacheControl: cc,
-		}
+		}}
 
 	case "image":
 		if rb.Source == nil {
@@ -316,28 +317,28 @@ func convertContentBlock(rb rawContentBlock) bamboo.ContentBlock {
 			Data:      rb.Source.Data,
 			URL:       rb.Source.URL,
 		}
-		return &bamboo.ImageBlock{
+		return []bamboo.ContentBlock{&bamboo.ImageBlock{
 			Type:         bamboo.ContentBlockImage,
 			Source:       &source,
 			CacheControl: cc,
-		}
+		}}
 
 	case "tool_use":
 		input := rb.Input
 		if len(input) == 0 {
 			input = json.RawMessage(`{}`)
 		}
-		return &bamboo.ToolUseBlock{
+		return []bamboo.ContentBlock{&bamboo.ToolUseBlock{
 			Type:         bamboo.ContentBlockToolUse,
 			ID:           rb.ID,
 			Name:         rb.Name,
 			Input:        input,
 			CacheControl: cc,
-		}
+		}}
 
 	case "tool_result":
-		content := extractToolResultContent(rb.Content)
-		return &bamboo.ToolResultBlock{
+		content, images := extractToolResultContentAndImages(rb.Content)
+		trb := &bamboo.ToolResultBlock{
 			Type:         bamboo.ContentBlockToolResult,
 			ToolUseID:    rb.ToolUseID,
 			ToolName:     rb.Name,
@@ -345,19 +346,24 @@ func convertContentBlock(rb rawContentBlock) bamboo.ContentBlock {
 			IsError:      rb.IsError,
 			CacheControl: cc,
 		}
+		blocks := []bamboo.ContentBlock{trb}
+		for _, img := range images {
+			blocks = append(blocks, img)
+		}
+		return blocks
 
 	case "thinking":
 		sp := ""
 		if rb.Signature != "" {
 			sp = bamboo.SignatureProviderAnthropic
 		}
-		return &bamboo.ThinkingBlock{
+		return []bamboo.ContentBlock{&bamboo.ThinkingBlock{
 			Type:              bamboo.ContentBlockThinking,
 			Thinking:          rb.Thinking,
 			Signature:         rb.Signature,
 			SignatureProvider: sp,
 			CacheControl:      cc,
-		}
+		}}
 
 	case "document":
 		if rb.Source == nil {
@@ -369,38 +375,49 @@ func convertContentBlock(rb rawContentBlock) bamboo.ContentBlock {
 			Data:      rb.Source.Data,
 			URL:       rb.Source.URL,
 		}
-		return &bamboo.DocumentBlock{
+		return []bamboo.ContentBlock{&bamboo.DocumentBlock{
 			Type:         bamboo.ContentBlockDocument,
 			Source:       &source,
 			CacheControl: cc,
-		}
+		}}
 	}
 	return nil
 }
 
-// extractToolResultContent 从 tool_result 的 content 字段提取文本。
-// content 可为 string 或 [{type:"text",text}]。
-func extractToolResultContent(raw json.RawMessage) string {
+// extractToolResultContentAndImages 从 tool_result 的 content 字段提取文本和图片。
+// content 可为 string 或 [{type:"text",text}, {type:"image",source}]。
+func extractToolResultContentAndImages(raw json.RawMessage) (string, []*bamboo.ImageBlock) {
 	if len(raw) == 0 {
-		return ""
+		return "", nil
 	}
 	// 尝试 string
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
+		return s, nil
 	}
 	// 尝试 array
 	var parts []rawContentBlock
 	if err := json.Unmarshal(raw, &parts); err == nil {
 		texts := make([]string, 0, len(parts))
+		var images []*bamboo.ImageBlock
 		for _, p := range parts {
 			if p.Type == "text" {
 				texts = append(texts, p.Text)
+			} else if p.Type == "image" && p.Source != nil {
+				images = append(images, &bamboo.ImageBlock{
+					Type: bamboo.ContentBlockImage,
+					Source: &bamboo.ContentSource{
+						Type:      p.Source.Type,
+						MediaType: p.Source.MediaType,
+						Data:      p.Source.Data,
+						URL:       p.Source.URL,
+					},
+				})
 			}
 		}
-		return strings.Join(texts, "\n")
+		return strings.Join(texts, "\n"), images
 	}
-	return ""
+	return "", nil
 }
 
 // parseTools 将 Anthropic tools 转为 bamboo.Tool 列表。
