@@ -112,16 +112,16 @@ func NewEphemeralCacheControl(ttl ...CacheControlEphemeralTTL) *CacheControl {
 // 包含 AI 模型返回的文本内容、工具调用列表、结束原因
 // 和 Token 用量统计。适用于不需要流式输出的同步请求场景。
 type CompletionResult struct {
-	Content           string       `json:"content"`                      // 文本响应内容
+	Content                   string       `json:"content"`                               // 文本响应内容
 	Thinking                  string       `json:"thinking,omitempty"`                    // 思考过程内容（如 Claude extended thinking）
 	ThinkingSignature         string       `json:"thinking_signature,omitempty"`          // 推理签名/加密内容（OpenAI encrypted_content 透传）
 	ThinkingSignatureProvider string       `json:"thinking_signature_provider,omitempty"` // 签名血统：anthropic / gemini / openai-responses
-	RedactedThinking  []string     `json:"redacted_thinking,omitempty"`  // 非流式响应中多个 redacted_thinking block
-	ToolCalls         []ToolCall   `json:"tool_calls,omitempty"`         // 工具调用列表
-	FinishReason      FinishReason `json:"finish_reason"`                // 结束原因
-	Usage             UsageData    `json:"usage"`                        // Token 用量统计
-	ResponseID        string       `json:"response_id,omitempty"`        // 响应 ID（OpenAI Responses API 用于多轮对话循环追踪）
-	ReasoningID       string       `json:"reasoning_id,omitempty"`       // 推理项 ID（OpenAI Responses API 的 reasoning item ID，如 "rs_xxx"，独立于 ThinkingSignature）
+	RedactedThinking          []string     `json:"redacted_thinking,omitempty"`           // 非流式响应中多个 redacted_thinking block
+	ToolCalls                 []ToolCall   `json:"tool_calls,omitempty"`                  // 工具调用列表
+	FinishReason              FinishReason `json:"finish_reason"`                         // 结束原因
+	Usage                     UsageData    `json:"usage"`                                 // Token 用量统计
+	ResponseID                string       `json:"response_id,omitempty"`                 // 响应 ID（OpenAI Responses API 用于多轮对话循环追踪）
+	ReasoningID               string       `json:"reasoning_id,omitempty"`                // 推理项 ID（OpenAI Responses API 的 reasoning item ID，如 "rs_xxx"，独立于 ThinkingSignature）
 }
 
 // ============================================
@@ -134,20 +134,20 @@ type CompletionResult struct {
 // 工具调用信息和工具响应的调用 ID。
 // 当 ContentBlocks 不为空时，ContentBlocks 优先于 Content。
 type Message struct {
-	Role                 MessageRole    `json:"role"`                             // 消息角色
-	Content              string         `json:"content,omitempty"`                // 消息文本内容（向后兼容）
-	ContentBlocks        []ContentBlock `json:"content_blocks,omitempty"`         // 多媒体内容块（优先于 Content）
+	Role                      MessageRole    `json:"role"`                                  // 消息角色
+	Content                   string         `json:"content,omitempty"`                     // 消息文本内容（向后兼容）
+	ContentBlocks             []ContentBlock `json:"content_blocks,omitempty"`              // 多媒体内容块（优先于 Content）
 	ThinkingContent           string         `json:"thinking_content,omitempty"`            // 思考过程内容（用于多轮对话中保留 thinking block）
 	ThinkingSignature         string         `json:"thinking_signature,omitempty"`          // 思考过程签名（Anthropic / Gemini / Responses 密文共用槽）
 	ThinkingSignatureProvider string         `json:"thinking_signature_provider,omitempty"` // 签名血统：anthropic / gemini / openai-responses
 	RedactedThinkingData      string         `json:"redacted_thinking_data,omitempty"`      // 加密 thinking block 的 data（Anthropic redacted_thinking，多轮对话原样传回）
-	ReasoningID          string         `json:"reasoning_id,omitempty"`           // 推理项 ID（OpenAI Responses API 的 reasoning item ID，如 "rs_xxx"，独立于 ThinkingSignature）
-	ToolCalls            []ToolCall     `json:"tool_calls,omitempty"`             // 助手发起的工具调用
-	ToolCallID           string         `json:"tool_call_id,omitempty"`           // 工具响应的调用 ID
-	ToolName             string         `json:"tool_name,omitempty"`              // 工具响应的函数名（Gemini FunctionResponse 需要）
-	IsError              bool           `json:"is_error,omitempty"`               // 工具响应是否为错误
-	CacheControl         *CacheControl  `json:"cache_control,omitempty"`          // 缓存控制标记（Anthropic prompt caching）
-	CacheControlBlockType string        `json:"cache_control_block_type,omitempty"` // cache_control 原始所在 block 类型（如 "text"/"thinking"/"tool_use"/"image"/"document"），用于 Anthropic 块级断点定位
+	ReasoningID               string         `json:"reasoning_id,omitempty"`                // 推理项 ID（OpenAI Responses API 的 reasoning item ID，如 "rs_xxx"，独立于 ThinkingSignature）
+	ToolCalls                 []ToolCall     `json:"tool_calls,omitempty"`                  // 助手发起的工具调用
+	ToolCallID                string         `json:"tool_call_id,omitempty"`                // 工具响应的调用 ID
+	ToolName                  string         `json:"tool_name,omitempty"`                   // 工具响应的函数名（Gemini FunctionResponse 需要）
+	IsError                   bool           `json:"is_error,omitempty"`                    // 工具响应是否为错误
+	CacheControl              *CacheControl  `json:"cache_control,omitempty"`               // 缓存控制标记（Anthropic prompt caching）
+	CacheControlBlockType     string         `json:"cache_control_block_type,omitempty"`    // cache_control 原始所在 block 类型（如 "text"/"thinking"/"tool_use"/"image"/"document"），用于 Anthropic 块级断点定位
 }
 
 // ToolCall 工具调用。

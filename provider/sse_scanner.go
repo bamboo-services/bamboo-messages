@@ -35,13 +35,13 @@ const sseScannerMaxBufferSize = 16 << 20
 // 上层调用方拿到 json.RawMessage 后自行 Unmarshal 为具体类型，
 // 解析失败是上层自己的业务逻辑问题，不影响 SSEScanner 继续读流。
 type SSEScanner struct {
-	rc             io.ReadCloser    // 底层数据源（用于 Close 释放连接）
-	scanner        *bufio.Scanner   // 底层行扫描器
-	dataBuf        bytes.Buffer     // 当前事件的 data 累积缓冲（多行 data 按 \n 拼接）
-	eventType      string           // 当前事件的 event: 类型（无 event: 行时为空）
-	err            error            // 终端错误状态（scanner.Err 或 io.EOF），设置后 Next() 永远返回同一状态
-	done           bool             // 是否收到 [DONE] 哨兵
-	pendingFrames  []json.RawMessage // 粘连帧拆分后缓存的额外有效帧（GLM Issue #66 帧粘连容错）
+	rc            io.ReadCloser     // 底层数据源（用于 Close 释放连接）
+	scanner       *bufio.Scanner    // 底层行扫描器
+	dataBuf       bytes.Buffer      // 当前事件的 data 累积缓冲（多行 data 按 \n 拼接）
+	eventType     string            // 当前事件的 event: 类型（无 event: 行时为空）
+	err           error             // 终端错误状态（scanner.Err 或 io.EOF），设置后 Next() 永远返回同一状态
+	done          bool              // 是否收到 [DONE] 哨兵
+	pendingFrames []json.RawMessage // 粘连帧拆分后缓存的额外有效帧（GLM Issue #66 帧粘连容错）
 }
 
 // NewSSEScanner 从 io.ReadCloser 创建 SSE 帧解析器。

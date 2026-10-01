@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -2994,5 +2995,95 @@ func TestMessagesToProvider_MixedTextAndToolResult(t *testing.T) {
 	}
 	if result[2].Role != provider.RoleTool || result[2].ToolCallID != "call_1" {
 		t.Errorf("result[2] 期望 tool(call_1), 实际 role=%q id=%q", result[2].Role, result[2].ToolCallID)
+	}
+}
+
+// TestStreamConverter_TimingPassthrough 验证物理时间戳与请求级锚点的门面透传：
+// message_start 事件携带 Timing 锚点，后续事件携带 provider 层打点的 ReceivedAt。
+func TestStreamConverter_TimingPassthrough(t *testing.T) {
+	sc := NewStreamConverter()
+
+	requestSentAt := time.Now().Add(-8 * time.Second)
+	responseHeaderAt := time.Now().Add(-4 * time.Second)
+	anchor := &provider.TimingAnchor{RequestSentAt: requestSentAt, ResponseHeaderAt: responseHeaderAt}
+
+	frameAt := time.Now()
+
+	// start 携带锚点
+	startEvents := sc.Convert(provider.StreamEvent{
+		Type:       provider.StreamTypeStart,
+		Timing:     anchor,
+		ReceivedAt: frameAt,
+	})
+	if len(startEvents) != 1 || startEvents[0].Type != EventMessageStart {
+		t.Fatalf("期望单个 message_start 事件, 实际 %v", startEvents)
+	}
+	if startEvents[0].Timing != anchor {
+		t.Error("message_start 应透传 Timing 锚点指针")
+	}
+	if !startEvents[0].ReceivedAt.Equal(frameAt) {
+		t.Errorf("message_start ReceivedAt = %v, 期望 %v", startEvents[0].ReceivedAt, frameAt)
+	}
+
+	// text delta 的 ReceivedAt 透传到 content_block_delta
+	deltaEvents := sc.Convert(provider.StreamEvent{
+		Type:       provider.StreamTypeDelta,
+		Delta:      provider.NewBlockStartDelta("text"),
+		ReceivedAt: frameAt.Add(10 * time.Millisecond),
+	})
+	deltaEvents = append(deltaEvents, sc.Convert(provider.StreamEvent{
+		Type:       provider.StreamTypeDelta,
+		Delta:      provider.NewTextDelta("hello"),
+		ReceivedAt: frameAt.Add(20 * time.Millisecond),
+	})...)
+	found := false
+	for _, ev := range deltaEvents {
+		if ev.Type == EventContentBlockDelta {
+			found = true
+			if ev.ReceivedAt.IsZero() {
+				t.Error("content_block_delta 应携带非零 ReceivedAt")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("未找到 content_block_delta 事件")
+	}
+
+	// done 触发的终止序列也应携带 Done 事件的 ReceivedAt
+	stopEvents := sc.Convert(provider.StreamEvent{Type: provider.StreamTypeStop})
+	stopEvents = append(stopEvents, sc.Convert(provider.StreamEvent{
+		Type:       provider.StreamTypeDone,
+		ReceivedAt: frameAt.Add(30 * time.Millisecond),
+	})...)
+	for _, ev := range stopEvents {
+		if ev.ReceivedAt.IsZero() {
+			t.Errorf("终止序列事件 %v 应携带非零 ReceivedAt", ev.Type)
+		}
+	}
+}
+
+// TestStreamEvent_WireFormatExcludesTimingFields 验证新增可观测性字段
+// 不会泄漏到线上 JSON 序列化（bamboo 原生恒等 codec 的线上字节不变）。
+func TestStreamEvent_WireFormatExcludesTimingFields(t *testing.T) {
+	ev := StreamEvent{
+		Type:       EventMessageStart,
+		Message:    &BambooMessage{Role: RoleAssistant, Content: []ContentBlock{}},
+		ReceivedAt: time.Now(),
+		Timing: &provider.TimingAnchor{
+			RequestSentAt:    time.Now(),
+			ResponseHeaderAt: time.Now(),
+		},
+	}
+	data, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatalf("json.Marshal 失败: %v", err)
+	}
+	s := string(data)
+	if strings.Contains(s, "received_at") || strings.Contains(s, "ReceivedAt") {
+		t.Errorf("线上序列化不应包含 received_at 字段: %s", s)
+	}
+	if strings.Contains(s, "timing") || strings.Contains(s, "Timing") ||
+		strings.Contains(s, "request_sent_at") || strings.Contains(s, "response_header_at") {
+		t.Errorf("线上序列化不应包含 timing 锚点字段: %s", s)
 	}
 }

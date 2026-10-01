@@ -152,7 +152,7 @@ provider/
 | `RateSampleKindThinking` | 常量 | timing.go | 思考阶段速率采样 |
 | `RateSampleKindOutput` | 常量 | timing.go | 输出阶段速率采样 |
 | `RateSampleKindTool` | 常量 | timing.go | 工具调用阶段速率采样 `"tool"` |
-| `TimingStats` | 结构体 | timing.go | 流式耗时统计 (TotalDuration, FirstByteDuration/TTFT, ThinkingDuration, ContentDuration, ToolDuration, ToolTokens / TotalTokens / TokenSource) |
+| `TimingStats` | 结构体 | timing.go | 流式耗时统计 (TotalDuration, FirstByteDuration/TTFT, ResponseHeaderDuration, ThinkingDuration, ContentDuration, ToolDuration, ToolTokens / TotalTokens / TokenSource) |
 | `TokenRates` | 结构体 | timing.go | Token 生成速率 (.2f 精度): ThinkingTokensPerSec, OutputTokensPerSec, ToolTokensPerSec |
 | `minReliableDuration` | 常量 | timing.go | 最小可信耗时阈值 (1ms)，低于此值的速率标记为不可靠（负值） |
 | `computeRate` | 方法 | timing.go | 计算 token/s 速率，耗时低于阈值时取负标记不可靠 |
@@ -204,6 +204,8 @@ provider/
 - **公共 Options 嵌入模式** — `provider.Options` 通过匿名嵌入为各 Provider 提供统一的拦截器注册能力；`Interceptors` 字段首字母大写保证嵌入子包后仍可访问
 - **统一 SSE 解析** — 所有适配器流式响应使用 `provider.SSEScanner` 解析，内置 json.Valid 校验与 GLM 截断容错
 - **TimingCollector 零侵入** — 用户代码主动创建 `TimingCollector` 并在事件循环中调用 `Observe(event)`，不修改 StreamEvent 结构；非并发安全（单 goroutine 使用）
+- **物理时间锚点（TimingAnchor + ReceivedAt）** — 适配器在 Do 调用前打点 `RequestSentAt`、返回后打点 `ResponseHeaderAt`，封装为 `provider.TimingAnchor` 随首个 `StreamTypeStart` 事件（`Timing` 字段）携带；每个事件在 SSE 帧解析时打点 `ReceivedAt`（本地合成事件用 `time.Now()`）；`Observe` 优先消费事件自带时间戳，零值回退本地时刻；`Stats()` 的 TTFT/TotalDuration 锚定 `RequestSentAt`（无锚点回退 StreamTypeStart），新增 `ResponseHeaderDuration`；两个字段均 `json:"-"` 不参与线上序列化
+- **TPS 不可靠阈值 100ms** — `minReliableDuration = 100ms`；阶段耗时低于阈值（TCP/代理缓冲倒灌）时速率为负值标记，绝对值 = tokens/阈值 的参考估算
 - **TimingCollector 阶段状态机** — 内部 `collectorPhase` (init → thinking → content → tool) 驱动耗时计算，tool 阶段从首个 tool BlockStart/ToolCall 到 Stop
 - **Token 估算规则标准化** — CJK 1:1, Latin 4:1, Other 2:1
 - **不可靠速率标记** — 阶段耗时低于 `minReliableDuration` (1ms) 时，`Rates()` 返回负值标记不可靠；绝对值为基于阈值估算的参考值（如 -6000 表示不可靠的 6000 tok/s）；零值表示阶段未发生
@@ -218,6 +220,7 @@ provider/
 - **禁止** 修改 `StreamEvent` 传递后的字段 — 值类型传递后应视为只读
 - **禁止** 裸类型断言访问 ProviderExtra — 必须使用 GetExtra* helpers
 - **禁止** 在 stream.go 中不关闭 channel — 必须在 goroutine 结束时 close
+- **禁止** 下游补点计时 — 耗时统计必须基于事件自带的 `ReceivedAt` / `TimingAnchor` 物理时间戳，禁止在下游消费 channel 时用本地 `time.Now()` 重打时间戳计算 TTFT（会被 channel 缓冲与调度延迟扭曲）
 - **禁止** 适配器之间互相引用 — 每个适配器独立，零耦合
 - **禁止** 将 `ThinkingContent` 与 `Content` 混淆 — 前者是 thinking block 的内容，后者是 text block 的内容
 - **禁止** 将 `ReasoningID` 与 `ThinkingSignature` 混用 — 前者是 OpenAI Responses reasoning item 标识，后者是加密内容

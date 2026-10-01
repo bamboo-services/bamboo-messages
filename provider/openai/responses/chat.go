@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -52,12 +53,16 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 		}
 
 		// 发送 HTTP 请求（含 debug 日志）
+		// 物理时间锚点：请求发出前打点（TTFT / 总耗时的真实起点）
+		requestSentAt := time.Now()
 		resp, err := p.httpClient.DoWithDebug(ctx, "POST", "/responses", body, "openai-responses", "POST /responses (streaming, model="+config.Model+")")
+		responseHeaderAt := time.Now()
 		if err != nil {
 			select {
 			case eventCh <- provider.StreamEvent{
-				Type: provider.StreamTypeError,
-				Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses 流式对话请求失败: %v", err), 0),
+				Type:       provider.StreamTypeError,
+				Err:        pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses 流式对话请求失败: %v", err), 0),
+				ReceivedAt: time.Now(),
 			}:
 			case <-ctx.Done():
 			}
@@ -102,6 +107,12 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			_ = resp.Body.Close()
 		}()
 
+		// timingAnchor 请求级物理锚点，随首个 StreamTypeStart 事件携带给下游
+		timingAnchor := &provider.TimingAnchor{
+			RequestSentAt:    requestSentAt,
+			ResponseHeaderAt: responseHeaderAt,
+		}
+
 		textBlockStarted := false
 		thinkingBlockStarted := false
 		startSent := false
@@ -109,6 +120,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 
 		for {
 			eventType, data, done, scanErr := scanner.Next()
+			frameAt := time.Now() // 帧到达物理时间戳：本帧派生的所有事件统一携带
 			provider.DebugSSEFrame("openai-responses", eventType, data)
 			if done {
 				break
@@ -124,8 +136,9 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 				}
 				select {
 				case eventCh <- provider.StreamEvent{
-					Type: provider.StreamTypeError,
-					Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses SSE 流读取失败: %v", scanErr), 0),
+					Type:       provider.StreamTypeError,
+					Err:        pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses SSE 流读取失败: %v", scanErr), 0),
+					ReceivedAt: frameAt,
 				}:
 				case <-ctx.Done():
 					return
@@ -150,7 +163,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			// 避免伪造 resp_<nano> 打断 Grok previous_response_id 链路。
 			if !startSent {
 				startSent = true
-				startEv := provider.StreamEvent{Type: provider.StreamTypeStart}
+				startEv := provider.StreamEvent{Type: provider.StreamTypeStart, Timing: timingAnchor, ReceivedAt: frameAt}
 				if event.Type == "response.created" && event.Response != nil && event.Response.ID != "" {
 					startEv.Delta = provider.NewMetadataDelta(event.Response.ID, "", "")
 				}
@@ -161,12 +174,13 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 				}
 			}
 
-			// 分发事件到处理函数
+			// 分发事件到处理函数（统一盖本帧到达时间戳）
 			events := p.handleStreamEvent(ctx, event, &textBlockStarted, &thinkingBlockStarted)
 			for _, e := range events {
 				if e.Type == provider.StreamTypeStop {
 					stopSent = true
 				}
+				e.ReceivedAt = frameAt
 				select {
 				case eventCh <- e:
 				case <-ctx.Done():
@@ -185,6 +199,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			case eventCh <- provider.StreamEvent{
 				Type:         provider.StreamTypeStop,
 				FinishReason: finishReason,
+				ReceivedAt:   time.Now(),
 			}:
 			case <-ctx.Done():
 				return
@@ -194,7 +209,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 		// 如果因 ctx 取消等原因未发送过 Start，补发一个 Start 以保证 channel 语义完整
 		if !startSent {
 			select {
-			case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
+			case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart, Timing: timingAnchor, ReceivedAt: time.Now()}:
 			case <-ctx.Done():
 				return
 			}
@@ -202,7 +217,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 
 		// 发送 StreamTypeDone 结束流
 		select {
-		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone}:
+		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone, ReceivedAt: time.Now()}:
 		case <-ctx.Done():
 		}
 	}()

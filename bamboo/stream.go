@@ -1,5 +1,11 @@
 package bamboo
 
+import (
+	"time"
+
+	"github.com/bamboo-services/bamboo-messages/provider"
+)
+
 // StreamEventType 流事件类型标识。
 //
 // 用于标识流式传输过程中的不同事件类型，如消息开始、内容块增量、消息结束等。
@@ -55,9 +61,9 @@ const (
 // 不同增量类型对应不同字段：文本增量使用 Text 字段、思考过程增量使用 Thinking 字段、
 // 工具调用参数增量使用 PartialJSON 字段、思考签名增量使用 Signature 字段。
 type StreamDelta struct {
-	Type        StreamDeltaType `json:"type"`                   // 增量类型
-	Text        string          `json:"text,omitempty"`         // 文本增量内容（Type 为 DeltaTextDelta 时使用）
-	Thinking    string          `json:"thinking,omitempty"`     // 思考过程增量内容（Type 为 DeltaThinkingDelta 时使用）
+	Type              StreamDeltaType `json:"type"`                         // 增量类型
+	Text              string          `json:"text,omitempty"`               // 文本增量内容（Type 为 DeltaTextDelta 时使用）
+	Thinking          string          `json:"thinking,omitempty"`           // 思考过程增量内容（Type 为 DeltaThinkingDelta 时使用）
 	Signature         string          `json:"signature,omitempty"`          // 思考签名增量（Type 为 DeltaSignature 时使用）
 	SignatureProvider string          `json:"signature_provider,omitempty"` // 签名血统，随 signature_delta 带出
 	PartialJSON       string          `json:"partial_json,omitempty"`       // 工具调用参数增量（Type 为 DeltaInputJSON 时使用）
@@ -94,11 +100,13 @@ type MessageDelta struct {
 // Delta 字段使用 any 类型以兼容 StreamDelta 和 MessageDelta 两种类型，
 // 调用方可通过类型断言获取具体类型。
 type StreamEvent struct {
-	Type         StreamEventType `json:"type"`                    // 事件类型
-	Message      *BambooMessage  `json:"message,omitempty"`       // 完整消息（仅 message_start 事件使用）
-	Index        int             `json:"index,omitempty"`         // 内容块索引（content_block_start/delta/stop 事件使用）
-	ContentBlock ContentBlock    `json:"content_block,omitempty"` // 内容块（仅 content_block_start 事件使用）
-	Delta        any             `json:"delta,omitempty"`         // 增量数据，可为 *StreamDelta 或 *MessageDelta（通过 any 兼容两种类型）
-	Usage        *Usage          `json:"usage,omitempty"`         // Token 用量统计（message_start 和 message_delta 事件使用）
-	Error        *BambooError    `json:"error,omitempty"`         // 错误详情（仅 error 事件使用）
+	Type         StreamEventType        `json:"type"`                    // 事件类型
+	Message      *BambooMessage         `json:"message,omitempty"`       // 完整消息（仅 message_start 事件使用）
+	Index        int                    `json:"index,omitempty"`         // 内容块索引（content_block_start/delta/stop 事件使用）
+	ContentBlock ContentBlock           `json:"content_block,omitempty"` // 内容块（仅 content_block_start 事件使用）
+	Delta        any                    `json:"delta,omitempty"`         // 增量数据，可为 *StreamDelta 或 *MessageDelta（通过 any 兼容两种类型）
+	Usage        *Usage                 `json:"usage,omitempty"`         // Token 用量统计（message_start 和 message_delta 事件使用）
+	Error        *BambooError           `json:"error,omitempty"`         // 错误详情（仅 error 事件使用）
+	ReceivedAt   time.Time              `json:"-"`                       // 该事件对应上游帧到达的物理时间戳，由 provider 层打点并经 StreamConverter 透传；零值表示未打点。仅为可观测性元数据，不参与任何线上协议序列化。
+	Timing       *provider.TimingAnchor `json:"-"`                       // 请求级物理时间锚点，仅挂在 message_start 事件上；携带 HTTP 请求发出与响应头到达时刻，供下游计时器计算真实 TTFT。
 }

@@ -226,10 +226,10 @@ func TestAudit_ResponseFormat_Mapping(t *testing.T) {
 
 func TestBuildEndpoint_ModelSanitization(t *testing.T) {
 	tests := []struct {
-		name       string
-		model      string
-		stream     bool
-		wantPath   string
+		name     string
+		model    string
+		stream   bool
+		wantPath string
 	}{
 		{"standard_model", "gemini-2.5-flash", false, "/v1beta/models/gemini-2.5-flash:generateContent"},
 		{"standard_model_stream", "gemini-2.5-pro", true, "/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse"},

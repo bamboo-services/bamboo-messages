@@ -29,11 +29,18 @@ const (
 // 记录单次流式请求中各阶段的耗时，用于性能审计和监控。
 // 所有 Duration 字段在对应阶段未发生时为零值。
 type TimingStats struct {
-	// TotalDuration 总耗时 — 从 StreamTypeStart 到 StreamTypeStop。
+	// TotalDuration 总耗时 — 优先从 HTTP 请求发出（RequestSentAt 锚点）到
+	// StreamTypeStop，包含建连、排队与 Prefill 全程；无锚点时从 StreamTypeStart 起算。
 	TotalDuration time.Duration
 
-	// FirstByteDuration 首字耗时（TTFT）— 从 Start 到第一个内容 Delta（含思考）。
+	// FirstByteDuration 首字耗时（TTFT）— 优先从 HTTP 请求发出（RequestSentAt 锚点）
+	// 到第一个内容 Delta（含思考），覆盖完整网络等待与 Prefill；无锚点时从
+	// StreamTypeStart 起算（旧式 Provider 回退语义）。
 	FirstByteDuration time.Duration
+
+	// ResponseHeaderDuration HTTP 层首包耗时 — 从请求发出到响应头到达
+	// （网络建连 + TLS + 服务端排队）。仅当 Start 事件携带 TimingAnchor 时非零。
+	ResponseHeaderDuration time.Duration
 
 	// ThinkingDuration 思考阶段耗时 — 从首个 thinking BlockStart 到思考阶段结束（即 text BlockStart 或 Stop）。
 	ThinkingDuration time.Duration
@@ -156,9 +163,13 @@ func round2(v float64) float64 {
 }
 
 // minReliableDuration 最小可信耗时阈值。
-// 低于此值时，阶段内事件密集到达（channel buffer 导致 Observe 时间戳几乎相同），
-// 计算出的 token/s 严重失真（如 5k+ tok/s），用负号标记（如 -6000 表示不可靠的 6000 tok/s）。
-const minReliableDuration = time.Millisecond
+//
+// 阶段耗时低于此值时，几乎必然是 TCP/反向代理缓冲倒灌（多个 SSE 帧被打包在
+// 同一批次内送达），测得的 "耗时" 仅反映本地出缓冲速率而非真实生成速率，
+// 计算出的 token/s 严重失真（生产实测可达 45 万 tok/s 离群值）。
+// 此类样本一律用负号标记不可靠（如 -6000 表示基于阈值的参考估算）。
+// 缓冲代理下真实生成速率在本地不可测，诚实标记不可靠是唯一正确行为。
+const minReliableDuration = 100 * time.Millisecond
 
 // ════════════════════════════════════════════════════════════════════════════
 // TimingCollector
@@ -183,10 +194,14 @@ const minReliableDuration = time.Millisecond
 //	series := collector.RateSeries() // 由上层业务通过 RecordRateSample 填充
 type TimingCollector struct {
 	// 时间戳
-	startTime     time.Time // StreamTypeStart 时刻
+	startTime     time.Time // StreamTypeStart 时刻（优先事件 ReceivedAt）
 	firstByteTime time.Time // 第一个 Delta 时刻
 	stopTime      time.Time // StreamTypeStop 时刻
 	lastEventTime time.Time // 最后一个事件时刻（取消时回退使用）
+
+	// 请求级物理锚点（来自 StreamTypeStart 事件携带的 TimingAnchor，可选）
+	requestSentAt    time.Time // HTTP 请求发出时刻（真实 TTFT / 总耗时起点）
+	responseHeaderAt time.Time // HTTP 响应头到达时刻（网络 + 首包时延终点）
 
 	// 阶段时间戳
 	thinkingStart time.Time // 首个 thinking BlockStart 时刻
@@ -221,8 +236,15 @@ func NewTimingCollector() *TimingCollector {
 //
 // 对每个从 provider.Chat() 返回的 StreamEvent 调用此方法。
 // 方法内部根据事件类型和 Delta 类型驱动状态机转换。
+//
+// 时间基准：优先使用事件携带的 ReceivedAt 物理时间戳（由适配器在
+// SSE 帧解析时打点），仅当 ReceivedAt 为零值时回退到本地 time.Now()。
+// 这使耗时统计免疫 channel 缓冲、下游调度延迟与 GC 停顿。
 func (tc *TimingCollector) Observe(event StreamEvent) {
-	now := time.Now()
+	now := event.ReceivedAt
+	if now.IsZero() {
+		now = time.Now()
+	}
 	tc.lastEventTime = now
 
 	// 缺失 Start 事件时，fallback startTime 到首个非 Start 事件时间
@@ -234,6 +256,15 @@ func (tc *TimingCollector) Observe(event StreamEvent) {
 	case StreamTypeStart:
 		if tc.startTime.IsZero() {
 			tc.startTime = now
+		}
+		// 记录请求级物理锚点（适配器随 Start 事件携带）
+		if event.Timing != nil {
+			if !event.Timing.RequestSentAt.IsZero() {
+				tc.requestSentAt = event.Timing.RequestSentAt
+			}
+			if !event.Timing.ResponseHeaderAt.IsZero() {
+				tc.responseHeaderAt = event.Timing.ResponseHeaderAt
+			}
 		}
 
 	case StreamTypeDelta:
@@ -271,19 +302,19 @@ func (tc *TimingCollector) handleDelta(delta StreamDelta[any], now time.Time) {
 				}
 				tc.phase = phaseContent
 
-		case "tool_use":
-			if tc.toolStart.IsZero() {
-				tc.toolStart = now
-			}
-			// 结束思考阶段（thinking → tool_use 直接切换，无中间 text）
-			if tc.thinkingEnd.IsZero() && !tc.thinkingStart.IsZero() {
-				tc.thinkingEnd = now
-			}
-			// 结束内容阶段
-			if tc.contentEnd.IsZero() && !tc.contentStart.IsZero() {
-				tc.contentEnd = now
-			}
-			tc.phase = phaseTool
+			case "tool_use":
+				if tc.toolStart.IsZero() {
+					tc.toolStart = now
+				}
+				// 结束思考阶段（thinking → tool_use 直接切换，无中间 text）
+				if tc.thinkingEnd.IsZero() && !tc.thinkingStart.IsZero() {
+					tc.thinkingEnd = now
+				}
+				// 结束内容阶段
+				if tc.contentEnd.IsZero() && !tc.contentStart.IsZero() {
+					tc.contentEnd = now
+				}
+				tc.phase = phaseTool
 			}
 		}
 
@@ -372,14 +403,26 @@ func (tc *TimingCollector) Stats() TimingStats {
 		endTime = tc.lastEventTime
 	}
 
-	// 总耗时
-	if !tc.startTime.IsZero() && !endTime.IsZero() {
-		stats.TotalDuration = endTime.Sub(tc.startTime)
+	// effectiveStartTime 有效起始时间：优先 HTTP 请求发出锚点（物理保真，
+	// 包含建连/排队/Prefill 全程），无锚点时回退 StreamTypeStart 时刻。
+	startTime := tc.requestSentAt
+	if startTime.IsZero() {
+		startTime = tc.startTime
 	}
 
-	// 首字耗时
-	if !tc.startTime.IsZero() && !tc.firstByteTime.IsZero() {
-		stats.FirstByteDuration = tc.firstByteTime.Sub(tc.startTime)
+	// 总耗时
+	if !startTime.IsZero() && !endTime.IsZero() {
+		stats.TotalDuration = endTime.Sub(startTime)
+	}
+
+	// 首字耗时：从请求发出（或 Start）到第一个内容 Delta，覆盖完整网络等待
+	if !startTime.IsZero() && !tc.firstByteTime.IsZero() {
+		stats.FirstByteDuration = tc.firstByteTime.Sub(startTime)
+	}
+
+	// HTTP 层首包耗时（仅当锚点存在时非零）
+	if !tc.requestSentAt.IsZero() && !tc.responseHeaderAt.IsZero() {
+		stats.ResponseHeaderDuration = tc.responseHeaderAt.Sub(tc.requestSentAt)
 	}
 
 	// 思考阶段耗时

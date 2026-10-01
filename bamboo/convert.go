@@ -547,7 +547,7 @@ func (sc *StreamConverter) Convert(event provider.StreamEvent) []StreamEvent {
 	case provider.StreamTypeStart:
 		return sc.handleStart(event)
 	case provider.StreamTypeDelta:
-		return sc.handleDelta(event.Delta)
+		return sc.stampReceivedAt(event.ReceivedAt, sc.handleDelta(event.Delta))
 	case provider.StreamTypeStop:
 		sc.recordFinishReason(event.FinishReason)
 		return nil
@@ -555,12 +555,29 @@ func (sc *StreamConverter) Convert(event provider.StreamEvent) []StreamEvent {
 		if !sc.started || sc.stopHandled {
 			return nil
 		}
-		return sc.handleStop()
+		return sc.stampReceivedAt(event.ReceivedAt, sc.handleStop())
 	case provider.StreamTypeError:
-		return sc.handleError(event.Err)
+		return sc.stampReceivedAt(event.ReceivedAt, sc.handleError(event.Err))
 	default:
 		return nil
 	}
+}
+
+// stampReceivedAt 把 provider 事件的物理到达时间戳透传到本批产出事件上。
+//
+// 上游 provider 层在 SSE 帧解析时为事件打点 ReceivedAt；同一 provider 事件
+// 可能产出多个 bamboo 事件（如 handleStop 的终止序列），它们共享同一时间戳。
+// 仅覆盖零值字段，不覆盖下游已显式设置的时间戳。
+func (sc *StreamConverter) stampReceivedAt(at time.Time, events []StreamEvent) []StreamEvent {
+	if at.IsZero() {
+		return events
+	}
+	for i := range events {
+		if events[i].ReceivedAt.IsZero() {
+			events[i].ReceivedAt = at
+		}
+	}
+	return events
 }
 
 // recordFinishReason 以优先级策略记录完成原因。
@@ -612,6 +629,9 @@ func (sc *StreamConverter) handleStart(event provider.StreamEvent) []StreamEvent
 		Type:    EventMessageStart,
 		Message: &BambooMessage{Role: RoleAssistant, Content: []ContentBlock{}},
 		Usage:   &Usage{},
+		// 透传 provider 层的物理时间戳与请求级锚点，供下游计时器计算真实 TTFT
+		ReceivedAt: event.ReceivedAt,
+		Timing:     event.Timing,
 	}
 	if event.Delta.Type == provider.StreamDeltaTypeMetadata {
 		if data, ok := event.Delta.Data.(provider.MetadataData); ok {

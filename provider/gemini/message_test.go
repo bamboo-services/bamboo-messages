@@ -559,7 +559,7 @@ func TestBuildMessages_FallbackResultByName(t *testing.T) {
 		{
 			Role:       provider.RoleTool,
 			ToolCallID: "client_call_abc", // ID 不匹配
-			ToolName:   "inspect",          // 但函数名匹配
+			ToolName:   "inspect",         // 但函数名匹配
 			Content:    "inspect_success",
 		},
 	})

@@ -187,14 +187,14 @@ func TestTimingCollector_Rates(t *testing.T) {
 
 	rates := tc.Rates()
 
-	// 思考 token/s 应 > 0
-	if rates.ThinkingTokensPerSec <= 0 {
-		t.Errorf("ThinkingTokensPerSec should be > 0, got %v", rates.ThinkingTokensPerSec)
+	// 思考 token/s 应非零（低于 minReliableDuration 时为负值不可靠标记）
+	if rates.ThinkingTokensPerSec == 0 {
+		t.Errorf("ThinkingTokensPerSec should be non-zero, got 0")
 	}
 
-	// 输出 token/s 应 > 0
-	if rates.OutputTokensPerSec <= 0 {
-		t.Errorf("OutputTokensPerSec should be > 0, got %v", rates.OutputTokensPerSec)
+	// 输出 token/s 应非零（低于 minReliableDuration 时为负值不可靠标记）
+	if rates.OutputTokensPerSec == 0 {
+		t.Errorf("OutputTokensPerSec should be non-zero, got 0")
 	}
 
 	// 验证 .2f 精度（小数点后不超过 2 位）
@@ -223,8 +223,9 @@ func TestTimingCollector_RatesWithNoThinking(t *testing.T) {
 	if rates.ThinkingTokensPerSec != 0 {
 		t.Errorf("ThinkingTokensPerSec should be 0 when no thinking, got %v", rates.ThinkingTokensPerSec)
 	}
-	if rates.OutputTokensPerSec <= 0 {
-		t.Errorf("OutputTokensPerSec should be > 0, got %v", rates.OutputTokensPerSec)
+	// 阶段耗时低于 minReliableDuration 时为负值不可靠标记，仅断言非零
+	if rates.OutputTokensPerSec == 0 {
+		t.Errorf("OutputTokensPerSec should be non-zero, got 0")
 	}
 }
 
@@ -443,8 +444,9 @@ func TestTimingCollector_NoStopEvent(t *testing.T) {
 	}
 
 	rates := tc.Rates()
-	if rates.OutputTokensPerSec <= 0 {
-		t.Errorf("OutputTokensPerSec should be > 0 on cancel, got %v", rates.OutputTokensPerSec)
+	// 阶段耗时低于 minReliableDuration 时输出负值不可靠标记（缓冲倒灌防护）
+	if rates.OutputTokensPerSec == 0 {
+		t.Errorf("OutputTokensPerSec should be non-zero on cancel, got 0")
 	}
 }
 
@@ -473,8 +475,9 @@ func TestTimingCollector_CancelDuringThinking(t *testing.T) {
 	}
 
 	rates := tc.Rates()
-	if rates.ThinkingTokensPerSec <= 0 {
-		t.Errorf("ThinkingTokensPerSec should be > 0 on cancel during thinking, got %v", rates.ThinkingTokensPerSec)
+	// 阶段耗时低于 minReliableDuration 时输出负值不可靠标记（缓冲倒灌防护）
+	if rates.ThinkingTokensPerSec == 0 {
+		t.Errorf("ThinkingTokensPerSec should be non-zero on cancel during thinking, got 0")
 	}
 }
 
@@ -611,8 +614,18 @@ func TestTimingCollector_Rates_ToolTokensPerSec(t *testing.T) {
 	tc.Observe(makeStopEvent())
 
 	rates := tc.Rates()
-	if rates.ToolTokensPerSec <= 0 {
-		t.Errorf("ToolTokensPerSec should be > 0, got %v", rates.ToolTokensPerSec)
+	stats := tc.Stats()
+	if stats.ToolDuration >= minReliableDuration {
+		// 阶段耗时达到可信阈值时应输出正常正速率
+		if rates.ToolTokensPerSec <= 0 {
+			t.Errorf("ToolTokensPerSec should be > 0, got %v", rates.ToolTokensPerSec)
+		}
+		return
+	}
+	// 阶段耗时低于阈值（TCP/代理缓冲倒灌）：负值不可靠标记
+	if rates.ToolTokensPerSec >= 0 {
+		t.Errorf("ToolTokensPerSec should be negative (unreliable) for sub-%v duration, got %v",
+			minReliableDuration, rates.ToolTokensPerSec)
 	}
 }
 
@@ -736,9 +749,10 @@ func TestTimingCollector_RatesReliablePositive(t *testing.T) {
 	time.Sleep(2 * time.Millisecond)
 
 	tc.Observe(makeDeltaEvent(StreamDeltaTypeBlockStart, BlockStartData{BlockType: "text"}))
-	time.Sleep(20 * time.Millisecond)
+	// 阶段耗时必须超过 minReliableDuration 才产出可信正速率
+	time.Sleep(60 * time.Millisecond)
 	tc.Observe(makeDeltaEvent(StreamDeltaTypeTextOutput, TextData("hello world foo bar")))
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(60 * time.Millisecond)
 	tc.Observe(makeStopEvent())
 
 	rates := tc.Rates()
@@ -809,5 +823,138 @@ func TestTimingCollector_RatesPhaseNotStarted_ReturnsZero(t *testing.T) {
 	}
 	if rates.ToolTokensPerSec != 0 {
 		t.Errorf("ToolTokensPerSec should be 0 (phase not started), got %v", rates.ToolTokensPerSec)
+	}
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 物理时间锚点（TimingAnchor）测试
+// ════════════════════════════════════════════════════════════════════════════
+
+// TestTimingCollector_AnchorTTFTCoversNetworkWait 验证锚点模式下 TTFT 覆盖完整网络等待。
+//
+// 生产缺陷复现：上游 Prefill 耗时 8.7s，旧实现 TTFT≈0~5ms（Start 在首帧后才发出）。
+// 锚点模式下 TTFT = 首内容 Delta.ReceivedAt − RequestSentAt，必须覆盖网络等待。
+func TestTimingCollector_AnchorTTFTCoversNetworkWait(t *testing.T) {
+	requestSentAt := time.Now()
+	responseHeaderAt := requestSentAt.Add(4 * time.Second)
+	firstFrameAt := requestSentAt.Add(8700 * time.Millisecond) // 模拟 8.7s Prefill
+	stopAt := firstFrameAt.Add(120 * time.Millisecond)
+
+	tc := NewTimingCollector()
+
+	// Start 事件携带锚点，ReceivedAt = 首帧到达时刻
+	start := makeEvent(StreamTypeStart)
+	start.Timing = &TimingAnchor{RequestSentAt: requestSentAt, ResponseHeaderAt: responseHeaderAt}
+	start.ReceivedAt = firstFrameAt
+	tc.Observe(start)
+
+	// 首个内容 Delta 在同一帧内到达
+	delta := makeDeltaEvent(StreamDeltaTypeTextOutput, TextData("hello"))
+	delta.ReceivedAt = firstFrameAt
+	tc.Observe(delta)
+
+	stop := makeStopEvent()
+	stop.ReceivedAt = stopAt
+	tc.Observe(stop)
+
+	stats := tc.Stats()
+
+	// TTFT 必须覆盖 8.7s 网络等待（旧实现测出 ≈0ms）
+	if stats.FirstByteDuration < 8*time.Second {
+		t.Errorf("FirstByteDuration = %v, want >= 8s (network wait must be covered)", stats.FirstByteDuration)
+	}
+	// TotalDuration 从请求发出起算
+	if stats.TotalDuration < 8*time.Second {
+		t.Errorf("TotalDuration = %v, want >= 8s (anchored to RequestSentAt)", stats.TotalDuration)
+	}
+	// 物理不变量：TTFT ≤ TotalDuration
+	if stats.FirstByteDuration > stats.TotalDuration {
+		t.Errorf("invariant violated: FirstByteDuration (%v) > TotalDuration (%v)",
+			stats.FirstByteDuration, stats.TotalDuration)
+	}
+	// HTTP 层首包耗时
+	wantHeader := 4 * time.Second
+	if stats.ResponseHeaderDuration < wantHeader-10*time.Millisecond || stats.ResponseHeaderDuration > wantHeader+10*time.Millisecond {
+		t.Errorf("ResponseHeaderDuration = %v, want ≈ %v", stats.ResponseHeaderDuration, wantHeader)
+	}
+}
+
+// TestTimingCollector_AnchorAbsentFallback 验证无锚点（旧式 Provider）回退语义：
+// ResponseHeaderDuration 为零，TTFT/TotalDuration 从 StreamTypeStart 起算。
+func TestTimingCollector_AnchorAbsentFallback(t *testing.T) {
+	tc := NewTimingCollector()
+	tc.Observe(makeEvent(StreamTypeStart))
+	time.Sleep(2 * time.Millisecond)
+	tc.Observe(makeDeltaEvent(StreamDeltaTypeTextOutput, TextData("hello")))
+	time.Sleep(2 * time.Millisecond)
+	tc.Observe(makeStopEvent())
+
+	stats := tc.Stats()
+	if stats.ResponseHeaderDuration != 0 {
+		t.Errorf("ResponseHeaderDuration should be 0 without anchor, got %v", stats.ResponseHeaderDuration)
+	}
+	if stats.FirstByteDuration < 0 || stats.TotalDuration < 0 {
+		t.Errorf("fallback durations should be non-negative")
+	}
+	if stats.FirstByteDuration > stats.TotalDuration {
+		t.Errorf("invariant violated: FirstByteDuration (%v) > TotalDuration (%v)",
+			stats.FirstByteDuration, stats.TotalDuration)
+	}
+}
+
+// TestTimingCollector_ReceivedAtPreferredOverObserveTime 验证 Observe 优先消费事件
+// 携带的 ReceivedAt 物理时间戳，而非本地消费时刻。
+func TestTimingCollector_ReceivedAtPreferredOverObserveTime(t *testing.T) {
+	frameAt := time.Now().Add(-10 * time.Second) // 事件产生于 10s 前
+
+	tc := NewTimingCollector()
+	start := makeEvent(StreamTypeStart)
+	start.ReceivedAt = frameAt
+	tc.Observe(start)
+
+	delta := makeDeltaEvent(StreamDeltaTypeTextOutput, TextData("hello"))
+	delta.ReceivedAt = frameAt.Add(500 * time.Millisecond)
+	tc.Observe(delta)
+
+	tc.Observe(makeStopEvent()) // 无 ReceivedAt → 回退本地时刻（远晚于物理时刻）
+
+	stats := tc.Stats()
+	if stats.FirstByteDuration != 500*time.Millisecond {
+		t.Errorf("FirstByteDuration = %v, want 500ms (from ReceivedAt, not Observe time)", stats.FirstByteDuration)
+	}
+}
+
+// TestTimingCollector_BurstTokensMarkedUnreliable 验证缓冲倒灌防护：
+// 短窗口内大批 token（如 2ms 内 966 个）必须输出负值不可靠标记，
+// 绝对值以 minReliableDuration 为分母，杜绝 45 万 tok/s 离群值。
+func TestTimingCollector_BurstTokensMarkedUnreliable(t *testing.T) {
+	frameAt := time.Now()
+	tc := NewTimingCollector()
+
+	start := makeEvent(StreamTypeStart)
+	start.Timing = &TimingAnchor{RequestSentAt: frameAt, ResponseHeaderAt: frameAt}
+	start.ReceivedAt = frameAt
+	tc.Observe(start)
+
+	bs := makeDeltaEvent(StreamDeltaTypeBlockStart, BlockStartData{BlockType: "thinking"})
+	bs.ReceivedAt = frameAt
+	tc.Observe(bs)
+
+	// 966 个 CJK token 在 2ms 内倒灌（模拟代理缓冲批次送达）
+	th := makeDeltaEvent(StreamDeltaTypeThinking, ThinkingData(strings.Repeat("思", 966)))
+	th.ReceivedAt = frameAt.Add(2 * time.Millisecond)
+	tc.Observe(th)
+
+	stop := makeStopEvent()
+	stop.ReceivedAt = frameAt.Add(2 * time.Millisecond)
+	tc.Observe(stop)
+
+	rates := tc.Rates()
+	if rates.ThinkingTokensPerSec >= 0 {
+		t.Fatalf("ThinkingTokensPerSec = %v, want negative (unreliable) for 2ms burst", rates.ThinkingTokensPerSec)
+	}
+	// 不可靠参考值 = tokens / minReliableDuration，绝对值不应超过 966/0.1s = 9660
+	if abs := -rates.ThinkingTokensPerSec; abs > 9660+1 {
+		t.Errorf("unreliable reference rate |%v| exceeds tokens/minReliableDuration bound", abs)
 	}
 }

@@ -1,6 +1,10 @@
 package provider
 
-import pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
+import (
+	"time"
+
+	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
+)
 
 // StreamEvent 表示流处理管道中产生的单个离散事件或信号。
 // 它封装了事件的基本分类信息、负载内容以及处理过程中可能产生的错误状态。
@@ -13,6 +17,21 @@ type StreamEvent struct {
 	Err          *pkgErrors.BambooError `json:"err" xml:"err"`                                         // 字段用于在事件处理过程中捕获和传递可能发生的错误状态，类型为 BambooError，允许下游组件根据该错误信息进行适当的错误处理或日志记录。
 	FinishReason FinishReason           `json:"finish_reason,omitempty" xml:"finish_reason,omitempty"` // 完成原因，仅在 StreamTypeStop 事件中由适配器填充，标识流结束的具体原因。
 	StatusCode   int                    `json:"status_code,omitempty" xml:"status_code,omitempty"`     // 上游 HTTP 状态码（仅在 StreamTypeError 事件中填充，如 429/401/500），0 表示不适用。
+	ReceivedAt   time.Time              `json:"-" xml:"-"`                                             // 该事件对应上游帧到达（解析）的物理时间戳，由适配器在 SSE 帧解析时打点；零值表示未打点，下游回退到消费时刻。仅为可观测性元数据，不参与任何线上协议序列化。
+	Timing       *TimingAnchor          `json:"-" xml:"-"`                                             // 请求级物理时间锚点，仅挂在 StreamTypeStart 事件上；携带 HTTP 请求发出与响应头到达时刻，供下游 TimingCollector 计算真实 TTFT。
+}
+
+// TimingAnchor 请求级物理时间锚点。
+//
+// 由 Provider 适配器在流式请求的关键网络节点打点，随 StreamTypeStart 事件携带给下游：
+//   - RequestSentAt:    适配器调用 HTTP 客户端发起请求前一刻（DNS/TLS/排队/Prefill 的全程起点）
+//   - ResponseHeaderAt: HTTP 响应头到达（Do 返回）后一刻（网络 + 服务端首包时延终点）
+//
+// 下游 TimingCollector 基于锚点计算物理保真的 TTFT 与总耗时，
+// 确保 TTFT ≤ TotalDuration 恒成立，不受 channel 缓冲与下游调度延迟影响。
+type TimingAnchor struct {
+	RequestSentAt    time.Time // HTTP 请求发出时刻
+	ResponseHeaderAt time.Time // HTTP 响应头到达时刻
 }
 
 // StreamDelta 流增量数据，支持泛型以确保类型安全

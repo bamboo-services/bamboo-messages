@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
@@ -399,4 +400,72 @@ func indexOf(s, substr string) int {
 		}
 	}
 	return -1
+}
+
+// TestChat_TimingAnchor 验证流式事件的物理时间锚点：
+// Start 事件携带 TimingAnchor（RequestSentAt/ResponseHeaderAt），
+// 服务端注入延迟后 TTFT 必须覆盖该延迟，且 RequestSentAt ≤ ResponseHeaderAt ≤ 首帧时刻。
+func TestChat_TimingAnchor(t *testing.T) {
+	frame := `{"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		time.Sleep(150 * time.Millisecond) // 模拟上游 Prefill 延迟
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", frame)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	p := newTestProvider(server)
+	ctx := context.Background()
+	config := &provider.ChatConfig{Model: "gemini-2.5-flash"}
+	ch := p.Chat(ctx, []provider.Message{{Role: provider.RoleUser, Content: "Hi"}}, config)
+	events := collectEvents(ch)
+
+	startIdx := findEventType(events, provider.StreamTypeStart)
+	if startIdx < 0 {
+		t.Fatal("expected StreamTypeStart event, not found")
+	}
+	startEv := events[startIdx]
+	if startEv.Timing == nil {
+		t.Fatal("Start event should carry TimingAnchor, got nil")
+	}
+	if startEv.Timing.RequestSentAt.IsZero() || startEv.Timing.ResponseHeaderAt.IsZero() {
+		t.Error("Timing anchor timestamps should be non-zero")
+	}
+	if startEv.ReceivedAt.IsZero() {
+		t.Error("Start event should carry ReceivedAt")
+	}
+	if startEv.Timing.RequestSentAt.After(startEv.Timing.ResponseHeaderAt) {
+		t.Error("RequestSentAt should be <= ResponseHeaderAt")
+	}
+	if startEv.Timing.ResponseHeaderAt.After(startEv.ReceivedAt) {
+		t.Error("ResponseHeaderAt should be <= first frame ReceivedAt")
+	}
+
+	// 文本增量必须携带非零 ReceivedAt
+	textEv := findDeltaType(events, provider.StreamDeltaTypeTextOutput)
+	if textEv == nil {
+		t.Fatal("expected text delta event, not found")
+	}
+	if textEv.ReceivedAt.IsZero() {
+		t.Error("text delta should carry ReceivedAt")
+	}
+
+	// TimingCollector 消费锚点后 TTFT 必须覆盖 150ms 服务端延迟
+	tc := provider.NewTimingCollector()
+	for _, ev := range events {
+		tc.Observe(ev)
+	}
+	stats := tc.Stats()
+	if stats.FirstByteDuration < 100*time.Millisecond {
+		t.Errorf("TTFT = %v, want >= 100ms (must cover server prefill delay)", stats.FirstByteDuration)
+	}
+	if stats.FirstByteDuration > stats.TotalDuration {
+		t.Errorf("invariant violated: TTFT (%v) > TotalDuration (%v)", stats.FirstByteDuration, stats.TotalDuration)
+	}
 }

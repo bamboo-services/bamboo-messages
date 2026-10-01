@@ -135,9 +135,9 @@ func TestAudit_ResponseFormat_Mapping(t *testing.T) {
 func TestAudit_PromptCacheKey_NonLegacy(t *testing.T) {
 	p := NewCompletionsProvider("test-key")
 	config := &provider.ChatConfig{
-		Model:           "gpt-4o",
-		MaxTokens:       1024,
-		PromptCacheKey:  "session-abc",
+		Model:          "gpt-4o",
+		MaxTokens:      1024,
+		PromptCacheKey: "session-abc",
 	}
 	params := p.buildParams("", nil, config)
 	if v, ok := params["prompt_cache_key"].(string); !ok || v != "session-abc" {

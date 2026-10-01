@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -48,12 +49,16 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 		}
 
 		endpoint := "POST /v1/bamboo (streaming, model=" + config.Model + ")"
+		// 物理时间锚点：请求发出前打点（TTFT / 总耗时的真实起点）
+		requestSentAt := time.Now()
 		resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, "/v1/bamboo", body, "bamboo", endpoint)
+		responseHeaderAt := time.Now()
 		if err != nil {
 			select {
 			case eventCh <- provider.StreamEvent{
-				Type: provider.StreamTypeError,
-				Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("bamboo 流式对话请求失败: %v", err), 0),
+				Type:       provider.StreamTypeError,
+				Err:        pkgErrors.NewBambooError("上游", fmt.Sprintf("bamboo 流式对话请求失败: %v", err), 0),
+				ReceivedAt: time.Now(),
 			}:
 			case <-ctx.Done():
 			}
@@ -84,6 +89,12 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			_ = resp.Body.Close()
 		}()
 
+		// timingAnchor 请求级物理锚点，随首个 StreamTypeStart 事件携带给下游
+		timingAnchor := &provider.TimingAnchor{
+			RequestSentAt:    requestSentAt,
+			ResponseHeaderAt: responseHeaderAt,
+		}
+
 		// 追踪完成原因
 		var finishReason provider.FinishReason
 		startSent := false
@@ -91,6 +102,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 		// SSE 事件循环
 		for {
 			eventType, data, done, scanErr := scanner.Next()
+			frameAt := time.Now() // 帧到达物理时间戳：本帧派生的所有事件统一携带
 			provider.DebugSSEFrame("bamboo", eventType, data)
 			if done {
 				break
@@ -105,8 +117,9 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 				}
 				select {
 				case eventCh <- provider.StreamEvent{
-					Type: provider.StreamTypeError,
-					Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("bamboo 流读取错误: %v", scanErr), 0),
+					Type:       provider.StreamTypeError,
+					Err:        pkgErrors.NewBambooError("上游", fmt.Sprintf("bamboo 流读取错误: %v", scanErr), 0),
+					ReceivedAt: frameAt,
 				}:
 				case <-ctx.Done():
 					return
@@ -114,11 +127,11 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 				break
 			}
 
-			// 发送 Start 事件（首个有效帧时）
+			// 发送 Start 事件（首个有效帧时），携带请求级物理时间锚点
 			if !startSent {
 				startSent = true
 				select {
-				case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
+				case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart, Timing: timingAnchor, ReceivedAt: frameAt}:
 				case <-ctx.Done():
 					return
 				}
@@ -126,6 +139,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 
 			events := p.handleStreamEvent(eventType, data, &finishReason)
 			for _, e := range events {
+				e.ReceivedAt = frameAt
 				select {
 				case eventCh <- e:
 				case <-ctx.Done():
@@ -141,6 +155,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			case eventCh <- provider.StreamEvent{
 				Type:         provider.StreamTypeStop,
 				FinishReason: finishReason,
+				ReceivedAt:   time.Now(),
 			}:
 			case <-ctx.Done():
 				return
@@ -149,7 +164,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 
 		// 发送 Done 事件
 		select {
-		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone}:
+		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone, ReceivedAt: time.Now()}:
 		case <-ctx.Done():
 		}
 	}()

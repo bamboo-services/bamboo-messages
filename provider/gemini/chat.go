@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -54,12 +55,16 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 		// Gemini 流式端点：/v1beta/models/{model}:streamGenerateContent?alt=sse
 		endpoint := buildEndpoint(config.Model, true)
 
+		// 物理时间锚点：请求发出前打点（TTFT / 总耗时的真实起点）
+		requestSentAt := time.Now()
 		resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, endpoint, bodyBytes, "gemini", endpoint)
+		responseHeaderAt := time.Now()
 		if err != nil {
 			select {
 			case eventCh <- provider.StreamEvent{
-				Type: provider.StreamTypeError,
-				Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("Gemini 流式对话请求失败: %v", err), 0),
+				Type:       provider.StreamTypeError,
+				Err:        pkgErrors.NewBambooError("上游", fmt.Sprintf("Gemini 流式对话请求失败: %v", err), 0),
+				ReceivedAt: time.Now(),
 			}:
 			case <-ctx.Done():
 			}
@@ -93,6 +98,12 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			_ = resp.Body.Close()
 		}()
 
+		// timingAnchor 请求级物理锚点，随首个 StreamTypeStart 事件携带给下游
+		timingAnchor := &provider.TimingAnchor{
+			RequestSentAt:    requestSentAt,
+			ResponseHeaderAt: responseHeaderAt,
+		}
+
 		state := streamState{callIDs: newToolCallIDs(messages)}
 		startSent := false
 		stopSent := false
@@ -100,6 +111,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 		// SSE 事件循环
 		for {
 			eventType, data, done, scanErr := scanner.Next()
+			frameAt := time.Now() // 帧到达物理时间戳：本帧派生的所有事件统一携带
 			provider.DebugSSEFrame("gemini", eventType, data)
 			if done {
 				break
@@ -115,8 +127,9 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 				}
 				select {
 				case eventCh <- provider.StreamEvent{
-					Type: provider.StreamTypeError,
-					Err:  pkgErrors.NewBambooError("上游", fmt.Sprintf("Gemini 流读取错误: %v", scanErr), 0),
+					Type:       provider.StreamTypeError,
+					Err:        pkgErrors.NewBambooError("上游", fmt.Sprintf("Gemini 流读取错误: %v", scanErr), 0),
+					ReceivedAt: frameAt,
 				}:
 				case <-ctx.Done():
 					return
@@ -137,17 +150,18 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 					Type:       provider.StreamTypeError,
 					Err:        pkgErrors.NewBambooError("上游", "Gemini: "+errResp.Error.Message, code),
 					StatusCode: code,
+					ReceivedAt: frameAt,
 				}:
 				case <-ctx.Done():
 				}
 				return
 			}
 
-			// 发送 Start 事件（首个有效帧时）
+			// 发送 Start 事件（首个有效帧时），携带请求级物理时间锚点
 			if !startSent {
 				startSent = true
 				select {
-				case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart}:
+				case eventCh <- provider.StreamEvent{Type: provider.StreamTypeStart, Timing: timingAnchor, ReceivedAt: frameAt}:
 				case <-ctx.Done():
 					return
 				}
@@ -160,12 +174,13 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 				continue
 			}
 
-			// 处理响应 → 事件
+			// 处理响应 → 事件（统一盖本帧到达时间戳）
 			events := p.handleStreamEvent(&geminiResp, &state)
 			for _, e := range events {
 				if e.Type == provider.StreamTypeStop {
 					stopSent = true
 				}
+				e.ReceivedAt = frameAt
 				select {
 				case eventCh <- e:
 				case <-ctx.Done():
@@ -189,6 +204,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 			case eventCh <- provider.StreamEvent{
 				Type:         provider.StreamTypeStop,
 				FinishReason: finishReason,
+				ReceivedAt:   time.Now(),
 			}:
 			case <-ctx.Done():
 				return
@@ -197,7 +213,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 
 		// 发送 Done 事件
 		select {
-		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone}:
+		case eventCh <- provider.StreamEvent{Type: provider.StreamTypeDone, ReceivedAt: time.Now()}:
 		case <-ctx.Done():
 		}
 	}()

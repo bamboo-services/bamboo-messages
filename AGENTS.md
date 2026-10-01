@@ -204,7 +204,7 @@ bamboo-messages/
 | `ApplyOptions` | 函数 | options.go | 应用公共选项列表 |
 | `TimingCollector` | 结构体 | timing.go | 流式请求耗时收集器（零侵入 Observe 模式） |
 | `NewTimingCollector` | 函数 | timing.go | 创建耗时收集器实例 |
-| `TimingStats` | 结构体 | timing.go | 流式耗时统计 (TotalDuration, FirstByteDuration/TTFT, ThinkingDuration, ContentDuration, ToolDuration, ThinkingTokens, OutputTokens, ToolTokens, TotalTokens, TokenSource) |
+| `TimingStats` | 结构体 | timing.go | 流式耗时统计 (TotalDuration, FirstByteDuration/TTFT, ResponseHeaderDuration, ThinkingDuration, ContentDuration, ToolDuration, ThinkingTokens, OutputTokens, ToolTokens, TotalTokens, TokenSource) |
 | `TokenRates` | 结构体 | timing.go | Token 生成速率 (.2f): ThinkingTokensPerSec, OutputTokensPerSec, ToolTokensPerSec（负值=不可靠） |
 | `RateSample` | 结构体 | timing.go | 速率采样点 (ElapsedSec, TokensPerSec, Kind) |
 | `RateSampleKind` | 类型 | timing.go | 速率采样类型: `"thinking"` / `"output"` / `"tool"` |
@@ -414,6 +414,8 @@ bamboo-messages/
 28. **拦截器 Transport 零包装** — `NewInterceptorHTTPClient` 无拦截器时返回 nil，Provider 保留标准库默认 client
 29. **公共 Options 嵌入模式** — `provider.Options` 通过匿名嵌入为各 Provider 提供统一的拦截器注册能力
 30. **TimingCollector 零侵入** — 用户代码主动创建并调用 `Observe(event)`；非并发安全，单 goroutine 使用
+30a. **物理时间锚点** — 适配器在 HTTP 请求发出前打点 `RequestSentAt`、响应头到达后打点 `ResponseHeaderAt`，随首个 `StreamTypeStart` 事件的 `Timing *TimingAnchor` 携带；每个事件在 SSE 帧解析时打点 `ReceivedAt`；TimingCollector 优先消费事件自带物理时间戳（零值回退本地时刻），TTFT/TotalDuration 锚定到请求发出时刻，恒满足 TTFT ≤ TotalDuration；新字段均 `json:"-"` 不参与线上序列化
+30b. **TPS 不可靠阈值 100ms** — 阶段耗时低于 `minReliableDuration`(100ms) 时速率为负值不可靠标记（缓冲代理倒灌防护），绝对值以阈值为分母的参考估算
 31. **Token 估算规则标准化** — TimingCollector: CJK 1:1, Latin 4:1, Other 2:1
 32. **优先级 FinishReason** — `recordFinishReason` 优先级策略：tool_use(2) > max_tokens(1) > end_turn(0)
 33. **Error 自动 flush** — `handleError` 在流式错误时自动补发 stop 事件（Vercel AI SDK flush 模式）
@@ -468,7 +470,7 @@ bamboo-messages/
 - FinishReason 流式透传 — 适配器在 `StreamTypeStop` 事件中填充 `FinishReason`，`StreamConverter` 使用实际停止原因而非硬编码；`recordFinishReason` 使用优先级策略防止覆盖
 - 流式纯透传 — relay 层 `RelayStream` 直接将上游 provider 产生的 SSE 帧经 codec 序列化后写入输出 channel，无中间缓冲、无调速、无 token 切分
 - 请求拦截器链 — `RequestInterceptor` + `ApplyInterceptors` + `interceptorTransport` 构成完整的 HTTP 层请求改写机制，正交扩展点
-- TimingCollector 零侵入可观测性 — pull 模式（非 push），用户代码主动创建并在事件循环中调用 `Observe`；4 阶段状态机驱动耗时计算；耗时低于 1ms 的阶段速率用负值标记不可靠
+- TimingCollector 零侵入可观测性 — pull 模式（非 push），用户代码主动创建并在事件循环中调用 `Observe`；4 阶段状态机驱动耗时计算；物理时间锚点（TimingAnchor + ReceivedAt）使统计免疫 channel 缓冲与下游调度延迟；耗时低于 100ms 的阶段速率用负值标记不可靠
 - Block 类型注册表 — `RegisterBlockType` + `ContentBlocks.UnmarshalJSON` 实现 JSON 多态反序列化，6 种标准类型 `init()` 自动注册
 - Chat 首事件 peek 模式 — 同步 peek 首个 provider 事件防止空流挂起
 

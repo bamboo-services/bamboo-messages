@@ -14,8 +14,8 @@ func TestBuildAssistantItem_ReasoningID_NoRsPrefix(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
 	msg := provider.Message{
-		Role:              provider.RoleAssistant,
-		Content:           "response text",
+		Role:                      provider.RoleAssistant,
+		Content:                   "response text",
 		ThinkingContent:           "thinking text",
 		ThinkingSignature:         "gAAAAABp_encrypted_token",
 		ThinkingSignatureProvider: provider.SignatureProviderOpenAIResponses,
@@ -46,8 +46,8 @@ func TestBuildAssistantItem_EmptyReasoningID(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
 	msg := provider.Message{
-		Role:              provider.RoleAssistant,
-		Content:           "response",
+		Role:                      provider.RoleAssistant,
+		Content:                   "response",
 		ThinkingContent:           "thinking",
 		ThinkingSignature:         "encrypted",
 		ThinkingSignatureProvider: provider.SignatureProviderOpenAIResponses,
@@ -74,8 +74,8 @@ func TestBuildAssistantItem_EncryptedContent(t *testing.T) {
 	p := NewResponsesProvider("test-api-key")
 
 	msg := provider.Message{
-		Role:              provider.RoleAssistant,
-		Content:           "text",
+		Role:                      provider.RoleAssistant,
+		Content:                   "text",
 		ThinkingContent:           "thinking",
 		ThinkingSignature:         "gAAAAABp_test_encrypted",
 		ThinkingSignatureProvider: provider.SignatureProviderOpenAIResponses,

@@ -35,21 +35,21 @@ type wireMessage struct {
 // JSON 序列化时仅输出当前类型相关字段。镜像 bamboo/content.go 中 7 种
 // ContentBlock 实现的全部字段并集。
 type wireContentBlock struct {
-	Type         string          `json:"type"`                    // 内容块类型标识（必填）
-	Text         string          `json:"text,omitempty"`          // text: 文本内容
+	Type              string          `json:"type"`                         // 内容块类型标识（必填）
+	Text              string          `json:"text,omitempty"`               // text: 文本内容
 	Thinking          string          `json:"thinking,omitempty"`           // thinking: 思考过程内容
 	Signature         string          `json:"signature,omitempty"`          // thinking: 验证签名
 	SignatureProvider string          `json:"signature_provider,omitempty"` // thinking: 签名血统
-	ID           string          `json:"id,omitempty"`            // tool_use: 调用 ID
-	Name         string          `json:"name,omitempty"`          // tool_use / tool_result: 函数名
-	Input        json.RawMessage `json:"input,omitempty"`         // tool_use: 参数 JSON
-	ToolUseID    string          `json:"tool_use_id,omitempty"`   // tool_result: 对应的 tool_use ID
-	ToolName     string          `json:"tool_name,omitempty"`     // tool_result: 函数名
-	Content      string          `json:"content,omitempty"`       // tool_result: 结果内容
-	IsError      bool            `json:"is_error,omitempty"`      // tool_result: 是否为错误
-	Source       *wireSource     `json:"source,omitempty"`        // image / document: 来源
-	CacheControl json.RawMessage `json:"cache_control,omitempty"` // 缓存控制标记（所有类型通用）
-	Data         string          `json:"data,omitempty"`          // redacted_thinking: 加密数据
+	ID                string          `json:"id,omitempty"`                 // tool_use: 调用 ID
+	Name              string          `json:"name,omitempty"`               // tool_use / tool_result: 函数名
+	Input             json.RawMessage `json:"input,omitempty"`              // tool_use: 参数 JSON
+	ToolUseID         string          `json:"tool_use_id,omitempty"`        // tool_result: 对应的 tool_use ID
+	ToolName          string          `json:"tool_name,omitempty"`          // tool_result: 函数名
+	Content           string          `json:"content,omitempty"`            // tool_result: 结果内容
+	IsError           bool            `json:"is_error,omitempty"`           // tool_result: 是否为错误
+	Source            *wireSource     `json:"source,omitempty"`             // image / document: 来源
+	CacheControl      json.RawMessage `json:"cache_control,omitempty"`      // 缓存控制标记（所有类型通用）
+	Data              string          `json:"data,omitempty"`               // redacted_thinking: 加密数据
 }
 
 // wireSource bamboo 原生协议内容来源。
