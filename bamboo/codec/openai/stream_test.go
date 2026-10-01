@@ -638,3 +638,88 @@ func TestStreamSerializer_ToolCallIndexConsistency_WithPrecedingText(t *testing.
 			"with 'Expected id to be a string'", startIndex, deltaIndex)
 	}
 }
+
+// TestParallelToolCalls_IsolatedIndices 验证多个并行工具调用的增量能够按 ContentBlock Index
+// 正确隔离到各自对应的 OpenAI tool_calls index，防止参数混乱污染与键重复。
+func TestParallelToolCalls_IsolatedIndices(t *testing.T) {
+	s := newStreamSerializer("gpt-4o")
+
+	// message_start
+	s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+
+	// 三个并行工具调用的 start，块索引分别为 1, 2, 3
+	s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        1,
+		ContentBlock: bamboo.NewToolUseBlock("call_1", "tool_one", nil),
+	})
+	s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        2,
+		ContentBlock: bamboo.NewToolUseBlock("call_2", "tool_two", nil),
+	})
+	s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        3,
+		ContentBlock: bamboo.NewToolUseBlock("call_3", "tool_three", nil),
+	})
+
+	// 交错发送参数增量：Index=1 的参数必须对应 tool_calls index=0
+	d1, err := s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 1,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaInputJSON, PartialJSON: `{"a":"1"}`},
+	})
+	if err != nil {
+		t.Fatalf("delta 1 error: %v", err)
+	}
+	c1 := parseSSEChunk(t, d1)
+	if idx := c1.Choices[0].Delta.ToolCalls[0].Index; idx != 0 {
+		t.Errorf("delta 1 index = %d, want 0", idx)
+	}
+
+	// Index=2 的参数必须对应 tool_calls index=1
+	d2, err := s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 2,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaInputJSON, PartialJSON: `{"b":"2"}`},
+	})
+	if err != nil {
+		t.Fatalf("delta 2 error: %v", err)
+	}
+	c2 := parseSSEChunk(t, d2)
+	if idx := c2.Choices[0].Delta.ToolCalls[0].Index; idx != 1 {
+		t.Errorf("delta 2 index = %d, want 1", idx)
+	}
+
+	// Index=3 的参数必须对应 tool_calls index=2
+	d3, err := s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 3,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaInputJSON, PartialJSON: `{"c":"3"}`},
+	})
+	if err != nil {
+		t.Fatalf("delta 3 error: %v", err)
+	}
+	c3 := parseSSEChunk(t, d3)
+	if idx := c3.Choices[0].Delta.ToolCalls[0].Index; idx != 2 {
+		t.Errorf("delta 3 index = %d, want 2", idx)
+	}
+
+	// 再次对 Index=1 发送增量，仍必须对应 index=0
+	d1Again, err := s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 1,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaInputJSON, PartialJSON: `{"more":"1"}`},
+	})
+	if err != nil {
+		t.Fatalf("delta 1 again error: %v", err)
+	}
+	c1Again := parseSSEChunk(t, d1Again)
+	if idx := c1Again.Choices[0].Delta.ToolCalls[0].Index; idx != 0 {
+		t.Errorf("delta 1 again index = %d, want 0", idx)
+	}
+}

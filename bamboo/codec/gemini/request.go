@@ -221,7 +221,7 @@ func parseContents(contents []geminiContent) ([]bamboo.BambooMessage, error) {
 				result = append(result, bamboo.NewUserMessageBlocks(blocks...))
 			}
 
-		case "model":
+		case "model", "assistant":
 			blocks, err := parseParts(content.Parts, history)
 			if err != nil {
 				return nil, err

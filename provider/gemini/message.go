@@ -12,8 +12,9 @@ import (
 
 // toolResultRecord 缓存一条 RoleTool 的函数响应，供按 tool_call_id 回填。
 type toolResultRecord struct {
-	content string
-	isError bool
+	content  string
+	isError  bool
+	toolName string
 }
 
 // ==============================
@@ -49,6 +50,9 @@ func (p *Provider) buildMessages(messages []provider.Message) []map[string]any {
 		}
 	}
 
+	// 合并连续相同 role 的轮次（如连续 user 轮次），满足 Gemini API 严格交替契约。
+	result = mergeConsecutiveTurns(result)
+
 	// Gemini API 约束：请求严禁以 model 轮次结尾（"Requests ending with a model turn are not supported"）。
 	// 当消息以 assistant/model 结尾时：
 	//   1. 若末尾 model 无有效内容（空文本或纯空白占位）：直接剔除，由前序 user 轮次收尾；
@@ -70,6 +74,46 @@ func (p *Provider) buildMessages(messages []provider.Message) []map[string]any {
 	}
 
 	return result
+}
+
+// mergeConsecutiveTurns 合并连续具有相同 role 的纯文本/多媒体轮次，
+// 但保留独立闭合的 functionResponse 轮次（Gemini 要求 functionResponse 必须紧跟对应 model 且独立成条）。
+func mergeConsecutiveTurns(contents []map[string]any) []map[string]any {
+	if len(contents) <= 1 {
+		return contents
+	}
+	merged := make([]map[string]any, 0, len(contents))
+	for _, content := range contents {
+		if len(merged) == 0 {
+			merged = append(merged, content)
+			continue
+		}
+		prev := merged[len(merged)-1]
+		if prev["role"] == content["role"] && !hasFunctionPart(prev) && !hasFunctionPart(content) {
+			prevParts, _ := prev["parts"].([]map[string]any)
+			currParts, _ := content["parts"].([]map[string]any)
+			prev["parts"] = append(prevParts, currParts...)
+		} else {
+			merged = append(merged, content)
+		}
+	}
+	return merged
+}
+
+func hasFunctionPart(content map[string]any) bool {
+	parts, ok := content["parts"].([]map[string]any)
+	if !ok {
+		return false
+	}
+	for _, p := range parts {
+		if fr, ok := p["functionResponse"]; ok && fr != nil {
+			return true
+		}
+		if fc, ok := p["functionCall"]; ok && fc != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // hasModelContent 检查一条 model 消息是否包含非空的有效正文或工具调用。
@@ -109,7 +153,7 @@ func collectToolResults(messages []provider.Message) map[string]toolResultRecord
 		if _, exists := results[id]; exists {
 			continue
 		}
-		results[id] = toolResultRecord{content: msg.Content, isError: msg.IsError}
+		results[id] = toolResultRecord{content: msg.Content, isError: msg.IsError, toolName: msg.ToolName}
 	}
 	return results
 }
@@ -217,12 +261,22 @@ func (p *Provider) buildAssistantMessage(msg provider.Message) map[string]any {
 }
 
 // geminiFunctionArgs 把工具参数规范成 Gemini FunctionCall.args（protobuf Struct = JSON object）。
+// 通过反序列化为 map 再重新序列化，自动消除 JSON 对象中的重复键，防止 Google Protobuf
+// 解析器报 "Repeated map key: '...' is already set"。
 func geminiFunctionArgs(raw string) json.RawMessage {
 	s := strings.TrimSpace(raw)
-	if s == "" || s[0] != '{' || !json.Valid([]byte(s)) {
+	if s == "" || s[0] != '{' {
 		return json.RawMessage(`{}`)
 	}
-	return json.RawMessage(s)
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(s), &obj); err != nil {
+		return json.RawMessage(`{}`)
+	}
+	deduped, err := json.Marshal(obj)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(deduped)
 }
 
 // buildFunctionResponseContent 将一轮 ToolCalls 闭合为单条 user content。
@@ -253,6 +307,11 @@ func buildFunctionResponsePart(tc provider.ToolCall, index int, results map[stri
 		if rec.isError {
 			responseMap["error"] = rec.content
 		}
+	} else if rec, ok := findResultByName(name, results); ok {
+		responseMap["output"] = rec.content
+		if rec.isError {
+			responseMap["error"] = rec.content
+		}
 	} else {
 		xLog.WithName("provider/gemini").SugarWarn(context.Background(),
 			fmt.Sprintf("tool_call(id=%q name=%q) 缺少 tool_result，已注入 dummy functionResponse", tc.ID, name))
@@ -267,6 +326,19 @@ func buildFunctionResponsePart(tc provider.ToolCall, index int, results map[stri
 			"response": json.RawMessage(responseBytes),
 		},
 	}
+}
+
+// findResultByName 在 results 中查找首个 toolName 匹配的记录作为兜底。
+func findResultByName(name string, results map[string]toolResultRecord) (toolResultRecord, bool) {
+	if name == "" {
+		return toolResultRecord{}, false
+	}
+	for _, rec := range results {
+		if rec.toolName == name {
+			return rec, true
+		}
+	}
+	return toolResultRecord{}, false
 }
 
 func functionCallID(tc provider.ToolCall, index int) string {

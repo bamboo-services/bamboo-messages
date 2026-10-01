@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/bamboo-services/bamboo-messages/provider"
@@ -498,6 +499,91 @@ func TestGeminiFunctionArgs_NonObjectFallsBack(t *testing.T) {
 	}
 	if string(geminiFunctionArgs(`{"q":1}`)) != `{"q":1}` {
 		t.Errorf("object args = %s", geminiFunctionArgs(`{"q":1}`))
+	}
+}
+
+func TestGeminiFunctionArgs_DeduplicatesRepeatedKeys(t *testing.T) {
+	// 验证包含重复键（如 description 出现多次）的 JSON 会被反序列化去重，防止 Google Protobuf
+	// 报 "Repeated map key: 'description' is already set"。
+	raw := `{"path":"main.go","description":"first description","description":"second description"}`
+	normalized := string(geminiFunctionArgs(raw))
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(normalized), &parsed); err != nil {
+		t.Fatalf("failed to parse normalized json: %v", err)
+	}
+
+	if parsed["path"] != "main.go" {
+		t.Errorf("path = %v, want main.go", parsed["path"])
+	}
+	if parsed["description"] != "second description" {
+		t.Errorf("description = %v, want 'second description'", parsed["description"])
+	}
+	// 验证在序列化文本中 "description" 仅出现一次
+	if strings.Count(normalized, `"description"`) != 1 {
+		t.Errorf("description key appeared %d times in normalized json: %s", strings.Count(normalized, `"description"`), normalized)
+	}
+}
+
+func TestBuildMessages_MergeConsecutiveUserTurns(t *testing.T) {
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "first message"},
+		{Role: provider.RoleUser, Content: "second message"},
+	})
+
+	if len(contents) != 1 {
+		t.Fatalf("contents len = %d, want 1 (consecutive user messages merged)", len(contents))
+	}
+	assertRole(t, contents[0], "user")
+	parts, ok := contents[0]["parts"].([]map[string]any)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("parts len = %d, want 2", len(parts))
+	}
+	if parts[0]["text"] != "first message" || parts[1]["text"] != "second message" {
+		t.Errorf("unexpected parts: %v", parts)
+	}
+}
+
+func TestBuildMessages_FallbackResultByName(t *testing.T) {
+	// 模拟 tool_call_id 与 tool_result 的 ID 不匹配，但函数名相同的情况
+	p := NewProvider("test-key")
+	contents := p.buildMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "run inspect"},
+		{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				{ID: "call_synthetic_123", Type: "function", Function: provider.FunctionCall{Name: "inspect"}},
+			},
+		},
+		{
+			Role:       provider.RoleTool,
+			ToolCallID: "client_call_abc", // ID 不匹配
+			ToolName:   "inspect",          // 但函数名匹配
+			Content:    "inspect_success",
+		},
+	})
+
+	if len(contents) != 3 {
+		t.Fatalf("contents len = %d, want 3", len(contents))
+	}
+	frs := functionResponses(t, contents[2])
+	if len(frs) != 1 {
+		t.Fatalf("frs len = %d, want 1", len(frs))
+	}
+	resp, ok := frs[0]["response"].(json.RawMessage)
+	if !ok {
+		t.Fatalf("response type %T, want json.RawMessage", frs[0]["response"])
+	}
+	var respObj map[string]any
+	if err := json.Unmarshal(resp, &respObj); err != nil {
+		t.Fatal(err)
+	}
+	if respObj["output"] != "inspect_success" {
+		t.Errorf("output = %v, want inspect_success", respObj["output"])
+	}
+	if respObj["error"] != nil {
+		t.Errorf("unexpected error: %v", respObj["error"])
 	}
 }
 

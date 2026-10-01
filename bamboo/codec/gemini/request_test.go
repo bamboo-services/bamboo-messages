@@ -111,6 +111,26 @@ func TestParseRequest_RoleMapping(t *testing.T) {
 	}
 }
 
+func TestParseRequest_AssistantRoleMapping(t *testing.T) {
+	// 验证第三方兼容客户端发送 role="assistant" 时正确映射为 assistant 而非 user
+	body := `{
+		"contents": [
+			{"role":"user","parts":[{"text":"hello"}]},
+			{"role":"assistant","parts":[{"text":"hi from assistant"}]}
+		]
+	}`
+	req, err := parseRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("parseRequest error = %v", err)
+	}
+	if len(req.Messages) != 2 {
+		t.Fatalf("Messages len = %d, want 2", len(req.Messages))
+	}
+	if req.Messages[1].Role != bamboo.RoleAssistant {
+		t.Errorf("msg[1].Role = %q, want assistant", req.Messages[1].Role)
+	}
+}
+
 func TestParseRequest_Parts_TextInline(t *testing.T) {
 	body := `{
 		"contents": [

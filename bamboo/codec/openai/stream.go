@@ -63,15 +63,17 @@ type openaiStreamSerializer struct {
 	model            string
 	toolIndex        int
 	currentToolIndex int
+	toolIndexByBlock map[int]int
 	started          bool
 }
 
 // newStreamSerializer 创建一个新的 OpenAI 流式序列化器实例。
 func newStreamSerializer(model string) *openaiStreamSerializer {
 	return &openaiStreamSerializer{
-		id:      fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
-		created: time.Now().Unix(),
-		model:   model,
+		id:               fmt.Sprintf("chatcmpl-%d", time.Now().UnixNano()),
+		created:          time.Now().Unix(),
+		model:            model,
+		toolIndexByBlock: make(map[int]int),
 	}
 }
 
@@ -144,7 +146,12 @@ func (s *openaiStreamSerializer) handleContentBlockStart(event bamboo.StreamEven
 		if !ok {
 			return nil, nil
 		}
-		s.currentToolIndex = s.toolIndex
+		if s.toolIndexByBlock == nil {
+			s.toolIndexByBlock = make(map[int]int)
+		}
+		toolIdx := s.toolIndex
+		s.toolIndexByBlock[event.Index] = toolIdx
+		s.currentToolIndex = toolIdx
 		chunk := openaiChunk{
 			ID:      s.id,
 			Object:  "chat.completion.chunk",
@@ -153,7 +160,7 @@ func (s *openaiStreamSerializer) handleContentBlockStart(event bamboo.StreamEven
 				Index: 0,
 				Delta: openaiDeltaMsg{
 					ToolCalls: []openaiDeltaTC{{
-						Index: s.toolIndex,
+						Index: toolIdx,
 						ID:    toolUse.ID,
 						Type:  "function",
 						Function: openaiDeltaTCFn{
@@ -208,6 +215,10 @@ func (s *openaiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 		return s.marshalChunk(chunk)
 
 	case bamboo.DeltaInputJSON:
+		toolIdx := s.currentToolIndex
+		if idx, ok := s.toolIndexByBlock[event.Index]; ok {
+			toolIdx = idx
+		}
 		chunk := openaiChunk{
 			ID:      s.id,
 			Object:  "chat.completion.chunk",
@@ -216,7 +227,7 @@ func (s *openaiStreamSerializer) handleContentBlockDelta(event bamboo.StreamEven
 				Index: 0,
 				Delta: openaiDeltaMsg{
 					ToolCalls: []openaiDeltaTC{{
-						Index:    s.currentToolIndex,
+						Index:    toolIdx,
 						Function: openaiDeltaTCFn{Arguments: delta.PartialJSON},
 					}},
 				},
