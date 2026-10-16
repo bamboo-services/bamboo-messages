@@ -48,3 +48,8 @@ MD052: false
 # MD060: 表格列样式（允许项目现存的不同表格紧凑/对齐排版）
 MD060: false
 
+# MD010: 允许代码块内使用 Go 标准 Tab 缩进
+MD010:
+  code_blocks: false
+
+
