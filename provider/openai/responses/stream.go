@@ -46,6 +46,8 @@ func (p *ResponsesProvider) handleStreamEvent(ctx context.Context, event respons
 		return p.contentResponseCompleted(event)
 	case "response.failed":
 		return p.contentResponseFailed(ctx, event)
+	case "error":
+		return p.contentStreamError(event)
 	case "response.incomplete":
 		return p.contentResponseIncomplete(event)
 	default:
@@ -277,8 +279,8 @@ func (p *ResponsesProvider) contentResponseCompleted(event responseStreamEvent) 
 
 // contentResponseFailed 处理响应失败事件。
 //
-// 当 OpenAI 请求失败时触发，包装错误信息并返回 ErrorEvent。
-func (p *ResponsesProvider) contentResponseFailed(ctx context.Context, event responseStreamEvent) []provider.StreamEvent {
+// 当 OpenAI 请求失败时触发，提取上游真实错误消息与状态码，包装为 ErrorEvent。
+func (p *ResponsesProvider) contentResponseFailed(_ context.Context, event responseStreamEvent) []provider.StreamEvent {
 	var events []provider.StreamEvent
 
 	if event.Response != nil && event.Response.Usage != nil &&
@@ -286,13 +288,77 @@ func (p *ResponsesProvider) contentResponseFailed(ctx context.Context, event res
 		events = append(events, usageEventFromResponses(event.Response.Usage))
 	}
 
-	errMsg := "OpenAI 响应失败"
+	errMsg := "OpenAI Responses: 响应失败"
+	errCode := ""
+	if event.Response != nil && event.Response.Error != nil {
+		if event.Response.Error.Message != "" {
+			errMsg = "OpenAI Responses: " + event.Response.Error.Message
+		} else if event.Response.Error.Code != "" {
+			errMsg = "OpenAI Responses: " + event.Response.Error.Code
+		}
+		errCode = event.Response.Error.Code
+		if errCode == "" {
+			errCode = event.Response.Error.Type
+		}
+	} else if event.Error != nil && event.Error.Message != "" {
+		errMsg = "OpenAI Responses: " + event.Error.Message
+		errCode = event.Error.Code
+	} else if event.Message != "" {
+		errMsg = "OpenAI Responses: " + event.Message
+		errCode = event.Code
+	}
+
+	statusCode := mapResponsesErrorCodeToStatus(errCode)
 	events = append(events, provider.StreamEvent{
-		Type: provider.StreamTypeError,
-		Err:  pkgErrors.NewBambooError("上游", errMsg, 0),
+		Type:       provider.StreamTypeError,
+		Err:        pkgErrors.NewBambooError("上游", errMsg, statusCode),
+		StatusCode: statusCode,
 	})
 
 	return events
+}
+
+// contentStreamError 处理 SSE 流中独立的 type="error" 错误事件。
+func (p *ResponsesProvider) contentStreamError(event responseStreamEvent) []provider.StreamEvent {
+	errMsg := "OpenAI Responses: 流式错误"
+	errCode := event.Code
+	if event.Error != nil {
+		if event.Error.Message != "" {
+			errMsg = "OpenAI Responses: " + event.Error.Message
+		} else if event.Error.Code != "" {
+			errMsg = "OpenAI Responses: " + event.Error.Code
+		}
+		if event.Error.Code != "" {
+			errCode = event.Error.Code
+		} else if event.Error.Type != "" {
+			errCode = event.Error.Type
+		}
+	} else if event.Message != "" {
+		errMsg = "OpenAI Responses: " + event.Message
+	}
+	statusCode := mapResponsesErrorCodeToStatus(errCode)
+	return []provider.StreamEvent{{
+		Type:       provider.StreamTypeError,
+		Err:        pkgErrors.NewBambooError("上游", errMsg, statusCode),
+		StatusCode: statusCode,
+	}}
+}
+
+func mapResponsesErrorCodeToStatus(code string) int {
+	switch code {
+	case "invalid_request", "invalid_request_error", "context_length_exceeded":
+		return 400
+	case "authentication_error", "invalid_api_key":
+		return 401
+	case "permission_denied", "insufficient_quota":
+		return 403
+	case "not_found", "model_not_found":
+		return 404
+	case "rate_limit_exceeded", "rate_limit_error":
+		return 429
+	default:
+		return 500
+	}
 }
 
 // contentResponseIncomplete 处理响应未完成事件。

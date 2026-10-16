@@ -108,7 +108,9 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 	if config == nil {
 		config = &provider.ChatConfig{}
 	}
-
+	if p.isWebSocketMode(config) {
+		return p.completeViaWebSocket(ctx, systemPrompt, messages, config)
+	}
 	// 构建请求参数
 	params := p.buildParams(config.Model, systemPrompt, messages, config, false)
 
@@ -134,13 +136,7 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 
 	// 检查 HTTP 状态码，解析错误响应
 	if resp.StatusCode >= 400 {
-		var apiErr openaiError
-		_ = json.Unmarshal(respBody, &apiErr)
-		errMsg := "OpenAI Responses"
-		if apiErr.Error.Message != "" {
-			errMsg += ": " + apiErr.Error.Message
-		}
-		return nil, pkgErrors.NewBambooError("上游", errMsg, resp.StatusCode)
+		return nil, pkgErrors.NewBambooError("上游", formatResponsesError(resp.StatusCode, respBody), resp.StatusCode)
 	}
 
 	// 解析响应体
@@ -149,6 +145,23 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses 响应体解析失败: %v", err), 0)
 	}
 
+	// 检查 HTTP 200 下返回 status="failed" 或携带顶层 error 的失败响应
+	if response.Status == "failed" || response.Error != nil {
+		errMsg := "OpenAI Responses: 响应失败"
+		errCode := ""
+		if response.Error != nil {
+			if response.Error.Message != "" {
+				errMsg = "OpenAI Responses: " + response.Error.Message
+			} else if response.Error.Code != "" {
+				errMsg = "OpenAI Responses: " + response.Error.Code
+			}
+			errCode = response.Error.Code
+			if errCode == "" {
+				errCode = response.Error.Type
+			}
+		}
+		return nil, pkgErrors.NewBambooError("上游", errMsg, mapResponsesErrorCodeToStatus(errCode))
+	}
 	// 构建结果
 	result := &provider.CompletionResult{
 		ResponseID: response.ID,
@@ -260,4 +273,33 @@ func mapCompleteFinishReason(resp *completeResponse, hasToolCalls bool) provider
 		return provider.FinishReasonToolCalls
 	}
 	return provider.FinishReasonStop
+}
+
+// formatResponsesError 从 Responses 错误响应体提取可读错误消息。
+//
+// 兼容两种常见错误结构：
+//  1. 嵌套格式: {"error": {"message": "...", "type": "...", "code": "..."}}
+//  2. 扁平格式: {"type": "error", "code": "...", "message": "..."}
+//
+// 若均未命中，回退为截断后的原始响应体文本（空 body 时附带 HTTP 状态码）。
+func formatResponsesError(statusCode int, body []byte) string {
+	var apiErr openaiError
+	if err := json.Unmarshal(body, &apiErr); err == nil && apiErr.Error.Message != "" {
+		return "OpenAI Responses: " + apiErr.Error.Message
+	}
+	var flatErr struct {
+		Message string `json:"message"`
+		Code    string `json:"code"`
+	}
+	if err := json.Unmarshal(body, &flatErr); err == nil && flatErr.Message != "" {
+		return "OpenAI Responses: " + flatErr.Message
+	}
+	raw := string(body)
+	if len(raw) > 500 {
+		raw = raw[:500] + "...(truncated)"
+	}
+	if raw == "" {
+		return fmt.Sprintf("OpenAI Responses: HTTP %d", statusCode)
+	}
+	return "OpenAI Responses: " + raw
 }

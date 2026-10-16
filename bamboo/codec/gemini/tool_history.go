@@ -26,7 +26,7 @@ func correlateToolHistory(contents []geminiContent) geminiToolHistory {
 	reserved := make(map[string]bool)
 	hasModel := false
 	for _, content := range contents {
-		if content.Role == "model" {
+		if isModelRole(content.Role) {
 			hasModel = true
 		}
 		for _, part := range content.Parts {
@@ -77,7 +77,7 @@ func correlateToolHistory(contents []geminiContent) geminiToolHistory {
 				continue
 			}
 			id := history.calls[call]
-			if content.Role == "model" && !seen[id] {
+			if isModelRole(content.Role) && !seen[id] {
 				active = append(active, geminiHistoryCall{geminiToolIdentity: geminiToolIdentity{id: id, name: call.Name}})
 				seen[id] = true
 			}
@@ -85,6 +85,10 @@ func correlateToolHistory(contents []geminiContent) geminiToolHistory {
 		i++
 	}
 	return history
+}
+
+func isModelRole(role string) bool {
+	return role == "model" || role == "assistant"
 }
 
 func responseBearing(content geminiContent) bool {

@@ -37,6 +37,7 @@ _debug/
 
 ### AI ###
 .omo/
+.pi/
 
 ### 含密钥的测试文件 ###
 bamboo/live_test.go

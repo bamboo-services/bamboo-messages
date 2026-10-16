@@ -228,12 +228,42 @@ func (p *Provider) contentMessageStop(finishReason *provider.FinishReason) []pro
 // Anthropic error 事件，发送 StreamTypeError 并携带错误信息。
 func (p *Provider) contentError(event messageStreamEvent) []provider.StreamEvent {
 	if event.Error == nil {
-		return []provider.StreamEvent{{Type: provider.StreamTypeError}}
+		return []provider.StreamEvent{{
+			Type: provider.StreamTypeError,
+			Err:  pkgErrors.NewBambooError("上游", "Anthropic 流式事件错误: 未知错误", 500),
+		}}
+	}
+	code := mapAnthropicErrorTypeToStatusCode(event.Error.Type)
+	msg := event.Error.Message
+	if msg == "" {
+		msg = event.Error.Type
 	}
 	return []provider.StreamEvent{{
-		Type: provider.StreamTypeError,
-		Err:  pkgErrors.NewBambooError("上游", "Anthropic 流式事件错误: "+event.Error.Message, 0),
+		Type:       provider.StreamTypeError,
+		Err:        pkgErrors.NewBambooError("上游", "Anthropic: "+msg, code),
+		StatusCode: code,
 	}}
+}
+
+func mapAnthropicErrorTypeToStatusCode(errType string) int {
+	switch errType {
+	case "invalid_request_error":
+		return 400
+	case "authentication_error":
+		return 401
+	case "permission_error":
+		return 403
+	case "not_found_error":
+		return 404
+	case "request_too_large":
+		return 413
+	case "rate_limit_error":
+		return 429
+	case "overloaded_error":
+		return 529
+	default:
+		return 500
+	}
 }
 
 // mapFinishReason 将 Anthropic 停止原因映射为统一的 FinishReason。

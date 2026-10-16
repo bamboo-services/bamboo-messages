@@ -239,3 +239,29 @@ func TestGeminiToolHistorySplitUpstream(t *testing.T) {
 		})
 	}
 }
+
+func TestGeminiToolHistoryAssistantRoleAliasCorrelation(t *testing.T) {
+	// 验证第三方客户端在 Gemini contents 中使用 role="assistant" 替代 "model" 时，
+	// correlateToolHistory 依然能正确识别并关联并行同名工具调用与响应。
+	contents := []geminiContent{
+		historyContent("assistant", historyCall("", "read_file"), historyCall("", "read_file")),
+		historyContent("user", historyResult("", "read_file", "file_1"), historyResult("", "read_file", "file_2")),
+	}
+	body, err := json.Marshal(geminiRequest{Contents: contents})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := Codec.ParseRequest(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"call:gemini_call_read_file_0:read_file",
+		"call:gemini_call_read_file_1:read_file",
+		"result:gemini_call_read_file_0:read_file:file_1",
+		"result:gemini_call_read_file_1:read_file:file_2",
+	}
+	if got := historyBlocks(req.Messages); !reflect.DeepEqual(got, want) {
+		t.Fatalf("blocks=%q want=%q", got, want)
+	}
+}

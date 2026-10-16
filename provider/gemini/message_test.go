@@ -652,6 +652,89 @@ func TestBuildMessages_NormalConversationEndingWithUserUntouched(t *testing.T) {
 	assertRole(t, contents[2], "user")
 }
 
+// TestBuildMessages_ParallelSameNameFallbackDoesNotDuplicateOrClobber 验证：
+//  1. 同名函数并发调用（如 read_file(a) 和 read_file(b)）在按函数名兜底回填时，
+//     按输入顺序逐一消费，绝不将第一条结果重复填入所有同名调用；
+//  2. 当某条结果只有一个而并发调用有两个时，第二个调用注入 dummy error，不复用第一个结果；
+//  3. 混合了显式 ID 命中和按名兜底时，显式 ID 命中的记录被预占保护，不会被前面的按名兜底误抢。
+func TestBuildMessages_ParallelSameNameFallbackDoesNotDuplicateOrClobber(t *testing.T) {
+	p := NewProvider("test-key")
+
+	t.Run("ordered_consumption_for_multiple_same_name_calls", func(t *testing.T) {
+		contents := p.buildMessages([]provider.Message{
+			{Role: provider.RoleUser, Content: "read two files"},
+			{
+				Role: provider.RoleAssistant,
+				ToolCalls: []provider.ToolCall{
+					{ID: "call_1", Type: "function", Function: provider.FunctionCall{Name: "read_file", Arguments: `{"path":"a.go"}`}},
+					{ID: "call_2", Type: "function", Function: provider.FunctionCall{Name: "read_file", Arguments: `{"path":"b.go"}`}},
+				},
+			},
+			// ToolCallID 与声明不一致，触发按名兜底
+			{Role: provider.RoleTool, ToolCallID: "legacy_1", ToolName: "read_file", Content: "content_A"},
+			{Role: provider.RoleTool, ToolCallID: "legacy_2", ToolName: "read_file", Content: "content_B"},
+		})
+
+		frs := functionResponses(t, contents[2])
+		if len(frs) != 2 {
+			t.Fatalf("frs len = %d, want 2", len(frs))
+		}
+		r0 := unmarshalResponse(t, frs[0])
+		r1 := unmarshalResponse(t, frs[1])
+		if r0["output"] != "content_A" || r1["output"] != "content_B" {
+			t.Fatalf("got outputs (%v, %v), want (content_A, content_B)", r0["output"], r1["output"])
+		}
+	})
+
+	t.Run("single_fallback_result_not_reused_for_second_call", func(t *testing.T) {
+		contents := p.buildMessages([]provider.Message{
+			{
+				Role: provider.RoleAssistant,
+				ToolCalls: []provider.ToolCall{
+					{ID: "call_1", Type: "function", Function: provider.FunctionCall{Name: "read_file"}},
+					{ID: "call_2", Type: "function", Function: provider.FunctionCall{Name: "read_file"}},
+				},
+			},
+			{Role: provider.RoleTool, ToolCallID: "legacy_1", ToolName: "read_file", Content: "only_one"},
+		})
+
+		frs := functionResponses(t, contents[1])
+		if len(frs) != 2 {
+			t.Fatalf("frs len = %d, want 2", len(frs))
+		}
+		r0 := unmarshalResponse(t, frs[0])
+		r1 := unmarshalResponse(t, frs[1])
+		if r0["output"] != "only_one" {
+			t.Errorf("first FR output = %v, want only_one", r0["output"])
+		}
+		if r1["error"] != "tool result missing" {
+			t.Errorf("second FR should get dummy error instead of reusing first result, got %v", r1)
+		}
+	})
+
+	t.Run("explicit_id_reserved_before_name_fallback", func(t *testing.T) {
+		contents := p.buildMessages([]provider.Message{
+			{
+				Role: provider.RoleAssistant,
+				ToolCalls: []provider.ToolCall{
+					{ID: "call_missing_id", Type: "function", Function: provider.FunctionCall{Name: "read_file"}},
+					{ID: "call_explicit", Type: "function", Function: provider.FunctionCall{Name: "read_file"}},
+				},
+			},
+			// 第一条是给 call_explicit 的精确匹配结果，第二条是给 call_missing_id 的按名兜底结果
+			{Role: provider.RoleTool, ToolCallID: "call_explicit", ToolName: "read_file", Content: "for_explicit"},
+			{Role: provider.RoleTool, ToolCallID: "other_id", ToolName: "read_file", Content: "for_fallback"},
+		})
+
+		frs := functionResponses(t, contents[1])
+		r0 := unmarshalResponse(t, frs[0])
+		r1 := unmarshalResponse(t, frs[1])
+		if r0["output"] != "for_fallback" || r1["output"] != "for_explicit" {
+			t.Fatalf("got (%v, %v), want (for_fallback, for_explicit)", r0["output"], r1["output"])
+		}
+	})
+}
+
 func assertRole(t *testing.T, content map[string]any, want string) {
 	t.Helper()
 	if content["role"] != want {

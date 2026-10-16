@@ -55,12 +55,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 
 	// 检查 HTTP 状态码，解析错误响应
 	if resp.StatusCode >= 400 {
-		var errResp anthropicErrorResponse
-		if jsonErr := json.Unmarshal(respBody, &errResp); jsonErr == nil && errResp.Error != nil {
-			return nil, pkgErrors.NewBambooError("上游",
-				fmt.Sprintf("Anthropic: %s", errResp.Error.Message), resp.StatusCode)
-		}
-		return nil, pkgErrors.NewBambooError("上游", "Anthropic: 未知错误", resp.StatusCode)
+		return nil, pkgErrors.NewBambooError("上游", formatAnthropicError(resp.StatusCode, respBody), resp.StatusCode)
 	}
 
 	// 解析响应

@@ -47,9 +47,16 @@ type openaiMessage struct {
 }
 
 type openaiToolCall struct {
-	ID       string             `json:"id"`
-	Type     string             `json:"type"`
-	Function openaiToolFunction `json:"function"`
+	ID           string             `json:"id"`
+	Type         string             `json:"type"`
+	Function     openaiToolFunction `json:"function"`
+	ExtraContent *openaiToolExtra   `json:"extra_content,omitempty"`
+}
+
+type openaiToolExtra struct {
+	Google *struct {
+		ThoughtSignature string `json:"thought_signature,omitempty"`
+	} `json:"google,omitempty"`
 }
 
 type openaiToolFunction struct {
@@ -96,7 +103,7 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 
 	for _, msg := range req.Messages {
 		switch msg.Role {
-		case "system":
+		case "system", "developer":
 			text := extractPlainText(msg.Content)
 			if text != "" {
 				systemParts = append(systemParts, text)
@@ -107,7 +114,7 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 				return nil, err
 			}
 			messages = append(messages, bm)
-		case "assistant":
+		case "assistant", "model":
 			bm := parseAssistantMessage(msg)
 			messages = append(messages, bm)
 		case "tool":
@@ -149,8 +156,14 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	}
 
 	// tool_choice
-	if choice, err := parseToolChoice(req.ToolChoice); err == nil && choice != "" {
+	if choice, toolName, err := parseToolChoice(req.ToolChoice); err == nil && choice != "" {
 		config.ToolChoice = choice
+		if toolName != "" {
+			if config.ProviderExtra == nil {
+				config.ProviderExtra = make(map[string]any)
+			}
+			config.ProviderExtra["forced_tool_name"] = toolName
+		}
 	}
 
 	// response_format
@@ -292,8 +305,19 @@ func parseAssistantMessage(msg openaiMessage) bamboo.BambooMessage {
 	var blocks []bamboo.ContentBlock
 
 	reasoning := extractReasoningContent(msg.ReasoningContent, msg.Reasoning)
-	if reasoning != "" || msg.ThinkingSignature != "" {
-		blocks = append(blocks, bamboo.NewThinkingBlockWithProvider(reasoning, msg.ThinkingSignature, msg.ThinkingProvider))
+	sig := msg.ThinkingSignature
+	sigProv := msg.ThinkingProvider
+	if sig == "" {
+		for _, tc := range msg.ToolCalls {
+			if tc.ExtraContent != nil && tc.ExtraContent.Google != nil && tc.ExtraContent.Google.ThoughtSignature != "" {
+				sig = tc.ExtraContent.Google.ThoughtSignature
+				sigProv = bamboo.SignatureProviderGemini
+				break
+			}
+		}
+	}
+	if reasoning != "" || sig != "" {
+		blocks = append(blocks, bamboo.NewThinkingBlockWithProvider(reasoning, sig, sigProv))
 	}
 
 	if text := extractPlainText(msg.Content); text != "" {
@@ -314,7 +338,6 @@ func parseAssistantMessage(msg openaiMessage) bamboo.BambooMessage {
 			Input: input,
 		})
 	}
-
 	if len(blocks) == 0 {
 		out := bamboo.BambooMessage{Role: bamboo.RoleAssistant}
 		out.ReasoningID = msg.ReasoningID
@@ -378,18 +401,18 @@ func parseStop(raw json.RawMessage) ([]string, error) {
 }
 
 // parseToolChoice 解析 tool_choice 字段。
-func parseToolChoice(raw json.RawMessage) (string, error) {
+func parseToolChoice(raw json.RawMessage) (string, string, error) {
 	if len(raw) == 0 {
-		return "", nil
+		return "", "", nil
 	}
 	// 尝试 string
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
 		switch s {
 		case "auto", "none", "required":
-			return s, nil
+			return s, "", nil
 		default:
-			return "", nil
+			return "", "", nil
 		}
 	}
 	// 尝试 object: {type:"function", function:{name:"xxx"}}
@@ -400,9 +423,9 @@ func parseToolChoice(raw json.RawMessage) (string, error) {
 		} `json:"function"`
 	}
 	if err := json.Unmarshal(raw, &obj); err == nil && obj.Type == "function" {
-		return "forced", nil
+		return "forced", obj.Function.Name, nil
 	}
-	return "", nil
+	return "", "", nil
 }
 
 // parseTools 将 OpenAI tools 转为 bamboo.Tool。

@@ -20,15 +20,16 @@ import (
 //
 // Affected: OpenAI→Any conversion with specific function tool_choice.
 func TestAudit_OpenAI_ToolChoiceFunctionLoss(t *testing.T) {
-	choice, err := parseToolChoice(json.RawMessage(`{"type":"function","function":{"name":"get_weather"}}`))
+	choice, name, err := parseToolChoice(json.RawMessage(`{"type":"function","function":{"name":"get_weather"}}`))
 	if err != nil {
 		t.Fatalf("parseToolChoice() error = %v", err)
 	}
 	if choice != "forced" {
 		t.Errorf("parseToolChoice() = %q, want %q", choice, "forced")
 	}
-	// Documenting: the function name "get_weather" is lost. A unified ToolChoice
-	// format of just "forced" cannot represent which specific tool to force.
+	if name != "get_weather" {
+		t.Errorf("parseToolChoice() name = %q, want %q", name, "get_weather")
+	}
 }
 
 // TestAudit_OpenAI_UserMessageContentParts verifies user content part parsing.

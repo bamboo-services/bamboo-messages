@@ -74,6 +74,12 @@ type responseStreamEvent struct {
 	CallID string `json:"call_id,omitempty"`
 	// Response 完整响应对象（created/completed/incomplete 使用）。
 	Response *responseObject `json:"response,omitempty"`
+	// Error 流式错误事件负载（type="error" 时携带）。
+	Error *responseErrorDetail `json:"error,omitempty"`
+	// Message 顶层错误消息（部分兼容实现直接放在顶层）。
+	Message string `json:"message,omitempty"`
+	// Code 顶层错误码（部分兼容实现直接放在顶层）。
+	Code string `json:"code,omitempty"`
 	// EncryptedContent 服务端加密的推理内容。
 	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
@@ -117,6 +123,15 @@ type responseObject struct {
 	Usage *responsesUsage `json:"usage,omitempty"`
 	// CreatedAt 响应创建时间戳。
 	CreatedAt float64 `json:"created_at,omitempty"`
+	// Error 响应失败时的错误详情（response.failed 携带）。
+	Error *responseErrorDetail `json:"error,omitempty"`
+}
+
+// responseErrorDetail 表示 Responses 响应或流事件中的错误详情。
+type responseErrorDetail struct {
+	Message string `json:"message,omitempty"`
+	Type    string `json:"type,omitempty"`
+	Code    string `json:"code,omitempty"`
 }
 
 // responseObjectItem 表示响应中的一个输出项。

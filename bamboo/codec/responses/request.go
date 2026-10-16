@@ -19,6 +19,9 @@ import (
 // 与 Chat Completions 完全不同，Responses 使用 input 数组而非 messages，
 // 工具定义直接展开（无 function 外层包装）。
 type responsesRequest struct {
+	Type               string          `json:"type,omitempty"` // 兼容 WebSocket response.create 信封
+	StreamID           string          `json:"stream_id,omitempty"`
+	Generate           *bool           `json:"generate,omitempty"`
 	Model              string          `json:"model"`
 	Instructions       string          `json:"instructions,omitempty"`
 	Input              json.RawMessage `json:"input,omitempty"`
@@ -26,6 +29,7 @@ type responsesRequest struct {
 	Temperature        *float64        `json:"temperature,omitempty"`
 	TopP               *float64        `json:"top_p,omitempty"`
 	Stream             bool            `json:"stream,omitempty"`
+	ParallelToolCalls  bool            `json:"parallel_tool_calls,omitempty"`
 	Tools              []responsesTool `json:"tools,omitempty"`
 	ToolChoice         json.RawMessage `json:"tool_choice,omitempty"`
 	Reasoning          *reasoningCfg   `json:"reasoning,omitempty"`
@@ -37,6 +41,7 @@ type responsesRequest struct {
 	Metadata           json.RawMessage `json:"metadata,omitempty"`
 	Text               *textConfig     `json:"text,omitempty"`
 	Include            []string        `json:"include,omitempty"`
+	ContextManagement  json.RawMessage `json:"context_management,omitempty"`
 }
 
 // reasoningCfg Reasoning 配置。
@@ -73,6 +78,7 @@ type responsesTool struct {
 type inputItem struct {
 	Type    string          `json:"type"`
 	Role    string          `json:"role,omitempty"`
+	Phase   string          `json:"phase,omitempty"`
 	Content json.RawMessage `json:"content,omitempty"`
 	ID      string          `json:"id,omitempty"`
 	Name    string          `json:"name,omitempty"`
@@ -148,8 +154,11 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	}
 
 	// tool_choice
-	if choice, err := parseToolChoice(req.ToolChoice); err == nil && choice != "" {
+	if choice, toolName, err := parseToolChoice(req.ToolChoice); err == nil && choice != "" {
 		config.ToolChoice = choice
+		if toolName != "" {
+			extra["forced_tool_name"] = toolName
+		}
 	}
 
 	// text.format.type → ResponseFormat
@@ -176,6 +185,7 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	if req.PromptCacheKey != "" {
 		config.PromptCacheKey = req.PromptCacheKey
 	}
+	config.ParallelToolCalls = req.ParallelToolCalls
 
 	// ProviderExtra：instructions / previous_response_id / store / truncation / include / reasoning.*
 	if req.PreviousResponseID != "" {
@@ -200,6 +210,18 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	}
 	if req.Truncation != "" {
 		extra["truncation"] = req.Truncation
+	}
+	if req.StreamID != "" {
+		extra["stream_id"] = req.StreamID
+	}
+	if req.Generate != nil {
+		extra["generate"] = *req.Generate
+	}
+	if len(req.ContextManagement) > 0 {
+		var cm map[string]any
+		if err := json.Unmarshal(req.ContextManagement, &cm); err == nil {
+			extra["context_management"] = cm
+		}
 	}
 	if len(req.Metadata) > 0 {
 		var metaMap map[string]any
@@ -227,11 +249,16 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 		config.ProviderExtra = extra
 	}
 
+	isStream := req.Stream
+	if req.Type == "response.create" {
+		isStream = true
+	}
+
 	return &codec.RelayRequest{
 		Messages: messages,
 		System:   strings.Join(systemParts, "\n\n"),
 		Config:   config,
-		IsStream: req.Stream,
+		IsStream: isStream,
 	}, nil
 }
 
@@ -393,7 +420,7 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 	}
 
 	switch item.Role {
-	case "system":
+	case "system", "developer":
 		var texts []string
 		for _, p := range parts {
 			if p.Text != "" {
@@ -792,18 +819,18 @@ func parseResponsesTools(tools []responsesTool) []bamboo.Tool {
 }
 
 // parseToolChoice 解析 tool_choice 字段（string 或 object）。
-func parseToolChoice(raw json.RawMessage) (string, error) {
+func parseToolChoice(raw json.RawMessage) (string, string, error) {
 	if len(raw) == 0 {
-		return "", nil
+		return "", "", nil
 	}
 	// 尝试 string
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
 		switch s {
 		case "auto", "none", "required":
-			return s, nil
+			return s, "", nil
 		default:
-			return "", nil
+			return "", "", nil
 		}
 	}
 	// 尝试 object: {type:"function", name:"xxx"}
@@ -812,7 +839,7 @@ func parseToolChoice(raw json.RawMessage) (string, error) {
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(raw, &obj); err == nil && obj.Type == "function" {
-		return "forced", nil
+		return "forced", obj.Name, nil
 	}
-	return "", nil
+	return "", "", nil
 }

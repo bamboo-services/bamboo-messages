@@ -28,6 +28,9 @@ func (p *ResponsesProvider) Chat(ctx context.Context, messages []provider.Messag
 // 通过 provider.SSEScanner 解析 SSE 帧并分发到 handleStreamEvent，
 // 不依赖 openai-go SDK。
 func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) <-chan provider.StreamEvent {
+	if p.isWebSocketMode(config) {
+		return p.chatViaWebSocket(ctx, systemPrompt, messages, config)
+	}
 	eventCh := make(chan provider.StreamEvent, 64)
 
 	go func() {
@@ -36,7 +39,6 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 		if config == nil {
 			config = &provider.ChatConfig{}
 		}
-
 		// 构建请求参数（map[string]any）
 		params := p.buildParams(config.Model, systemPrompt, messages, config, true)
 
@@ -74,12 +76,7 @@ func (p *ResponsesProvider) ChatWithSystem(ctx context.Context, systemPrompt str
 			respBody, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
 
-			var apiErr openaiError
-			_ = json.Unmarshal(respBody, &apiErr)
-			errMsg := "OpenAI Responses"
-			if apiErr.Error.Message != "" {
-				errMsg += ": " + apiErr.Error.Message
-			}
+			errMsg := formatResponsesError(resp.StatusCode, respBody)
 
 			select {
 			case eventCh <- provider.StreamEvent{

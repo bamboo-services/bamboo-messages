@@ -249,3 +249,51 @@ func TestBuildEndpoint_ModelSanitization(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildToolConfig_ForcedAndAllowedFunctionNames(t *testing.T) {
+	p := NewProvider("test-key")
+
+	t.Run("forced_with_tool_name", func(t *testing.T) {
+		body := p.buildRequestBody(nil, "", &provider.ChatConfig{
+			Model:      ModelGemini3Pro,
+			ToolChoice: "forced",
+			ProviderExtra: map[string]any{
+				"forced_tool_name": "get_weather",
+			},
+		}, false)
+		tc, ok := body["toolConfig"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected toolConfig, got %#v", body["toolConfig"])
+		}
+		fcc, ok := tc["functionCallingConfig"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected functionCallingConfig, got %#v", tc)
+		}
+		if fcc["mode"] != "ANY" {
+			t.Errorf("mode = %v, want ANY", fcc["mode"])
+		}
+		allowed, ok := fcc["allowedFunctionNames"].([]string)
+		if !ok || len(allowed) != 1 || allowed[0] != "get_weather" {
+			t.Errorf("allowedFunctionNames = %#v, want [get_weather]", fcc["allowedFunctionNames"])
+		}
+	})
+
+	t.Run("validated_mode_with_whitelist", func(t *testing.T) {
+		body := p.buildRequestBody(nil, "", &provider.ChatConfig{
+			Model:      ModelGemini3Flash,
+			ToolChoice: "validated",
+			ProviderExtra: map[string]any{
+				"allowed_function_names": []string{"read_file", "list_dir"},
+			},
+		}, false)
+		tc := body["toolConfig"].(map[string]any)
+		fcc := tc["functionCallingConfig"].(map[string]any)
+		if fcc["mode"] != "VALIDATED" {
+			t.Errorf("mode = %v, want VALIDATED", fcc["mode"])
+		}
+		allowed, ok := fcc["allowedFunctionNames"].([]string)
+		if !ok || len(allowed) != 2 || allowed[0] != "read_file" || allowed[1] != "list_dir" {
+			t.Errorf("allowedFunctionNames = %#v, want [read_file list_dir]", fcc["allowedFunctionNames"])
+		}
+	})
+}

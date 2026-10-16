@@ -62,8 +62,11 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 		), 0)
 	}
 
-	// 检查响应
+	// 检查响应：若 choices 为空，优先识别 HTTP 200 下的错误信封（如部分中转网关在 200 中返回 {"error":{...}}）
 	if len(chatResp.Choices) == 0 {
+		if msg, code, ok := extractOpenAIErrorEnvelope(body); ok {
+			return nil, pkgErrors.NewBambooError("上游", "OpenAI Completions: "+msg, code)
+		}
 		if provider.DebugEnabled {
 			xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
 				fmt.Sprintf("上游返回空响应, raw=%s", truncateBody(body)))
@@ -132,8 +135,12 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 		}
 	}
 
-	// 解析工具调用
+	// 解析工具调用（同时提取 Google OpenAI 兼容层在 tool_calls[0].extra_content.google.thought_signature 中携带的签名）
 	for _, tc := range choice.Message.ToolCalls {
+		if result.ThinkingSignature == "" && tc.ExtraContent != nil && tc.ExtraContent.Google != nil && tc.ExtraContent.Google.ThoughtSignature != "" {
+			result.ThinkingSignature = tc.ExtraContent.Google.ThoughtSignature
+			result.ThinkingSignatureProvider = provider.SignatureProviderGemini
+		}
 		result.ToolCalls = append(result.ToolCalls, provider.ToolCall{
 			ID:   tc.ID,
 			Type: "function",
@@ -197,17 +204,99 @@ const maxUpstreamDumpLen = 1000
 // formatUpstreamError 从 HTTP 状态码和响应体中提取错误信息，
 // 生成包含完整诊断信息的错误消息。
 //
-// 尝试解析响应体为 openaiError 结构体提取结构化错误信息；
-// 解析失败时退化为原始响应体文本。
+// 兼容嵌套 {"error":{"message":"..."}} 与顶层 {"message":"..."} 两种错误结构；
+// 解析失败时退化为原始响应体文本（空 body 时附带 HTTP 状态码）。
 func formatUpstreamError(statusCode int, body []byte) string {
-	var apiErr openaiError
-	if err := json.Unmarshal(body, &apiErr); err == nil && apiErr.Error.Message != "" {
-		return fmt.Sprintf("OpenAI Completions: %s", apiErr.Error.Message)
+	if msg, _, ok := extractOpenAIErrorEnvelope(body); ok {
+		return fmt.Sprintf("OpenAI Completions: %s", msg)
+	}
+
+	var topMsg struct {
+		Message string `json:"message"`
+		Detail  string `json:"detail"`
+	}
+	if err := json.Unmarshal(body, &topMsg); err == nil {
+		if topMsg.Message != "" {
+			return fmt.Sprintf("OpenAI Completions: %s", topMsg.Message)
+		}
+		if topMsg.Detail != "" {
+			return fmt.Sprintf("OpenAI Completions: %s", topMsg.Detail)
+		}
 	}
 
 	dump := string(body)
 	if len(dump) > maxUpstreamDumpLen {
 		dump = dump[:maxUpstreamDumpLen] + "...(truncated)"
 	}
+	if dump == "" {
+		return fmt.Sprintf("OpenAI Completions: HTTP %d", statusCode)
+	}
 	return fmt.Sprintf("OpenAI Completions: %s", dump)
+}
+
+// extractOpenAIErrorEnvelope 尝试从 JSON 字节流中提取 {"error": ...} 信封的错误消息与推断状态码。
+//
+// 兼容两种常见形态：
+//  1. {"error": {"message": "...", "type": "...", "code": ...}}
+//  2. {"error": "string error message"}
+func extractOpenAIErrorEnvelope(data []byte) (message string, statusCode int, ok bool) {
+	var raw struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil || len(raw.Error) == 0 || string(raw.Error) == "null" {
+		return "", 0, false
+	}
+
+	// 形态 1：error 是对象
+	var detail openaiErrorDetail
+	if err := json.Unmarshal(raw.Error, &detail); err == nil && (detail.Message != "" || detail.Type != "" || len(detail.Code) > 0) {
+		msg := detail.Message
+		codeStr := detail.Type
+		var numCode int
+		if len(detail.Code) > 0 && string(detail.Code) != "null" {
+			if json.Unmarshal(detail.Code, &numCode) == nil && numCode >= 400 && numCode <= 599 {
+				statusCode = numCode
+			} else {
+				var s string
+				if json.Unmarshal(detail.Code, &s) == nil && s != "" {
+					codeStr = s
+				}
+			}
+		}
+		if statusCode == 0 {
+			statusCode = mapOpenAIErrorCodeToStatus(codeStr)
+		}
+		if msg == "" {
+			msg = codeStr
+		}
+		if msg == "" {
+			msg = string(raw.Error)
+		}
+		return msg, statusCode, true
+	}
+
+	// 形态 2：error 是纯字符串
+	var errStr string
+	if err := json.Unmarshal(raw.Error, &errStr); err == nil && errStr != "" {
+		return errStr, 500, true
+	}
+
+	return "", 0, false
+}
+
+func mapOpenAIErrorCodeToStatus(code string) int {
+	switch code {
+	case "invalid_request_error", "invalid_request", "context_length_exceeded":
+		return 400
+	case "authentication_error", "invalid_api_key":
+		return 401
+	case "permission_error", "permission_denied", "insufficient_quota":
+		return 403
+	case "not_found_error", "model_not_found":
+		return 404
+	case "rate_limit_exceeded", "rate_limit_error":
+		return 429
+	default:
+		return 0
+	}
 }

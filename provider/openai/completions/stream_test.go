@@ -293,3 +293,57 @@ func TestParseReasoningRaw_ObjectFormat(t *testing.T) {
 		t.Errorf("parseReasoningRaw(nil) = %q, want empty", got)
 	}
 }
+
+func TestExtractOpenAIErrorEnvelope(t *testing.T) {
+	tests := []struct {
+		name     string
+		payload  string
+		wantMsg  string
+		wantCode int
+		wantOK   bool
+	}{
+		{
+			name:     "standard_string_code",
+			payload:  `{"error":{"message":"Quota exceeded","type":"insufficient_quota","code":"insufficient_quota"}}`,
+			wantMsg:  "Quota exceeded",
+			wantCode: 403,
+			wantOK:   true,
+		},
+		{
+			name:     "numeric_code_compat",
+			payload:  `{"error":{"message":"Upstream rate limit","code":429}}`,
+			wantMsg:  "Upstream rate limit",
+			wantCode: 429,
+			wantOK:   true,
+		},
+		{
+			name:     "plain_string_error",
+			payload:  `{"error":"Gateway timeout"}`,
+			wantMsg:  "Gateway timeout",
+			wantCode: 500,
+			wantOK:   true,
+		},
+		{
+			name:     "normal_chunk_ignored",
+			payload:  `{"id":"chatcmpl-1","choices":[{"delta":{"content":"hi"}}]}`,
+			wantMsg:  "",
+			wantCode: 0,
+			wantOK:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg, code, ok := extractOpenAIErrorEnvelope([]byte(tt.payload))
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if msg != tt.wantMsg {
+				t.Errorf("msg = %q, want %q", msg, tt.wantMsg)
+			}
+			if code != tt.wantCode {
+				t.Errorf("code = %d, want %d", code, tt.wantCode)
+			}
+		})
+	}
+}

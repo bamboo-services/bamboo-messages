@@ -130,7 +130,7 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	}
 
 	// tool_choice
-	if choice, toolName := parseToolChoice(req.ToolChoice); choice != "" {
+	if choice, toolName, disableParallel := parseToolChoice(req.ToolChoice); choice != "" {
 		config.ToolChoice = choice
 		// tool_choice.type="tool" 时，存储 forced tool name 避免丢失
 		if toolName != "" {
@@ -138,6 +138,12 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 				config.ProviderExtra = make(map[string]any)
 			}
 			config.ProviderExtra["forced_tool_name"] = toolName
+		}
+		if disableParallel {
+			if config.ProviderExtra == nil {
+				config.ProviderExtra = make(map[string]any)
+			}
+			config.ProviderExtra["disable_parallel_tool_use"] = true
 		}
 	}
 
@@ -443,29 +449,30 @@ func parseTools(tools []anthropicTool) []bamboo.Tool {
 //   - {type:"none"}  → "none"
 //   - {type:"tool", name:"xxx"} → "forced", name:"xxx"
 //
-// 返回 toolChoice 字符串和可选的 forced tool name。
-func parseToolChoice(raw json.RawMessage) (string, string) {
+// 返回 toolChoice 字符串、可选的 forced tool name 以及 disable_parallel_tool_use 标志。
+func parseToolChoice(raw json.RawMessage) (string, string, bool) {
 	if len(raw) == 0 {
-		return "", ""
+		return "", "", false
 	}
 	var obj struct {
-		Type string `json:"type"`
-		Name string `json:"name"`
+		Type                   string `json:"type"`
+		Name                   string `json:"name"`
+		DisableParallelToolUse bool   `json:"disable_parallel_tool_use,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		return "", ""
+		return "", "", false
 	}
 	switch obj.Type {
 	case "auto":
-		return "auto", ""
+		return "auto", "", obj.DisableParallelToolUse
 	case "any":
-		return "required", ""
+		return "required", "", obj.DisableParallelToolUse
 	case "none":
-		return "none", ""
+		return "none", "", false
 	case "tool":
-		return "forced", obj.Name
+		return "forced", obj.Name, obj.DisableParallelToolUse
 	}
-	return "", ""
+	return "", "", false
 }
 
 // maxUserIDLen OpenAI user 字段最大长度限制。
@@ -502,6 +509,8 @@ func parseOutputConfigEffort(raw json.RawMessage) string {
 // 映射规则:
 //   - {type:"adaptive"}             → ThinkingConfig{Effort:"high"}
 //   - {type:"enabled", budget_tokens:N} → ThinkingConfig{Effort:"medium"}
+//   - {type:"between_tools"}        → ThinkingConfig{Effort:"low"}
+//   - {type:"disabled"}             → ThinkingConfig{Effort:"none"}
 func parseThinking(raw json.RawMessage) *bamboo.ThinkingConfig {
 	if len(raw) == 0 {
 		return nil
@@ -509,15 +518,20 @@ func parseThinking(raw json.RawMessage) *bamboo.ThinkingConfig {
 	var obj struct {
 		Type         string `json:"type"`
 		BudgetTokens *int64 `json:"budget_tokens,omitempty"`
+		Display      string `json:"display,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return nil
 	}
 	switch obj.Type {
 	case "adaptive":
-		return &bamboo.ThinkingConfig{Effort: "high"}
+		return &bamboo.ThinkingConfig{Effort: "high", Display: obj.Display}
 	case "enabled":
-		return &bamboo.ThinkingConfig{Effort: "medium"}
+		return &bamboo.ThinkingConfig{Effort: "medium", Display: obj.Display}
+	case "between_tools":
+		return &bamboo.ThinkingConfig{Effort: "low", Display: obj.Display}
+	case "disabled":
+		return &bamboo.ThinkingConfig{Effort: "none", Display: obj.Display}
 	}
 	return nil
 }

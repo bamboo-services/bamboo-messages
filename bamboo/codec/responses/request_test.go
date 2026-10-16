@@ -524,7 +524,7 @@ func TestParseRequest_ToolChoiceString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		choice, err := parseToolChoice(json.RawMessage(tt.input))
+		choice, _, err := parseToolChoice(json.RawMessage(tt.input))
 		if err != nil {
 			t.Errorf("parseToolChoice(%s) error = %v", tt.input, err)
 		}

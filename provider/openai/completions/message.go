@@ -179,15 +179,25 @@ func (p *CompletionsProvider) buildAssistantMessage(msg provider.Message) map[st
 
 	if len(msg.ToolCalls) > 0 {
 		toolCalls := make([]map[string]any, 0, len(msg.ToolCalls))
-		for _, tc := range msg.ToolCalls {
-			toolCalls = append(toolCalls, map[string]any{
+		for i, tc := range msg.ToolCalls {
+			tcMap := map[string]any{
 				"id":   tc.ID,
 				"type": "function",
 				"function": map[string]any{
 					"name":      tc.Function.Name,
 					"arguments": tc.Function.Arguments,
 				},
-			})
+			}
+			// 对齐 Google OpenAI 兼容层规范：当携带 Gemini 原生 thoughtSignature 时，
+			// 在首个 tool_call 上附带 extra_content.google.thought_signature。
+			if i == 0 && provider.NativeThinkingCredential(msg.ThinkingSignature, msg.ThinkingSignatureProvider, provider.SignatureProviderGemini) {
+				tcMap["extra_content"] = map[string]any{
+					"google": map[string]any{
+						"thought_signature": msg.ThinkingSignature,
+					},
+				}
+			}
+			toolCalls = append(toolCalls, tcMap)
 		}
 		m["tool_calls"] = toolCalls
 	}

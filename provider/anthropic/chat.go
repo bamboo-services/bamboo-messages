@@ -173,6 +173,9 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 					Error        *anthropicError  `json:"error,omitempty"`
 				}
 				if jsonErr := json.Unmarshal(data, &raw); jsonErr == nil {
+					if event.Type == "" && raw.Type != "" {
+						event.Type = raw.Type
+					}
 					event.Index = raw.Index
 					event.ContentBlock = raw.ContentBlock
 					event.Message = raw.Message
@@ -180,7 +183,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 					// 对于 content_block_delta 和 message_delta，Delta 字段需要是 delta 子对象
 					// 但 handleStreamEvent 中 contentBlockDelta 会重新从 event.Delta 解析 contentBlockDelta
 					// 所以这里需要提取 delta 子对象
-					if eventType == "content_block_delta" || eventType == "message_delta" {
+					if event.Type == "content_block_delta" || event.Type == "message_delta" {
 						var wrapper struct {
 							Delta json.RawMessage `json:"delta,omitempty"`
 						}
@@ -190,7 +193,6 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 					}
 				}
 			}
-
 			events := p.handleStreamEvent(event, &finishReason)
 			for _, e := range events {
 				e.ReceivedAt = frameAt
@@ -232,15 +234,18 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 // formatAnthropicError 格式化 Anthropic API 错误响应为可读字符串。
 //
 // 尝试解析 Anthropic 标准错误响应结构，提取 error.message 字段；
-// 解析失败时返回原始响应体摘要。
+// 解析失败时返回原始响应体摘要（若为空则附带 HTTP 状态码）。
 func formatAnthropicError(statusCode int, body []byte) string {
 	var errResp anthropicErrorResponse
-	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error != nil {
+	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error != nil && errResp.Error.Message != "" {
 		return fmt.Sprintf("Anthropic: %s", errResp.Error.Message)
 	}
 	bodyStr := string(body)
-	if len(bodyStr) > 200 {
-		bodyStr = bodyStr[:200] + "..."
+	if len(bodyStr) > 500 {
+		bodyStr = bodyStr[:500] + "...(truncated)"
+	}
+	if bodyStr == "" {
+		return fmt.Sprintf("Anthropic: HTTP %d", statusCode)
 	}
 	return fmt.Sprintf("Anthropic: %s", bodyStr)
 }

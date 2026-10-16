@@ -142,6 +142,21 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 				break
 			}
 
+			// 显式错误信封检查：若上游在 HTTP 200 SSE 流中返回 {"error": ...}，
+			// 立即发出 StreamTypeError 并终止流，防止错误被当作空 chunk 静默吞掉。
+			if msg, code, ok := extractOpenAIErrorEnvelope(data); ok {
+				select {
+				case eventCh <- provider.StreamEvent{
+					Type:       provider.StreamTypeError,
+					Err:        pkgErrors.NewBambooError("上游", "OpenAI Completions: "+msg, code),
+					StatusCode: code,
+					ReceivedAt: frameAt,
+				}:
+				case <-ctx.Done():
+				}
+				return
+			}
+
 			// 发送 Start 事件（首个有效帧时）
 			if !startSent {
 				startSent = true
@@ -151,7 +166,6 @@ func (p *CompletionsProvider) ChatWithSystem(ctx context.Context, systemPrompt s
 					return
 				}
 			}
-
 			// 反序列化 chunk
 			var chunk chatCompletionChunk
 			if jsonErr := json.Unmarshal(data, &chunk); jsonErr != nil {

@@ -39,9 +39,18 @@ type openaiMsgOut struct {
 }
 
 type openaiToolOut struct {
-	ID       string          `json:"id"`
-	Type     string          `json:"type"`
-	Function openaiToolOutFn `json:"function"`
+	ID           string            `json:"id"`
+	Type         string            `json:"type"`
+	Function     openaiToolOutFn   `json:"function"`
+	ExtraContent *openaiToolExtraO `json:"extra_content,omitempty"`
+}
+
+type openaiToolExtraO struct {
+	Google *openaiGoogleExtraOut `json:"google,omitempty"`
+}
+
+type openaiGoogleExtraOut struct {
+	ThoughtSignature string `json:"thought_signature,omitempty"`
 }
 
 type openaiToolOutFn struct {
@@ -140,6 +149,13 @@ func serializeResponse(resp *bamboo.Response) ([]byte, error) {
 
 	// tool_calls
 	if len(toolCalls) > 0 {
+		if thinkingSignature != "" && thinkingProvider == bamboo.SignatureProviderGemini {
+			toolCalls[0].ExtraContent = &openaiToolExtraO{
+				Google: &openaiGoogleExtraOut{
+					ThoughtSignature: thinkingSignature,
+				},
+			}
+		}
 		choice.Message.ToolCalls = toolCalls
 	}
 

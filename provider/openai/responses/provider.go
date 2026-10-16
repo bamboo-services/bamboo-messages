@@ -13,6 +13,7 @@ type ResponsesProvider struct {
 	degradedReason          provider.DegradedReasonStrategy
 	includeReasoningContent bool
 	ignoreEncryptedContent  bool
+	websocketMode           bool
 }
 
 // ============================================
@@ -37,6 +38,7 @@ type config struct {
 	degradedReason          provider.DegradedReasonStrategy
 	includeReasoningContent bool
 	ignoreEncryptedContent  bool
+	websocketMode           bool
 }
 
 // WithAPIKey 设置 API 密钥。
@@ -105,6 +107,14 @@ func WithIgnoreEncryptedContent(ignore bool) Option {
 	return func(c *config) { c.ignoreEncryptedContent = ignore }
 }
 
+// WithWebSocketMode 启用 OpenAI Responses WebSocket 传输模式（wss://.../v1/responses）。
+//
+// 启用后（或当 BaseURL 以 ws:// / wss:// 开头时），Chat / Complete 会通过 WebSocket
+// 连接发送 {"type": "response.create", ...} 帧并接收服务端事件流。
+func WithWebSocketMode(enabled bool) Option {
+	return func(c *config) { c.websocketMode = enabled }
+}
+
 // ============================================
 // 构造函数
 // ============================================
@@ -144,6 +154,7 @@ func NewResponsesProviderWithOptions(opts ...Option) *ResponsesProvider {
 		degradedReason:          cfg.degradedReason,
 		includeReasoningContent: cfg.includeReasoningContent,
 		ignoreEncryptedContent:  cfg.ignoreEncryptedContent,
+		websocketMode:           cfg.websocketMode,
 	}
 }
 

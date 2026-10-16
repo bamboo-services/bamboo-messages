@@ -71,10 +71,16 @@ func Relay(
 
 	req, err := inCodec.ParseRequest(body)
 	if err != nil {
-		cfg.triggerError(err)
-		return nil, toBambooError(err)
+		bErr := toBambooError(err)
+		var be *pkgErrors.BambooError
+		if errors.As(bErr, &be) && be.StatusCode == 0 {
+			be.StatusCode = 400
+		}
+		cfg.triggerError(bErr)
+		errorBody := outCodec.SerializeError(bErr)
+		debugRelayResponse("Relay", inFormat, outFormat, errorBody)
+		return errorBody, bErr
 	}
-
 	debugRelayParsed("Relay", inFormat, req)
 
 	// ── 调用 Provider（通过 bamboo client 包装） ──
@@ -388,4 +394,75 @@ func SplitSSEFrames(data []byte) [][]byte {
 		return [][]byte{data}
 	}
 	return frames
+}
+
+// ExtractSSEDataPayloads 从单个或合并的 SSE 字节流中提取所有有效 JSON data 负载。
+//
+// 用于将 RelayStream 产出的 SSE 帧（如 `event: response.created\ndata: {...}\n\n`）
+// 无损转换为 WebSocket 文本帧所需的纯 JSON 负载列表：
+//   - 自动跳过 `: keep-alive` 等 SSE 注释帧；
+//   - 自动跳过 `data: [DONE]` 终止哨兵；
+//   - 支持单次输入包含多个合并的 SSE 事件。
+func ExtractSSEDataPayloads(sseData []byte) [][]byte {
+	frames := SplitSSEFrames(sseData)
+	var payloads [][]byte
+	for _, frame := range frames {
+		trimmed := bytes.TrimSpace(frame)
+		if len(trimmed) == 0 || bytes.HasPrefix(trimmed, []byte(":")) {
+			continue
+		}
+		lines := bytes.Split(trimmed, []byte("\n"))
+		var dataParts [][]byte
+		for _, line := range lines {
+			line = bytes.TrimRight(line, "\r")
+			if bytes.HasPrefix(line, []byte("data:")) {
+				val := bytes.TrimPrefix(line, []byte("data:"))
+				if len(val) > 0 && val[0] == ' ' {
+					val = val[1:]
+				}
+				dataParts = append(dataParts, val)
+			}
+		}
+		if len(dataParts) == 0 {
+			continue
+		}
+		joined := bytes.Join(dataParts, []byte("\n"))
+		if bytes.Equal(bytes.TrimSpace(joined), []byte("[DONE]")) {
+			continue
+		}
+		payloads = append(payloads, joined)
+	}
+	return payloads
+}
+
+// RelayWebSocketMessages 将流式协议互转输出转换为逐条纯 JSON 消息流（适用于 Responses WebSocket 等下行通道）。
+//
+// 内部复用 RelayStream，自动剥离 SSE `event:` / `data:` 包装并过滤心跳注释与 `[DONE]` 哨兵，
+// 每条发往返回 channel 的 []byte 均为可直接通过 WebSocket WriteMessage(TextMessage, ...) 发送的完整 JSON 事件。
+func RelayWebSocketMessages(
+	ctx context.Context,
+	p provider.Provider,
+	body []byte,
+	inFormat codec.FormatType,
+	outFormat codec.FormatType,
+	opts ...Option,
+) (<-chan []byte, error) {
+	sseCh, err := RelayStream(ctx, p, body, inFormat, outFormat, opts...)
+	if err != nil {
+		return nil, err
+	}
+	wsOut := make(chan []byte, 64)
+	go func() {
+		defer close(wsOut)
+		for sseFrame := range sseCh {
+			for _, payload := range ExtractSSEDataPayloads(sseFrame) {
+				select {
+				case wsOut <- payload:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return wsOut, nil
 }

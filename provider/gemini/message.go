@@ -10,11 +10,19 @@ import (
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
-// toolResultRecord 缓存一条 RoleTool 的函数响应，供按 tool_call_id 回填。
+// toolResultRecord 缓存一条 RoleTool 的函数响应，供按 tool_call_id 或工具名回填。
 type toolResultRecord struct {
+	id       string
 	content  string
 	isError  bool
 	toolName string
+	consumed bool
+}
+
+// toolResultPool 维护按 ID 快速索引与按输入顺序排列的 RoleTool 结果池。
+type toolResultPool struct {
+	byID    map[string]*toolResultRecord
+	ordered []*toolResultRecord
 }
 
 // ==============================
@@ -139,23 +147,34 @@ func hasModelContent(msg map[string]any) bool {
 	return false
 }
 
-// collectToolResults 按 tool_call_id 收集 RoleTool 响应，同一 id 仅保留第一条。
-func collectToolResults(messages []provider.Message) map[string]toolResultRecord {
-	results := make(map[string]toolResultRecord)
+// collectToolResults 按 tool_call_id 收集 RoleTool 响应，同一非空 id 仅保留第一条，并保持输入顺序。
+func collectToolResults(messages []provider.Message) toolResultPool {
+	pool := toolResultPool{
+		byID:    make(map[string]*toolResultRecord),
+		ordered: make([]*toolResultRecord, 0),
+	}
 	for _, msg := range messages {
 		if msg.Role != provider.RoleTool {
 			continue
 		}
 		id := msg.ToolCallID
-		if id == "" {
-			continue
+		if id != "" {
+			if _, exists := pool.byID[id]; exists {
+				continue
+			}
 		}
-		if _, exists := results[id]; exists {
-			continue
+		rec := &toolResultRecord{
+			id:       id,
+			content:  msg.Content,
+			isError:  msg.IsError,
+			toolName: msg.ToolName,
 		}
-		results[id] = toolResultRecord{content: msg.Content, isError: msg.IsError, toolName: msg.ToolName}
+		if id != "" {
+			pool.byID[id] = rec
+		}
+		pool.ordered = append(pool.ordered, rec)
 	}
-	return results
+	return pool
 }
 
 // buildUserMessage 构建用户消息。
@@ -282,8 +301,17 @@ func geminiFunctionArgs(raw string) json.RawMessage {
 // buildFunctionResponseContent 将一轮 ToolCalls 闭合为单条 user content。
 //
 // parts 顺序与 functionCall 声明顺序一致；name 始终取函数名。
+// 先预占所有按 ID 精确命中的结果，避免按名兜底消费掉后续同轮显式 ID 的结果；
+// 按名兜底按输入顺序遍历并标记 consumed，防止同名并行工具调用重复复用同一条结果或因 map 随机遍历乱序。
 // 缺失的工具结果注入 dummy error，避免 Gemini 因历史不完整拒绝请求。
-func buildFunctionResponseContent(calls []provider.ToolCall, results map[string]toolResultRecord) map[string]any {
+func buildFunctionResponseContent(calls []provider.ToolCall, results toolResultPool) map[string]any {
+	for _, tc := range calls {
+		if tc.ID != "" {
+			if rec, ok := results.byID[tc.ID]; ok && rec != nil {
+				rec.consumed = true
+			}
+		}
+	}
 	parts := make([]map[string]any, 0, len(calls))
 	for i, tc := range calls {
 		parts = append(parts, buildFunctionResponsePart(tc, i, results))
@@ -294,7 +322,7 @@ func buildFunctionResponseContent(calls []provider.ToolCall, results map[string]
 	}
 }
 
-func buildFunctionResponsePart(tc provider.ToolCall, index int, results map[string]toolResultRecord) map[string]any {
+func buildFunctionResponsePart(tc provider.ToolCall, index int, results toolResultPool) map[string]any {
 	name := tc.Function.Name
 	if name == "" {
 		name = "tool_response"
@@ -302,12 +330,12 @@ func buildFunctionResponsePart(tc provider.ToolCall, index int, results map[stri
 	id := functionCallID(tc, index)
 
 	responseMap := map[string]any{}
-	if rec, ok := results[tc.ID]; ok && tc.ID != "" {
+	if rec, ok := results.byID[tc.ID]; ok && tc.ID != "" && rec != nil {
 		responseMap["output"] = rec.content
 		if rec.isError {
 			responseMap["error"] = rec.content
 		}
-	} else if rec, ok := findResultByName(name, results); ok {
+	} else if rec := results.consumeByName(name); rec != nil {
 		responseMap["output"] = rec.content
 		if rec.isError {
 			responseMap["error"] = rec.content
@@ -328,17 +356,18 @@ func buildFunctionResponsePart(tc provider.ToolCall, index int, results map[stri
 	}
 }
 
-// findResultByName 在 results 中查找首个 toolName 匹配的记录作为兜底。
-func findResultByName(name string, results map[string]toolResultRecord) (toolResultRecord, bool) {
+// consumeByName 按原始输入顺序查找首个未被消费且 toolName 匹配的记录作为兜底。
+func (p *toolResultPool) consumeByName(name string) *toolResultRecord {
 	if name == "" {
-		return toolResultRecord{}, false
+		return nil
 	}
-	for _, rec := range results {
-		if rec.toolName == name {
-			return rec, true
+	for _, rec := range p.ordered {
+		if rec != nil && !rec.consumed && rec.toolName == name {
+			rec.consumed = true
+			return rec
 		}
 	}
-	return toolResultRecord{}, false
+	return nil
 }
 
 func functionCallID(tc provider.ToolCall, index int) string {

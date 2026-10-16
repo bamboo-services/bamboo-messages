@@ -175,15 +175,18 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 // formatBambooError 格式化 bamboo API 错误响应为可读字符串。
 //
 // 尝试解析 bamboo 错误响应结构，提取 error.message 字段；
-// 解析失败时返回原始响应体摘要。
+// 解析失败时返回原始响应体摘要（空 body 时附带 HTTP 状态码）。
 func formatBambooError(statusCode int, body []byte) string {
 	var errResp wireErrorPayload
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
 		return fmt.Sprintf("bamboo: %s", errResp.Error.Message)
 	}
 	bodyStr := string(body)
-	if len(bodyStr) > 200 {
-		bodyStr = bodyStr[:200] + "..."
+	if len(bodyStr) > 500 {
+		bodyStr = bodyStr[:500] + "...(truncated)"
+	}
+	if bodyStr == "" {
+		return fmt.Sprintf("bamboo: HTTP %d", statusCode)
 	}
 	return fmt.Sprintf("bamboo: %s", bodyStr)
 }

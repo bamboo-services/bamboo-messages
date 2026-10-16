@@ -1004,3 +1004,87 @@ func TestStreamSerializer_TextAccumulation(t *testing.T) {
 		t.Errorf("frame[0] text = %v, want %q", frames[0].payload["text"], "ABC")
 	}
 }
+
+func TestStreamSerializer_ErrorSuppressesSubsequentCompleted(t *testing.T) {
+	s := newStreamSerializer("o3")
+	_, _ = s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+	_, _ = s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        0,
+		ContentBlock: bamboo.NewTextBlock(""),
+	})
+	_, _ = s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 0,
+		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaTextDelta, Text: "partial"},
+	})
+
+	errBytes, err := s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventError,
+		Error: bamboo.NewBambooError("上游", "Rate limit exceeded", 429),
+	})
+	if err != nil {
+		t.Fatalf("Serialize(error) error = %v", err)
+	}
+	evType, payload := parseResponsesSSE(t, errBytes)
+	if evType != "response.failed" {
+		t.Fatalf("event type = %q, want response.failed", evType)
+	}
+	resp := extractResponse(t, payload)
+	if resp["status"] != "failed" {
+		t.Errorf("status = %v, want failed", resp["status"])
+	}
+
+	// StreamConverter.handleError 自动补发的后续 stop / message_delta 事件必须被抑制，不能发出 response.completed
+	for _, ev := range []bamboo.StreamEvent{
+		{Type: bamboo.EventContentBlockStop, Index: 0},
+		{Type: bamboo.EventMessageDelta, Delta: &bamboo.MessageDelta{StopReason: bamboo.FinishReasonEndTurn}},
+		{Type: bamboo.EventMessageStop},
+	} {
+		after, afterErr := s.Serialize(ev)
+		if afterErr != nil || len(after) != 0 {
+			t.Errorf("expected suppressed output after error for %v, got %q (err=%v)", ev.Type, string(after), afterErr)
+		}
+	}
+}
+
+func TestStreamSerializer_ForeignSignatureFilteredFromEncryptedContent(t *testing.T) {
+	s := newStreamSerializer("o3")
+	_, _ = s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+	_, _ = s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        0,
+		ContentBlock: bamboo.NewThinkingBlockWithProvider("", "", bamboo.SignatureProviderGemini),
+	})
+	_, _ = s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockDelta,
+		Index: 0,
+		Delta: &bamboo.StreamDelta{
+			Type:              bamboo.DeltaSignature,
+			Signature:         "gemini_thought_sig",
+			SignatureProvider: bamboo.SignatureProviderGemini,
+		},
+	})
+	stopBytes, err := s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventContentBlockStop,
+		Index: 0,
+	})
+	if err != nil {
+		t.Fatalf("Serialize(stop) error = %v", err)
+	}
+	frames := parseAllResponsesSSE(t, stopBytes)
+	for _, f := range frames {
+		if f.eventType == "response.output_item.done" {
+			item, _ := f.payload["item"].(map[string]any)
+			if enc, _ := item["encrypted_content"].(string); enc != "" {
+				t.Errorf("foreign signature must not be written to encrypted_content, got %q", enc)
+			}
+		}
+	}
+}

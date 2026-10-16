@@ -134,13 +134,21 @@ func (p *ResponsesProvider) buildParams(model string, systemPrompt string, messa
 		}
 	}
 
-	// ToolChoice — 工具选择策略（"forced" 统一映射为 "required"）
+	// ToolChoice — 工具选择策略
+	// 若为 "forced" 且携带 forced_tool_name，构造 Responses 原生 {"type":"function","name":...}；否则映射为 "required"
 	if config.ToolChoice != "" {
-		tc := config.ToolChoice
-		if tc == "forced" {
-			tc = "required"
+		if config.ToolChoice == "forced" {
+			if toolName, ok := provider.GetExtraString(config.ProviderExtra, "forced_tool_name"); ok && toolName != "" {
+				params["tool_choice"] = map[string]any{
+					"type": "function",
+					"name": toolName,
+				}
+			} else {
+				params["tool_choice"] = "required"
+			}
+		} else {
+			params["tool_choice"] = config.ToolChoice
 		}
-		params["tool_choice"] = tc
 	}
 
 	// ResponseFormat — 响应格式 (text / json_object)

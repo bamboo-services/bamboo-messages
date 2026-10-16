@@ -145,6 +145,7 @@ type responsesStreamSerializer struct {
 
 	created       bool
 	completedSent bool
+	failed        bool
 	lastUsage     *bamboo.Usage
 }
 
@@ -168,6 +169,9 @@ func newStreamSerializer(model string) *responsesStreamSerializer {
 }
 
 func (s *responsesStreamSerializer) Serialize(event bamboo.StreamEvent) ([]byte, error) {
+	if s.failed {
+		return nil, nil
+	}
 	switch event.Type {
 	case bamboo.EventMessageStart:
 		s.rememberUsage(event.Usage)
@@ -385,7 +389,9 @@ func (s *responsesStreamSerializer) handleContentBlockDelta(event bamboo.StreamE
 
 	case bamboo.DeltaSignature:
 		block := s.ensureReasoningBlock(event.Index)
-		block.encryptedContent = delta.Signature
+		if bamboo.HasNativeThinkingCredential(delta.Signature, delta.SignatureProvider, bamboo.SignatureProviderOpenAIResponses) {
+			block.encryptedContent = delta.Signature
+		}
 		return nil, nil
 	default:
 		return nil, nil
@@ -548,6 +554,9 @@ func (s *responsesStreamSerializer) handleMessageDelta(event bamboo.StreamEvent)
 }
 
 func (s *responsesStreamSerializer) handleError(event bamboo.StreamEvent) ([]byte, error) {
+	s.failed = true
+	s.completedSent = true
+	s.blocks = nil
 	errMsg := "unknown error"
 	errCode := "server_error"
 	if event.Error != nil {
@@ -611,9 +620,9 @@ func (s *responsesStreamSerializer) ensureToolBlock(index int, callID, name stri
 		return block
 	}
 	if callID == "" {
-		callID = fmt.Sprintf("call_%d", time.Now().UnixNano())
+		callID = fmt.Sprintf("call_%d_%d", time.Now().UnixNano(), s.outputIndexCounter)
 	}
-	itemID := fmt.Sprintf("fc_%d", time.Now().UnixNano())
+	itemID := fmt.Sprintf("fc_%d_%d", time.Now().UnixNano(), s.outputIndexCounter)
 	block := &responsesStreamBlock{
 		kind:        "tool_use",
 		outputIndex: s.outputIndexCounter,

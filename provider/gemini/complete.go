@@ -3,11 +3,12 @@ package gemini
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"net/http"
-
+	"fmt"
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
 	"github.com/bamboo-services/bamboo-messages/provider"
+	"io"
+	"net/http"
+	"strings"
 )
 
 // Complete 非流式对话。
@@ -33,7 +34,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	reqBody := p.buildRequestBody(messages, systemPrompt, config, false)
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, pkgErrors.NewBambooError("上游", "Gemini 非流式对话请求序列化失败", 0)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("Gemini 非流式对话请求序列化失败: %v", err), 0)
 	}
 
 	// Gemini 非流式端点：/v1beta/models/{model}:generateContent
@@ -41,32 +42,30 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 
 	resp, err := p.httpClient.DoWithDebug(ctx, http.MethodPost, endpoint, bodyBytes, "gemini", endpoint)
 	if err != nil {
-		return nil, pkgErrors.NewBambooError("上游", "Gemini 非流式对话请求失败", 0)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("Gemini 非流式对话请求失败: %v", err), 0)
 	}
 	defer resp.Body.Close()
 
 	// 读取响应体
 	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, pkgErrors.NewBambooError("上游", "Gemini 非流式对话响应读取失败", 0)
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("Gemini 非流式对话响应读取失败: %v", err), 0)
 	}
 	provider.DebugResponse("gemini", resp.StatusCode, provider.ResponseHeadersToMap(resp.Header), respBytes)
 
 	// HTTP 状态码 >= 400 → 解析错误响应
 	if resp.StatusCode >= 400 {
-		var errResp geminiErrorResponse
-		_ = json.Unmarshal(respBytes, &errResp)
-		errMsg := "Gemini: 未知错误"
-		if errResp.Error != nil && errResp.Error.Message != "" {
-			errMsg = "Gemini: " + errResp.Error.Message
-		}
-		return nil, pkgErrors.NewBambooError("上游", errMsg, resp.StatusCode)
+		return nil, pkgErrors.NewBambooError("上游", formatGeminiError(resp.StatusCode, respBytes), resp.StatusCode)
 	}
 
 	// 反序列化响应
 	var geminiResp generateContentResponse
 	if err := json.Unmarshal(respBytes, &geminiResp); err != nil {
-		return nil, pkgErrors.NewBambooError("上游", "Gemini 非流式对话响应解析失败", 0)
+		raw := strings.TrimSpace(string(respBytes))
+		if len(raw) > 200 {
+			raw = raw[:200] + "..."
+		}
+		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("Gemini 非流式对话响应解析失败: %v, raw=%s", err, raw), 0)
 	}
 
 	result := &provider.CompletionResult{

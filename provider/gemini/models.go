@@ -5,6 +5,8 @@ package gemini
 // ============================================
 
 const (
+	ModelGemini3Pro    = "gemini-3-pro"     // Gemini 3 Pro — 原生支持 ToolCall ID 与 thinkingLevel
+	ModelGemini3Flash  = "gemini-3-flash"   // Gemini 3 Flash — 高速多模态与原生 ToolCall ID
 	ModelGemini25Flash = "gemini-2.5-flash" // Gemini 2.5 Flash — 高速低成本
 	ModelGemini25Pro   = "gemini-2.5-pro"   // Gemini 2.5 Pro — 最强推理
 	ModelGemini20Flash = "gemini-2.0-flash" // Gemini 2.0 Flash — 上一代快速模型
@@ -15,6 +17,8 @@ const (
 // 返回 Gemini 支持的模型名称列表。
 func (p *Provider) GetAvailableModels() []string {
 	return []string{
+		ModelGemini3Pro,
+		ModelGemini3Flash,
 		ModelGemini25Flash,
 		ModelGemini25Pro,
 		ModelGemini20Flash,

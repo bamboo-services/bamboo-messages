@@ -112,7 +112,8 @@ type geminiToolConfig struct {
 
 // geminiFuncCallingConfig 函数调用配置。
 type geminiFuncCallingConfig struct {
-	Mode string `json:"mode,omitempty"`
+	Mode                 string   `json:"mode,omitempty"`
+	AllowedFunctionNames []string `json:"allowedFunctionNames,omitempty"`
 }
 
 // geminiSafetySetting 安全设置（透传）。
@@ -153,7 +154,20 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 
 	// ── 5. toolConfig ──
 	if req.ToolConfig != nil && req.ToolConfig.FunctionCallingConfig != nil {
-		config.ToolChoice = mapToolChoiceMode(req.ToolConfig.FunctionCallingConfig.Mode)
+		fcc := req.ToolConfig.FunctionCallingConfig
+		config.ToolChoice = mapToolChoiceMode(fcc.Mode)
+		if len(fcc.AllowedFunctionNames) > 0 {
+			if config.ProviderExtra == nil {
+				config.ProviderExtra = make(map[string]any)
+			}
+			config.ProviderExtra["allowed_function_names"] = fcc.AllowedFunctionNames
+			if len(fcc.AllowedFunctionNames) == 1 && (fcc.Mode == "ANY" || fcc.Mode == "") {
+				config.ProviderExtra["forced_tool_name"] = fcc.AllowedFunctionNames[0]
+				if config.ToolChoice == "" || config.ToolChoice == "required" {
+					config.ToolChoice = "forced"
+				}
+			}
+		}
 	}
 
 	// ── 6. safetySettings 转换为 []map[string]string 后透传到 ProviderExtra ──
@@ -412,9 +426,10 @@ func mapResponseMimeType(mime string) string {
 
 // mapToolChoiceMode 将 Gemini toolConfig mode 映射为 bamboo ToolChoice。
 //
-// AUTO → "auto"
-// NONE → "none"
-// ANY  → "required"
+// AUTO      → "auto"
+// NONE      → "none"
+// ANY       → "required"
+// VALIDATED → "validated"
 func mapToolChoiceMode(mode string) string {
 	switch mode {
 	case "AUTO":
@@ -423,6 +438,8 @@ func mapToolChoiceMode(mode string) string {
 		return "none"
 	case "ANY":
 		return "required"
+	case "VALIDATED":
+		return "validated"
 	default:
 		return mode
 	}

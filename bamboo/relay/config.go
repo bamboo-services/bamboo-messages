@@ -46,6 +46,9 @@ type Config struct {
 	// 估算精度的偏差约 ±20%，适用于按次计费等容错场景。
 	// 通过 WithUsageEstimation(true) 启用。
 	EstimateOnMissingUsage bool
+
+	// SessionStore 可选的 Responses 会话历史存储（用于跨请求/跨 WebSocket 连接的 previous_response_id 续接）。
+	SessionStore *ResponsesSessionStore
 }
 
 // Option relay 配置选项函数。
@@ -81,6 +84,13 @@ func WithErrorCallback(fn func(error)) Option {
 func WithUsageEstimation(enabled bool) Option {
 	return func(c *Config) {
 		c.EstimateOnMissingUsage = enabled
+	}
+}
+
+// WithSessionStore 设置 Responses WebSocket / 多轮续接使用的历史会话存储。
+func WithSessionStore(store *ResponsesSessionStore) Option {
+	return func(c *Config) {
+		c.SessionStore = store
 	}
 }
 

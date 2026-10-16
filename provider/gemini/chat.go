@@ -223,12 +223,26 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 
 // formatGeminiError 格式化 Gemini API 错误响应为可读消息。
 //
-// 尝试解析 Gemini 错误响应结构（{error: {code, message, status}}），
-// 解析失败时回退为原始 HTTP 状态码 + body。
+// 兼容两种常见上游错误结构：
+//  1. 标准对象结构: {"error": {"code": 400, "message": "...", "status": "..."}}
+//  2. 数组包裹结构: [{"error": {"code": 400, "message": "..."}}]（部分代理或 streamGenerateContent 非 200 响应）
+//
+// 解析失败时回退为截断后的原始 HTTP 响应体（若 body 为空则附带 HTTP 状态码）。
 func formatGeminiError(statusCode int, body []byte) string {
 	var errResp geminiErrorResponse
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error != nil && errResp.Error.Message != "" {
 		return fmt.Sprintf("Gemini: %s", errResp.Error.Message)
 	}
-	return fmt.Sprintf("Gemini: %s", string(body))
+	var errList []geminiErrorResponse
+	if err := json.Unmarshal(body, &errList); err == nil && len(errList) > 0 && errList[0].Error != nil && errList[0].Error.Message != "" {
+		return fmt.Sprintf("Gemini: %s", errList[0].Error.Message)
+	}
+	raw := string(body)
+	if len(raw) > 500 {
+		raw = raw[:500] + "...(truncated)"
+	}
+	if raw == "" {
+		return fmt.Sprintf("Gemini: HTTP %d", statusCode)
+	}
+	return fmt.Sprintf("Gemini: %s", raw)
 }

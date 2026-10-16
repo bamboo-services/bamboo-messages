@@ -404,3 +404,47 @@ func TestSplitSSEFrames_NoTrailingNewline(t *testing.T) {
 		t.Fatalf("期望 1 帧（无 \\n\\n 不拆分），实际 %d", len(frames))
 	}
 }
+
+func TestRelay_ParseRequestErrorReturnsFormattedErrorBody(t *testing.T) {
+	mp := newMockCompleteProvider("ok", 1, 1)
+	body := []byte(`{invalid json`)
+
+	errBody, err := Relay(context.Background(), mp, body, codec.FormatOpenAI, codec.FormatAnthropic)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON, got nil")
+	}
+	if len(errBody) == 0 {
+		t.Fatal("expected non-empty serialized error body when ParseRequest fails")
+	}
+	if !contains(string(errBody), `"invalid_request_error"`) {
+		t.Errorf("expected invalid_request_error (400) in serialized body, got: %s", string(errBody))
+	}
+}
+
+func TestExtractSSEDataPayloads_And_RelayWebSocketMessages(t *testing.T) {
+	rawSSE := []byte(": keep-alive\n\nevent: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":1}\n\ndata: [DONE]\n\n")
+	payloads := ExtractSSEDataPayloads(rawSSE)
+	if len(payloads) != 1 {
+		t.Fatalf("payloads len = %d, want 1", len(payloads))
+	}
+	if string(payloads[0]) != `{"type":"response.created","sequence_number":1}` {
+		t.Errorf("payload[0] = %s", payloads[0])
+	}
+
+	mp := newMockStreamProvider([]string{"Hello", " WS"}, 10, 5)
+	wsBody := []byte(`{"type":"response.create","stream_id":"main","model":"gpt-4o","input":"hi"}`)
+	wsCh, err := RelayWebSocketMessages(context.Background(), mp, wsBody, codec.FormatResponses, codec.FormatResponses)
+	if err != nil {
+		t.Fatalf("RelayWebSocketMessages error: %v", err)
+	}
+	var count int
+	for msg := range wsCh {
+		count++
+		if contains(string(msg), "event:") || contains(string(msg), "data:") {
+			t.Errorf("WebSocket message should be pure JSON without SSE prefix, got: %s", msg)
+		}
+	}
+	if count == 0 {
+		t.Error("expected WebSocket JSON messages, got 0")
+	}
+}

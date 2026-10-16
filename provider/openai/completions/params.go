@@ -136,11 +136,20 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 
 	// 工具选择策略
 	if config.ToolChoice != "" {
-		tc := config.ToolChoice
-		if tc == "forced" {
-			tc = "required" // 映射 forced→required，OpenAI 标准
+		if config.ToolChoice == "forced" {
+			if toolName, ok := provider.GetExtraString(config.ProviderExtra, "forced_tool_name"); ok && toolName != "" {
+				params["tool_choice"] = map[string]any{
+					"type": "function",
+					"function": map[string]any{
+						"name": toolName,
+					},
+				}
+			} else {
+				params["tool_choice"] = "required"
+			}
+		} else {
+			params["tool_choice"] = config.ToolChoice
 		}
-		params["tool_choice"] = tc
 	}
 
 	// 响应格式

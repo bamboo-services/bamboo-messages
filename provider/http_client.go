@@ -156,6 +156,21 @@ func (c *HTTPClient) GetBaseURL() string {
 	return c.baseURL
 }
 
+// BuildURL 根据配置的 baseURL 和相对路径拼接完整请求 URL。
+func (c *HTTPClient) BuildURL(path string) string {
+	return c.buildURL(path)
+}
+
+// BuildHeaders 返回包含认证头、统一 User-Agent 和所有自定义请求头的 map 副本（供 WebSocket 握手等场景复用）。
+func (c *HTTPClient) BuildHeaders() map[string]string {
+	return c.buildDebugHeaders()
+}
+
+// Interceptors 返回注册的请求拦截器列表。
+func (c *HTTPClient) Interceptors() []RequestInterceptor {
+	return c.interceptors
+}
+
 // ============================================
 // 内部辅助方法
 // ============================================

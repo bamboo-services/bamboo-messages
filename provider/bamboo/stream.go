@@ -46,6 +46,14 @@ type streamMessageDelta struct {
 //   - ping 事件跳过（provider 无对应类型）
 //   - content_block_stop 必须发出 BlockStop delta（不可返回 nil）
 func (p *Provider) handleStreamEvent(eventType string, data []byte, finishReason *provider.FinishReason) []provider.StreamEvent {
+	if eventType == "" && len(data) > 0 {
+		var raw struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(data, &raw); err == nil && raw.Type != "" {
+			eventType = raw.Type
+		}
+	}
 	switch eventType {
 	case "message_start":
 		return p.handleMessageStart(data)
@@ -255,11 +263,16 @@ func (p *Provider) handleMessageStop(finishReason *provider.FinishReason) []prov
 func (p *Provider) handleError(data []byte) []provider.StreamEvent {
 	var errPayload wireErrorPayload
 	if err := json.Unmarshal(data, &errPayload); err != nil {
-		return []provider.StreamEvent{{Type: provider.StreamTypeError}}
+		return []provider.StreamEvent{{
+			Type: provider.StreamTypeError,
+			Err:  pkgErrors.NewBambooError("上游", "bamboo 流式事件错误: 未知错误", 500),
+		}}
 	}
+	code := errPayload.Error.StatusCode
 	return []provider.StreamEvent{{
-		Type: provider.StreamTypeError,
-		Err:  pkgErrors.NewBambooError("上游", "bamboo 流式事件错误: "+errPayload.Error.Message, 0),
+		Type:       provider.StreamTypeError,
+		Err:        pkgErrors.NewBambooError("上游", "bamboo 流式事件错误: "+errPayload.Error.Message, code),
+		StatusCode: code,
 	}}
 }
 

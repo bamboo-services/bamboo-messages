@@ -41,7 +41,7 @@ func (p *Provider) buildRequestBody(messages []provider.Message, systemPrompt st
 	}
 
 	// 工具调用策略
-	if tc := buildToolConfig(config.ToolChoice); tc != nil {
+	if tc := buildToolConfig(config); tc != nil {
 		body["toolConfig"] = tc
 	}
 
@@ -180,7 +180,7 @@ func buildGeminiThinkingConfig(config *provider.ChatConfig) map[string]any {
 	effort = provider.NormalizeReasoningEffort(effort)
 	model := strings.ToLower(config.Model)
 	switch {
-	case strings.Contains(model, "gemini-3"):
+	case strings.Contains(model, "gemini-3") || strings.Contains(model, "gemini-4"):
 		tc["thinkingLevel"] = effort
 	case strings.Contains(model, "2.5") || strings.Contains(model, "gemini-2"):
 		tc["thinkingBudget"] = effortToGeminiBudget(effort)
@@ -206,28 +206,72 @@ func effortToGeminiBudget(effort string) int {
 	}
 }
 
-// buildToolConfig 将统一的 ToolChoice 字符串映射为 Gemini toolConfig。
+// buildToolConfig 将统一的 ToolChoice 和 ProviderExtra 映射为 Gemini toolConfig。
 //
-// Gemini FunctionCallingConfig.Mode 取值：AUTO / NONE / ANY。
+// Gemini FunctionCallingConfig.Mode 取值：AUTO / NONE / ANY / VALIDATED。
 //   - "auto"     → AUTO
 //   - "none"     → NONE
-//   - "required" / "forced" / "any" → ANY
-//   - 空         → nil（不设置 toolConfig）
-func buildToolConfig(toolChoice string) map[string]any {
-	switch toolChoice {
-	case "auto":
-		return map[string]any{
-			"functionCallingConfig": map[string]any{"mode": "AUTO"},
-		}
-	case "none":
-		return map[string]any{
-			"functionCallingConfig": map[string]any{"mode": "NONE"},
-		}
-	case "required", "forced", "any":
-		return map[string]any{
-			"functionCallingConfig": map[string]any{"mode": "ANY"},
-		}
-	default:
+//   - "required" / "forced" / "any" → ANY（若 ProviderExtra["forced_tool_name"] 非空则附带 allowedFunctionNames）
+//   - "validated" / "VALIDATED" → VALIDATED
+//   - ProviderExtra["allowed_function_names"] ([]string) 存在时一并写入 allowedFunctionNames
+//   - 空且无白名单 → nil（不设置 toolConfig）
+func buildToolConfig(config *provider.ChatConfig) map[string]any {
+	if config == nil {
 		return nil
 	}
+	fcc := map[string]any{}
+	switch config.ToolChoice {
+	case "auto", "AUTO":
+		fcc["mode"] = "AUTO"
+	case "none", "NONE":
+		fcc["mode"] = "NONE"
+	case "required", "forced", "any", "ANY":
+		fcc["mode"] = "ANY"
+	case "validated", "VALIDATED":
+		fcc["mode"] = "VALIDATED"
+	}
+
+	if allowed := extractAllowedFunctionNames(config); len(allowed) > 0 {
+		fcc["allowedFunctionNames"] = allowed
+		if _, hasMode := fcc["mode"]; !hasMode {
+			fcc["mode"] = "ANY"
+		}
+	}
+
+	if len(fcc) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"functionCallingConfig": fcc,
+	}
+}
+
+func extractAllowedFunctionNames(config *provider.ChatConfig) []string {
+	if config == nil {
+		return nil
+	}
+	if raw, ok := provider.GetExtraAny(config.ProviderExtra, "allowed_function_names"); ok {
+		switch v := raw.(type) {
+		case []string:
+			if len(v) > 0 {
+				return v
+			}
+		case []any:
+			names := make([]string, 0, len(v))
+			for _, item := range v {
+				if s, ok := item.(string); ok && s != "" {
+					names = append(names, s)
+				}
+			}
+			if len(names) > 0 {
+				return names
+			}
+		}
+	}
+	if config.ToolChoice == "forced" {
+		if forcedName, ok := provider.GetExtraString(config.ProviderExtra, "forced_tool_name"); ok && forcedName != "" {
+			return []string{forcedName}
+		}
+	}
+	return nil
 }

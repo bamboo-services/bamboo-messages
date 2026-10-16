@@ -150,6 +150,14 @@ func syncBlockState(stripped []provider.StreamEvent, textBlockStarted *bool, thi
 func (p *CompletionsProvider) handleToolCallDelta(tc chunkDeltaToolCall) []provider.StreamEvent {
 	var events []provider.StreamEvent
 
+	// 提取 Google OpenAI 兼容端点附带在 tool_calls[].extra_content.google.thought_signature 上的签名
+	if tc.ExtraContent != nil && tc.ExtraContent.Google != nil && tc.ExtraContent.Google.ThoughtSignature != "" {
+		events = append(events, provider.StreamEvent{
+			Type:  provider.StreamTypeDelta,
+			Delta: provider.NewSignatureDeltaWithProvider(tc.ExtraContent.Google.ThoughtSignature, provider.SignatureProviderGemini),
+		})
+	}
+
 	// 当 ID 存在时表示新的工具调用开始
 	if tc.ID != "" {
 		if tc.Index != nil {
@@ -164,7 +172,6 @@ func (p *CompletionsProvider) handleToolCallDelta(tc chunkDeltaToolCall) []provi
 			})
 		}
 	}
-
 	// 参数增量
 	if tc.Function.Arguments != "" {
 		if tc.Index != nil {

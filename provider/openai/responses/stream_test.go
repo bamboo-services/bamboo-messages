@@ -408,3 +408,55 @@ func TestContentReasoningTextDelta_LegacyCompat(t *testing.T) {
 		t.Errorf("expected ThinkingDelta, got %v", events[0].Delta.Type)
 	}
 }
+
+func TestContentResponseFailed_PreservesUpstreamErrorAndCode(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+
+	rawJSON := `{
+		"type": "response.failed",
+		"response": {
+			"id": "resp_fail_429",
+			"status": "failed",
+			"error": {
+				"message": "Rate limit reached for gpt-4o",
+				"code": "rate_limit_exceeded"
+			}
+		}
+	}`
+	event := unmarshalResponseEvent(t, rawJSON)
+	events := p.contentResponseFailed(context.Background(), event)
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(events))
+	}
+	if events[0].Type != provider.StreamTypeError || events[0].Err == nil {
+		t.Fatalf("expected error event, got %+v", events[0])
+	}
+	if events[0].Err.Message != "OpenAI Responses: Rate limit reached for gpt-4o" {
+		t.Errorf("Err.Message = %q", events[0].Err.Message)
+	}
+	if events[0].Err.StatusCode != 429 || events[0].StatusCode != 429 {
+		t.Errorf("StatusCode = %d/%d, want 429", events[0].Err.StatusCode, events[0].StatusCode)
+	}
+}
+
+func TestHandleStreamEvent_ErrorEventHandled(t *testing.T) {
+	p := NewResponsesProvider("test-api-key")
+	rawJSON := `{
+		"type": "error",
+		"error": {
+			"message": "Invalid parameter: reasoning.effort",
+			"code": "invalid_request_error"
+		}
+	}`
+	event := unmarshalResponseEvent(t, rawJSON)
+	events := p.handleStreamEvent(context.Background(), event, new(bool), new(bool))
+	if len(events) != 1 || events[0].Type != provider.StreamTypeError || events[0].Err == nil {
+		t.Fatalf("expected StreamTypeError, got %+v", events)
+	}
+	if events[0].Err.Message != "OpenAI Responses: Invalid parameter: reasoning.effort" {
+		t.Errorf("Err.Message = %q", events[0].Err.Message)
+	}
+	if events[0].Err.StatusCode != 400 {
+		t.Errorf("StatusCode = %d, want 400", events[0].Err.StatusCode)
+	}
+}

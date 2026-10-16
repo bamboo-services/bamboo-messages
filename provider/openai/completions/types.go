@@ -39,6 +39,13 @@ type chunkDeltaToolCall struct {
 		Name      string `json:"name,omitempty"`
 		Arguments string `json:"arguments,omitempty"`
 	} `json:"function,omitempty"`
+	ExtraContent *toolCallExtraContent `json:"extra_content,omitempty"`
+}
+
+type toolCallExtraContent struct {
+	Google *struct {
+		ThoughtSignature string `json:"thought_signature,omitempty"`
+	} `json:"google,omitempty"`
 }
 
 // chunkUsage 表示流式 chunk 中的 Token 用量统计。
@@ -88,13 +95,19 @@ type responseToolCall struct {
 		Name      string `json:"name,omitempty"`
 		Arguments string `json:"arguments,omitempty"`
 	} `json:"function,omitempty"`
+	ExtraContent *toolCallExtraContent `json:"extra_content,omitempty"`
 }
 
 // openaiError 表示上游 OpenAI 兼容端点返回的错误结构。
+//
+// Error.Code 使用 json.RawMessage 兼容字符串错误码（如 "rate_limit_exceeded"）
+// 与数字错误码（如 400/429/500，常见于部分第三方兼容网关），防止整帧 Unmarshal 失败导致丢失 Message。
 type openaiError struct {
-	Error struct {
-		Message string `json:"message,omitempty"`
-		Type    string `json:"type,omitempty"`
-		Code    string `json:"code,omitempty"`
-	} `json:"error,omitempty"`
+	Error *openaiErrorDetail `json:"error,omitempty"`
+}
+
+type openaiErrorDetail struct {
+	Message string          `json:"message,omitempty"`
+	Type    string          `json:"type,omitempty"`
+	Code    json.RawMessage `json:"code,omitempty"`
 }

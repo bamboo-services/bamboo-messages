@@ -151,15 +151,32 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 		params.TopK = &k
 	}
 
-	// ToolChoice 映射: auto→{"type":"auto"}, any/required/forced→{"type":"any"}, none→{"type":"none"}
+	// ToolChoice 映射: auto→{"type":"auto"}, any/required→{"type":"any"},
+	// forced→若 ProviderExtra["forced_tool_name"] 非空则 {"type":"tool","name":...} 否则 {"type":"any"},
+	// none→{"type":"none"}
 	if config.ToolChoice != "" {
+		var tcMap map[string]any
 		switch config.ToolChoice {
 		case "auto":
-			params.ToolChoice = map[string]any{"type": "auto"}
-		case "any", "required", "forced":
-			params.ToolChoice = map[string]any{"type": "any"}
+			tcMap = map[string]any{"type": "auto"}
+		case "forced":
+			if toolName, ok := provider.GetExtraString(config.ProviderExtra, "forced_tool_name"); ok && toolName != "" {
+				tcMap = map[string]any{"type": "tool", "name": toolName}
+			} else {
+				tcMap = map[string]any{"type": "any"}
+			}
+		case "any", "required":
+			tcMap = map[string]any{"type": "any"}
 		case "none":
-			params.ToolChoice = map[string]any{"type": "none"}
+			tcMap = map[string]any{"type": "none"}
+		}
+		if tcMap != nil {
+			if tcMap["type"] != "none" {
+				if disableParallel, ok := provider.GetExtraBool(config.ProviderExtra, "disable_parallel_tool_use"); ok && disableParallel {
+					tcMap["disable_parallel_tool_use"] = true
+				}
+			}
+			params.ToolChoice = tcMap
 		}
 	}
 
