@@ -37,9 +37,15 @@ const (
 const defaultMaxMessageSize = 32 << 20
 
 // HandshakeError 表示 WebSocket 握手阶段的 HTTP 非 101 响应错误。
+//
+// 当服务端拒绝协议升级（如返回 400 Bad Request、401 Unauthorized、404 Not Found 等）时，
+// [Dial] 会返回此错误类型。调用方可通过类型断言或 errors.As 提取服务端返回的 HTTP 状态码与响应体。
 type HandshakeError struct {
+	// StatusCode 是服务端返回的 HTTP 响应状态码（非 101）。
 	StatusCode int
-	Body       []byte
+
+	// Body 是服务端返回的完整原始响应体字节切片。
+	Body []byte
 }
 
 func (e *HandshakeError) Error() string {
@@ -61,7 +67,16 @@ type Conn struct {
 	closed   bool
 }
 
-// Dial 发起客户端 WebSocket 握手并返回连接（支持 ws:// 与 wss://，自动将 http/https 转换为 ws/wss）。
+// Dial 发起客户端 WebSocket 握手并返回已建立双向连接的 [*Conn]。
+//
+// 参数：
+//   - ctx: 上下文，控制 TCP 建连、TLS 握手以及 HTTP 升级请求的整体超时与取消；
+//   - rawURL: 目标服务端地址（支持 ws:// 与 wss://；传入 http:// 或 https:// 会被自动纠正为对应 WS 协议）；
+//   - headers: 附加 HTTP 请求头（如 Authorization、User-Agent 等；Sec-WebSocket-* 头由内部自动生成）。
+//
+// 错误处理：
+//   - 若目标服务端返回非 101 状态码，返回包含状态码与响应体的 [*HandshakeError]；
+//   - 若网络不可达、TLS 证书不合法或握手密钥回执不匹配，返回对应底层的 error。
 func Dial(ctx context.Context, rawURL string, headers map[string]string) (*Conn, error) {
 	u, err := normalizeWSURL(rawURL)
 	if err != nil {
@@ -166,7 +181,19 @@ func Dial(ctx context.Context, rawURL string, headers map[string]string) (*Conn,
 	}, nil
 }
 
-// Upgrade 将服务端收到的 HTTP 请求升级为 WebSocket 连接（RFC 6455）。
+// Upgrade 将服务端收到的标准 HTTP 请求升级为 WebSocket 连接（RFC 6455）。
+//
+// 内部执行步骤：
+//  1. 校验请求头 Connection 是否包含 Upgrade，以及 Upgrade 是否为 websocket；
+//  2. 提取并校验客户端 Sec-WebSocket-Key 是否合法存在；
+//  3. 通过 [http.Hijacker] 劫持底层 TCP 连接；
+//  4. 按照 RFC 6455 规范计算 Sec-WebSocket-Accept 并向客户端写入 HTTP 101 Switching Protocols 响应头。
+//
+// 参数：
+//   - w: 当前 HTTP 请求的 ResponseWriter（必须实现 [http.Hijacker] 接口）；
+//   - r: 当前接收到的 HTTP 请求指针。
+//
+// 成功时返回配置为服务端模式（isClient=false）的 [*Conn]；失败时向客户端写入相应 HTTP 错误并返回 error。
 func Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error) {
 	if !headerContainsToken(r.Header, "Connection", "upgrade") ||
 		!headerContainsToken(r.Header, "Upgrade", "websocket") {
@@ -211,7 +238,15 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error) {
 
 // ReadMessage 读取下一条完整的文本或二进制消息。
 //
-// 自动处理分片续接（Continuation frames）、自动回复 Ping 帧（返回 Pong）以及处理 Close 帧。
+// 核心行为：
+//   - 分片续接：自动组装连续的 Continuation 分片帧，直到 FIN 标志为 true 的完整消息；
+//   - 自动保活：收到 OpcodePing 时在内部自动应答 OpcodePong 帧；收到 OpcodePong 时静默丢弃；
+//   - 关闭处理：收到 OpcodeClose 时自动回发关闭帧、关闭底层网络连接并返回 [io.EOF]；
+//   - 长度保护：单条消息超过默认上限 32MB 时返回错误，防止恶意攻击。
+//
+// 并发约束：
+//
+//	ReadMessage 非并发安全，同一时间必须由单个 goroutine 顺序读取。
 func (c *Conn) ReadMessage() (opcode byte, payload []byte, err error) {
 	var msgBuf bytes.Buffer
 	var msgOpcode byte
@@ -260,12 +295,18 @@ func (c *Conn) ReadMessage() (opcode byte, payload []byte, err error) {
 	}
 }
 
-// WriteText 发送一条 UTF-8 文本消息（JSON 事件帧）。
+// WriteText 发送一条 UTF-8 文本消息（OpcodeText）。
+//
+// 客户端模式下发送会自动生成随机 4 字节掩码；服务端模式下发送不带掩码。
+// 内部使用互斥锁保护，可由多个 goroutine 并发安全调用。
 func (c *Conn) WriteText(data []byte) error {
 	return c.writeFrame(OpcodeText, data)
 }
 
-// Close 发送关闭帧并关闭底层网络连接。
+// Close 优雅关闭 WebSocket 连接。
+//
+// 首先并发安全地尝试发送一次标准关闭帧（OpcodeClose），随后关闭底层 TCP 网络连接。
+// 多次重复调用是安全的且不会发生 panic。
 func (c *Conn) Close() error {
 	c.writeMu.Lock()
 	if !c.closed {

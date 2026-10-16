@@ -1,8 +1,3 @@
-// Package bamboo 提供 Bamboo Messages SDK 的公共类型系统与客户端接口。
-//
-// bamboo 包是 Bamboo Messages 的上层门面（Facade），屏蔽底层 AI 协议差异，
-// 为上层业务提供统一的消息模型、流事件、工具定义和配置类型。
-// 该包零外部 SDK 依赖，仅依赖 Go 标准库。
 package bamboo
 
 import (

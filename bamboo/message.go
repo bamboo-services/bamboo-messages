@@ -19,10 +19,16 @@ const (
 //
 // 一条消息可包含多个不同类型的内容块（文本、图片、工具调用等），
 // 以支持多模态和工具交互场景。
+//
+// # 字段说明
+//
+//   - Role: 消息发送方的身份（[RoleUser] 或 [RoleAssistant]）；
+//   - Content: 消息包含的内容块列表，单条消息可容纳多模态与工具交互内容；
+//   - ReasoningID: 可选的推理项 ID（对应 OpenAI Responses API 的 reasoning item ID，独立于 ThinkingSignature）。
 type BambooMessage struct {
-	Role        MessageRole    `json:"role"`                   // 消息发送方角色
+	Role        MessageRole    `json:"role"`                   // 消息发送方角色（[RoleUser] 或 [RoleAssistant]）
 	Content     []ContentBlock `json:"content"`                // 消息内容块列表
-	ReasoningID string         `json:"reasoning_id,omitempty"` // 推理项 ID（OpenAI Responses reasoning item ID，独立于 ThinkingSignature）
+	ReasoningID string         `json:"reasoning_id,omitempty"` // 推理项 ID（对应 OpenAI Responses reasoning item ID）
 }
 
 // UnmarshalJSON 自定义 JSON 反序列化，使用 ContentBlocks 包装类型

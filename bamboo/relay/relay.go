@@ -14,7 +14,7 @@ import (
 	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
-// Relay 非流式协议互转。
+// Relay 执行非流式跨协议请求转换。
 //
 // 将 inFormat 协议格式的请求体交给底层 Provider 处理，
 // 并将响应序列化为 outFormat 协议格式返回。
@@ -114,10 +114,9 @@ func Relay(
 	return data, nil
 }
 
-// RelayStream 流式协议互转。
+// RelayStream 执行流式跨协议请求转换并返回只读 SSE 字节流 channel。
 //
-// 将 inFormat 协议格式的请求体交给底层 Provider 处理（流式），
-// 并将流事件逐步序列化为 outFormat 协议的 SSE 数据帧。
+// 启动异步转换 goroutine，持续消费底层 Provider 的事件流并逐步序列化为 outFormat 协议的 SSE 数据帧。
 //
 // 参数：
 //   - ctx: 上下文，支持取消和超时

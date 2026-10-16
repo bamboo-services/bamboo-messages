@@ -3,3 +3,5 @@
 .omo/
 vendor/
 develop/
+.agents/go-doc
+

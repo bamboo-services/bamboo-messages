@@ -1,19 +1,3 @@
-// Package relay 提供函数式协议互转 API。
-//
-// relay 层是 codec 与 bamboo client 的薄包装，通过 Relay() 和 RelayStream()
-// 两个函数实现不同 AI 对话协议（OpenAI / Anthropic / Responses / Gemini）之间的
-// 请求-响应互转，无需上层业务关心协议差异。
-//
-// 使用方式：
-//
-//	// 非流式互转：OpenAI 格式请求 → Anthropic 格式响应
-//	out, err := relay.Relay(ctx, provider, body, codec.FormatOpenAI, codec.FormatAnthropic)
-//
-//	// 流式互转
-//	ch, err := relay.RelayStream(ctx, provider, body, codec.FormatOpenAI, codec.FormatAnthropic)
-//	for data := range ch {
-//	    write(data) // SSE 数据帧
-//	}
 package relay
 
 import (

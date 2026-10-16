@@ -40,7 +40,10 @@ func NewResponsesSessionStore() *ResponsesSessionStore {
 	}
 }
 
-// Save 保存指定 responseID 对应的完整对话历史快照（含本轮 assistant 输出）。
+// Save 保存指定 responseID 对应的完整对话历史快照（含本轮 assistant 输出与思维签名）。
+//
+// 存储过程深拷贝 messages 列表，保证后续请求或分叉调用不会受到并发修改污染。
+// 若 responseID 为空字符串或 s 为 nil，静默忽略。
 func (s *ResponsesSessionStore) Save(responseID, system string, history []bamboo.BambooMessage) {
 	if s == nil || responseID == "" {
 		return
@@ -62,6 +65,9 @@ func (s *ResponsesSessionStore) Save(responseID, system string, history []bamboo
 }
 
 // Load 读取指定 responseID 对应的历史快照副本。
+//
+// 返回该轮对话记录的 system 提示词与深拷贝的历史消息切片。
+// 若未找到对应记录或 s 为 nil，返回 ok=false。
 func (s *ResponsesSessionStore) Load(responseID string) (system string, messages []bamboo.BambooMessage, ok bool) {
 	if s == nil || responseID == "" {
 		return "", nil, false
@@ -106,7 +112,12 @@ func RelayResponsesWebSocket(
 	return ServeResponsesWebSocketConn(ctx, conn, p, opts...)
 }
 
-// ServeResponsesWebSocketConn 在已建立的 `*ws.Conn` 上运行 Responses WebSocket 服务端事件循环。
+// ServeResponsesWebSocketConn 在已建立的 [*ws.Conn] 上运行 Responses WebSocket 服务端事件循环。
+//
+// 循环读取客户端发送的 WebSocket 文本帧：
+//   - 仅允许合法 JSON 且 type 为 response.create 的请求帧，其余类型返回 invalid_request 错误事件；
+//   - 支持 stream_id 多路复用：为每个 stream_id 分配独立的 FIFO 队列，实现同通道严格串行、跨通道并发执行；
+//   - 当客户端连接断开（EOF）或 context 取消时，优雅关闭各通道队列并退出。
 func ServeResponsesWebSocketConn(
 	ctx context.Context,
 	conn *ws.Conn,

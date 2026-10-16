@@ -46,8 +46,9 @@ type SSEScanner struct {
 
 // NewSSEScanner 从 io.ReadCloser 创建 SSE 帧解析器。
 //
-// 内部创建 bufio.Scanner 并设置 1MB 最大缓冲，防止超大帧导致 bufio.ErrTooLong。
-// 调用方负责在读取完成后 Close 底层的 ReadCloser（通过 [SSEScanner.Close]）。
+// 内部创建 bufio.Scanner 并设置 16MB 最大缓冲容量（[sseScannerMaxBufferSize]），
+// 防止多模态 Base64 或超长文本帧导致 bufio.ErrTooLong 错误。
+// 调用方负责在读取完成后通过 [SSEScanner.Close] 释放底层连接资源。
 func NewSSEScanner(rc io.ReadCloser) *SSEScanner {
 	scn := bufio.NewScanner(rc)
 	scn.Buffer(make([]byte, 0, sseScannerBufferCapacity), sseScannerMaxBufferSize)

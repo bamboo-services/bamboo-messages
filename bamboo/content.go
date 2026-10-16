@@ -85,36 +85,47 @@ func SignatureProviderFromUpstream(pt provider.ProviderType) string {
 	return provider.SignatureProviderFromUpstream(pt)
 }
 
-// ThinkingBlock 思考过程内容块（如 Claude Extended Thinking）。
+// ThinkingBlock 思考过程内容块（如 Claude Extended Thinking / Gemini 思维链）。
+//
+// # 签名与血统保护
+//
+// 当上游模型（如 Claude 3.7 或 Gemini 3）返回加密的思考签名时，Signature 保存原始签名串，
+// SignatureProvider 记录生成来源（[SignatureProviderAnthropic] 或 [SignatureProviderGemini]）。
+// 在跨协议转码时，中继层会根据血统匹配规则安全透传，防止签名被错误发送给异构模型导致 400 校验失败。
 type ThinkingBlock struct {
-	Type              ContentBlockType       `json:"type"`
-	Thinking          string                 `json:"thinking,omitempty"`
-	Signature         string                 `json:"signature,omitempty"`
-	SignatureProvider string                 `json:"signature_provider,omitempty"`
-	CacheControl      *provider.CacheControl `json:"cache_control,omitempty"`
+	Type              ContentBlockType       `json:"type"`                         // 内容块类型，固定为 "thinking"
+	Thinking          string                 `json:"thinking,omitempty"`           // 思考推理文本
+	Signature         string                 `json:"signature,omitempty"`          // 加密思考签名凭证
+	SignatureProvider string                 `json:"signature_provider,omitempty"` // 签名所属服务商血统
+	CacheControl      *provider.CacheControl `json:"cache_control,omitempty"`      // Prompt Caching 缓存断点
 }
 
 func (b ThinkingBlock) BlockType() ContentBlockType { return ContentBlockThinking }
 
 // ToolUseBlock 工具调用内容块。
 type ToolUseBlock struct {
-	Type         ContentBlockType       `json:"type"`
-	ID           string                 `json:"id,omitempty"`
-	Name         string                 `json:"name,omitempty"`
-	Input        json.RawMessage        `json:"input,omitempty"`
-	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
+	Type         ContentBlockType       `json:"type"`                    // 内容块类型，固定为 "tool_use"
+	ID           string                 `json:"id,omitempty"`            // 工具调用唯一 ID
+	Name         string                 `json:"name,omitempty"`          // 目标工具/函数名称
+	Input        json.RawMessage        `json:"input,omitempty"`         // 调用参数 JSON
+	CacheControl *provider.CacheControl `json:"cache_control,omitempty"` // Prompt Caching 缓存断点
 }
 
 func (b ToolUseBlock) BlockType() ContentBlockType { return ContentBlockToolUse }
 
 // ToolResultBlock 工具调用结果内容块。
+//
+// # Gemini 协议兼容性
+//
+// Google Gemini 的 functionResponse 要求必须同时包含函数名与调用 ID。
+// 本结构体同时保留 ToolUseID 与 ToolName，确保跨 OpenAI / Anthropic / Gemini 互转时不发生元数据丢失。
 type ToolResultBlock struct {
-	Type         ContentBlockType       `json:"type"`
-	ToolUseID    string                 `json:"tool_use_id,omitempty"`
-	ToolName     string                 `json:"tool_name,omitempty"`
-	Content      string                 `json:"content,omitempty"`
-	IsError      bool                   `json:"is_error,omitempty"`
-	CacheControl *provider.CacheControl `json:"cache_control,omitempty"`
+	Type         ContentBlockType       `json:"type"`                    // 内容块类型，固定为 "tool_result"
+	ToolUseID    string                 `json:"tool_use_id,omitempty"`   // 关联的工具调用 ID
+	ToolName     string                 `json:"tool_name,omitempty"`     // 调用的工具函数名
+	Content      string                 `json:"content,omitempty"`       // 工具执行返回的文本内容
+	IsError      bool                   `json:"is_error,omitempty"`      // 工具执行是否失败
+	CacheControl *provider.CacheControl `json:"cache_control,omitempty"` // Prompt Caching 缓存断点
 }
 
 func (b ToolResultBlock) BlockType() ContentBlockType { return ContentBlockToolResult }

@@ -109,8 +109,13 @@ func NewEphemeralCacheControl(ttl ...CacheControlEphemeralTTL) *CacheControl {
 
 // CompletionResult 非流式调用的完整响应结果。
 //
-// 包含 AI 模型返回的文本内容、工具调用列表、结束原因
-// 和 Token 用量统计。适用于不需要流式输出的同步请求场景。
+// 包含 AI 模型返回的文本内容、思考过程、加密签名凭据、工具调用列表、结束原因以及 Token 用量统计。
+//
+// # 关键字段契约
+//
+//   - ThinkingSignatureProvider: 标记当前思考签名的协议血统（如 "anthropic"、"gemini"），防止跨上游投毒；
+//   - ResponseID: 对应 OpenAI Responses 模式的 response_id，用于长对话上下文关联；
+//   - ReasoningID: 推理项独立 ID（如 "rs_xxx"），与加密签名解耦。
 type CompletionResult struct {
 	Content                   string       `json:"content"`                               // 文本响应内容
 	Thinking                  string       `json:"thinking,omitempty"`                    // 思考过程内容（如 Claude extended thinking）
@@ -128,11 +133,16 @@ type CompletionResult struct {
 // 消息相关结构体
 // ============================================
 
-// Message 对话消息。
+// Message 对话消息核心结构体。
 //
-// 表示对话中的一条消息，包含角色、文本内容、多媒体内容块、
-// 工具调用信息和工具响应的调用 ID。
+// 表示对话中的一条消息，包含角色、文本内容、多模态块、工具调用信息与状态标记。
 // 当 ContentBlocks 不为空时，ContentBlocks 优先于 Content。
+//
+// # 多轮上下文与血统保护
+//
+//   - ThinkingSignatureProvider: 记录思考签名来源，跨协议转码时若目标与血统不符会自动清洗；
+//   - ToolName 与 ToolCallID: 配合支持 Gemini functionResponse 对函数名与调用 ID 的双重要求；
+//   - CacheControlBlockType: 记录缓存断点所在的原始内容块类型，用于精确定位。
 type Message struct {
 	Role                      MessageRole    `json:"role"`                                  // 消息角色
 	Content                   string         `json:"content,omitempty"`                     // 消息文本内容（向后兼容）

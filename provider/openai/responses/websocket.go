@@ -62,7 +62,14 @@ func (p *ResponsesProvider) buildWebSocketPayload(model, systemPrompt string, me
 	return params
 }
 
-// chatViaWebSocket 通过 WebSocket 持久连接协议执行流式 Responses 对话。
+// chatViaWebSocket 通过 WebSocket 持久连接协议向上游发送请求并返回流事件 channel。
+//
+// 核心逻辑：
+//  1. 将 messages 与 config 参数转为官方 {"type":"response.create", ...} 格式，强制移除 stream 与 background 字段；
+//  2. 运行请求拦截器链（如果有注册），支持对序列化后的 JSON 负载进行自定义改写；
+//  3. 发起 [ws.Dial] 连接目标服务，记录 RequestSentAt 与 ResponseHeaderAt 物理时间锚点；
+//  4. 循环读取服务端返回的事件帧，针对 error、response.created、response.output_item.* 等事件转换为对应的 [provider.StreamEvent]；
+//  5. 若首帧遇到连接或认证级错误，直接作为带有精准 HTTP 状态码的 StreamTypeError 发出并提前终止。
 func (p *ResponsesProvider) chatViaWebSocket(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) <-chan provider.StreamEvent {
 	eventCh := make(chan provider.StreamEvent, 64)
 
@@ -288,6 +295,10 @@ func (p *ResponsesProvider) chatViaWebSocket(ctx context.Context, systemPrompt s
 }
 
 // completeViaWebSocket 在 WebSocket 模式下通过聚合流事件完成同步 Complete 调用。
+//
+// 启动后台 WebSocket 流式读取任务，并在当前 goroutine 中同步遍历事件 channel，
+// 将文本增量、思维过程、加密签名、工具调用参数以及 Token 用量聚合为完整的 [*provider.CompletionResult]。
+// 遇到上游错误事件时立即返回结构化的 [*pkgErrors.BambooError]。
 func (p *ResponsesProvider) completeViaWebSocket(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
 	ch := p.chatViaWebSocket(ctx, systemPrompt, messages, config)
 
