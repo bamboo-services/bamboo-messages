@@ -79,7 +79,7 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 	if eventType != "content_block_start" {
 		t.Errorf("eventType = %q", eventType)
 	}
-	if payload["index"].(float64) != 0 {
+	if idx, ok := payload["index"].(float64); !ok || idx != 0 {
 		t.Errorf("index = %v", payload["index"])
 	}
 	cb, ok := payload["content_block"].(map[string]any)
@@ -122,7 +122,7 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Serialize(content_block_stop) error = %v", err)
 	}
-	eventType, payload = parseSSEEvent(t, data)
+	eventType, _ = parseSSEEvent(t, data)
 	if eventType != "content_block_stop" {
 		t.Errorf("eventType = %q", eventType)
 	}
@@ -213,7 +213,7 @@ func TestStreamSerializer_ToolUseStream(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -267,7 +267,7 @@ func TestStreamSerializer_ToolUseStream(t *testing.T) {
 func TestStreamSerializer_ThinkingStream(t *testing.T) {
 	s := newStreamSerializer("")
 
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -341,10 +341,10 @@ func TestStreamSerializer_MessageDeltaUsage(t *testing.T) {
 	if !ok {
 		t.Fatalf("usage should be object")
 	}
-	if usage["input_tokens"].(float64) != 10 {
+	if in, ok := usage["input_tokens"].(float64); !ok || in != 10 {
 		t.Errorf("input_tokens = %v", usage["input_tokens"])
 	}
-	if usage["output_tokens"].(float64) != 100 {
+	if out, ok := usage["output_tokens"].(float64); !ok || out != 100 {
 		t.Errorf("output_tokens = %v", usage["output_tokens"])
 	}
 }
@@ -375,10 +375,10 @@ func TestStreamSerializer_MessageDeltaUsageWithCache(t *testing.T) {
 	}
 
 	// input_tokens 应为 99516 - 0 - 98880 = 636（非缓存部分）
-	if usage["input_tokens"].(float64) != 636 {
+	if in, ok := usage["input_tokens"].(float64); !ok || in != 636 {
 		t.Errorf("input_tokens = %v, want 636 (non-cached)", usage["input_tokens"])
 	}
-	if usage["cache_read_input_tokens"].(float64) != 98880 {
+	if cr, ok := usage["cache_read_input_tokens"].(float64); !ok || cr != 98880 {
 		t.Errorf("cache_read_input_tokens = %v, want 98880", usage["cache_read_input_tokens"])
 	}
 }

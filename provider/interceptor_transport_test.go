@@ -48,7 +48,7 @@ func TestInterceptorTransportAppliesInterceptors(t *testing.T) {
 		if err != nil {
 			t.Fatalf("请求失败: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		// 断言上游收到了被拦截器修改后的 body
 		if got := string(capturedBody); got != `{"model":"x","temperature":0.9}` {
@@ -197,7 +197,7 @@ func TestInterceptorTransportNoBodyRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET 请求失败: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if !upstreamCalled {
 		t.Error("上游未被调用")

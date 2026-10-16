@@ -1,0 +1,50 @@
+# 默认启用所有规则
+default: true
+
+# MD013: 行长度限制（根据全局规范对简体中文说明不作强制折行限制）
+MD013: false
+
+# MD024: 允许不同父级下相同的子标题
+MD024:
+  siblings_only: true
+
+# MD033: 允许合理的内联 HTML 元素
+MD033:
+  allowed_elements:
+    - kbd
+    - sub
+    - sup
+    - details
+    - summary
+    - br
+    - img
+    - span
+    - div
+    - table
+    - thead
+    - tbody
+    - tr
+    - th
+    - td
+    - a
+    - p
+    - b
+    - i
+    - em
+    - strong
+    - hr
+    - pre
+    - code
+
+# MD029: 序号前缀（允许项目自定义编号，如 30a/30b 或重复序号标记）
+MD029: false
+
+# MD041: 文件首行必须为 H1（允许包含指令的入口文件，如 CLAUDE.md）
+MD041: false
+
+# MD052: 未声明的参考链接（允许调研文档中的引用编号角标，如 [O1][O3]）
+MD052: false
+
+# MD060: 表格列样式（允许项目现存的不同表格紧凑/对齐排版）
+MD060: false
+

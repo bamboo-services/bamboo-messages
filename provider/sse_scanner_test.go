@@ -52,8 +52,8 @@ func TestSSEScanner_NormalFrames(t *testing.T) {
 	if err != nil && !errors.Is(err, io.EOF) {
 		t.Fatalf("意外错误: %v", err)
 	}
-	if !done {
-		// 正常耗尽为 EOF，非 [DONE]
+	if done {
+		t.Error("期望未收到 [DONE]，实际 done=true")
 	}
 
 	if len(events) != 2 {
@@ -470,9 +470,9 @@ func TestSSEScanner_FrameConcatenationBeforeNormalFrame(t *testing.T) {
 	}
 
 	var v1, v2, v3 map[string]int
-	json.Unmarshal(events[0].Data, &v1)
-	json.Unmarshal(events[1].Data, &v2)
-	json.Unmarshal(events[2].Data, &v3)
+	_ = json.Unmarshal(events[0].Data, &v1)
+	_ = json.Unmarshal(events[1].Data, &v2)
+	_ = json.Unmarshal(events[2].Data, &v3)
 
 	if v1["a"] != 1 || v2["b"] != 2 || v3["c"] != 3 {
 		t.Errorf("帧顺序或内容错误: v1=%v v2=%v v3=%v", v1, v2, v3)

@@ -83,7 +83,7 @@ func TestResponsesStream_ZeroUsage(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -148,25 +148,25 @@ func setupReasoningStream(t *testing.T) []byte {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
 
 	// content_block_start (thinking)
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        0,
 		ContentBlock: bamboo.NewThinkingBlock("", ""),
 	})
 
 	// 两次 thinking delta — 内容应累积为 "Hello World"
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockDelta,
 		Index: 0,
 		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaThinkingDelta, Thinking: "Hello "},
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockDelta,
 		Index: 0,
 		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaThinkingDelta, Thinking: "World"},

@@ -36,7 +36,7 @@ func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, 
 	if err != nil {
 		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("bamboo 非流式对话请求失败: %v", err), 0)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

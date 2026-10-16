@@ -257,10 +257,12 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 	if !ok {
 		t.Fatal("missing usage in response.completed")
 	}
-	if int64(usage["input_tokens"].(float64)) != 10 {
+	inVal, ok := usage["input_tokens"].(float64)
+	if !ok || int64(inVal) != 10 {
 		t.Errorf("usage.input_tokens = %v", usage["input_tokens"])
 	}
-	if int64(usage["output_tokens"].(float64)) != 5 {
+	outVal, ok := usage["output_tokens"].(float64)
+	if !ok || int64(outVal) != 5 {
 		t.Errorf("usage.output_tokens = %v", usage["output_tokens"])
 	}
 	if _, ok := usage["input_tokens_details"].(map[string]any); !ok {
@@ -278,7 +280,7 @@ func TestStreamSerializer_FunctionCallStream(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -380,7 +382,7 @@ func TestStreamSerializer_ThinkingStream(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -528,7 +530,7 @@ func TestStreamSerializer_ResponseCompletedWithUsage(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// 先发送 message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -560,10 +562,12 @@ func TestStreamSerializer_ResponseCompletedWithUsage(t *testing.T) {
 	if !ok {
 		t.Fatal("missing usage in response")
 	}
-	if int64(usage["input_tokens"].(float64)) != 100 {
+	inVal, ok := usage["input_tokens"].(float64)
+	if !ok || int64(inVal) != 100 {
 		t.Errorf("input_tokens = %v", usage["input_tokens"])
 	}
-	if int64(usage["output_tokens"].(float64)) != 50 {
+	outVal, ok := usage["output_tokens"].(float64)
+	if !ok || int64(outVal) != 50 {
 		t.Errorf("output_tokens = %v", usage["output_tokens"])
 	}
 }
@@ -603,20 +607,24 @@ func TestStreamSerializer_ResponseCompletedFallsBackToLastNonZeroUsage(t *testin
 	if !ok {
 		t.Fatal("missing usage in response.completed")
 	}
-	if int64(usage["input_tokens"].(float64)) != 42 {
+	inVal, ok := usage["input_tokens"].(float64)
+	if !ok || int64(inVal) != 42 {
 		t.Errorf("input_tokens = %v, want 42 from last ping", usage["input_tokens"])
 	}
-	if int64(usage["output_tokens"].(float64)) != 18 {
+	outVal, ok := usage["output_tokens"].(float64)
+	if !ok || int64(outVal) != 18 {
 		t.Errorf("output_tokens = %v, want 18 from last ping", usage["output_tokens"])
 	}
-	if int64(usage["total_tokens"].(float64)) != 60 {
+	totalVal, ok := usage["total_tokens"].(float64)
+	if !ok || int64(totalVal) != 60 {
 		t.Errorf("total_tokens = %v, want 60", usage["total_tokens"])
 	}
 	details, ok := usage["output_tokens_details"].(map[string]any)
 	if !ok {
 		t.Fatalf("missing output_tokens_details: %v", usage)
 	}
-	if int64(details["reasoning_tokens"].(float64)) != 7 {
+	reasoningVal, ok := details["reasoning_tokens"].(float64)
+	if !ok || int64(reasoningVal) != 7 {
 		t.Errorf("reasoning_tokens = %v, want 7", details["reasoning_tokens"])
 	}
 }
@@ -624,7 +632,7 @@ func TestStreamSerializer_ResponseCompletedFallsBackToLastNonZeroUsage(t *testin
 func TestStreamSerializer_ResponseCompletedUsageDetailsIncludeZeroRequiredFields(t *testing.T) {
 	s := newStreamSerializer("")
 
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -674,21 +682,21 @@ func TestStreamSerializer_ResponseCompletedUsageDetailsIncludeZeroRequiredFields
 func TestStreamSerializer_ResponseCompletedParsesWithOpenAIGoSchema(t *testing.T) {
 	s := newStreamSerializer("")
 
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        0,
 		ContentBlock: bamboo.NewTextBlock(""),
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockDelta,
 		Index: 0,
 		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaTextDelta, Text: "Hello"},
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockStop,
 		Index: 0,
 	})
@@ -725,7 +733,7 @@ func TestStreamSerializer_ResponseCompletedParsesWithOpenAIGoSchema(t *testing.T
 func TestStreamSerializer_ResponseCompletedWithoutUpstreamUsageParsesWithOpenAIGoSchema(t *testing.T) {
 	s := newStreamSerializer("")
 
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -765,7 +773,7 @@ func TestStreamSerializer_ResponseCompletedWithoutUpstreamUsageParsesWithOpenAIG
 func TestStreamSerializer_MaxTokensStatus(t *testing.T) {
 	s := newStreamSerializer("")
 
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -888,7 +896,7 @@ func TestStreamSerializer_CombinedStream(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -963,29 +971,29 @@ func TestStreamSerializer_CombinedStream(t *testing.T) {
 func TestStreamSerializer_TextAccumulation(t *testing.T) {
 	s := newStreamSerializer("")
 
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
 
 	// 多次 text delta
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        0,
 		ContentBlock: bamboo.NewTextBlock(""),
 	})
 
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockDelta,
 		Index: 0,
 		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaTextDelta, Text: "A"},
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockDelta,
 		Index: 0,
 		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaTextDelta, Text: "B"},
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockDelta,
 		Index: 0,
 		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaTextDelta, Text: "C"},

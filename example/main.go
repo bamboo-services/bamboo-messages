@@ -184,7 +184,7 @@ func demoNonStreaming(ctx context.Context, client bamboo.BambooClient, model str
 
 	resp, err := client.Complete(ctx, messages, "你是一个有帮助的助手。", config)
 	if err != nil {
-		return fmt.Errorf("Complete 失败: %w", err)
+		return fmt.Errorf("complete failed: %w", err)
 	}
 
 	fmt.Println("📋 响应详情:")
@@ -234,7 +234,7 @@ func demoThinking(ctx context.Context, client bamboo.BambooClient, model string)
 
 	resp, err := client.Complete(ctx, messages, "你是一个有帮助的助手，请用中文回答。", config)
 	if err != nil {
-		return fmt.Errorf("Complete (Thinking) 失败: %w", err)
+		return fmt.Errorf("complete (thinking) failed: %w", err)
 	}
 
 	fmt.Println("🧠 思考模式响应:")
@@ -294,7 +294,7 @@ func demoToolCalling(ctx context.Context, client bamboo.BambooClient, model stri
 	fmt.Println("📤 Step 1: 发送带工具的请求")
 	resp, err := client.Complete(ctx, messages, systemPrompt, config)
 	if err != nil {
-		return fmt.Errorf("Complete 失败: %w", err)
+		return fmt.Errorf("complete failed: %w", err)
 	}
 
 	fmt.Printf("  StopReason: %s\n", resp.StopReason)

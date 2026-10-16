@@ -398,7 +398,10 @@ func TestBuildParams_JSONStructure(t *testing.T) {
 	if !ok || len(tools) != 1 {
 		t.Fatalf("expected 1 tool in config, got %+v", cfg["tools"])
 	}
-	tool := tools[0].(map[string]any)
+	tool, ok := tools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected map[string]any for tool, got %T", tools[0])
+	}
 	if tool["name"] != "fn" {
 		t.Errorf("expected tool name fn, got %v", tool["name"])
 	}

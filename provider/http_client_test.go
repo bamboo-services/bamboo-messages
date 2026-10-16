@@ -207,13 +207,13 @@ func TestHTTPClient_MultipleInterceptorsChain(t *testing.T) {
 	// 两个拦截器按注册顺序执行
 	interceptor1 := func(ctx context.Context, body []byte) ([]byte, error) {
 		var m map[string]any
-		json.Unmarshal(body, &m)
+		_ = json.Unmarshal(body, &m)
 		m["first"] = true
 		return json.Marshal(m)
 	}
 	interceptor2 := func(ctx context.Context, body []byte) ([]byte, error) {
 		var m map[string]any
-		json.Unmarshal(body, &m)
+		_ = json.Unmarshal(body, &m)
 		m["second"] = true
 		return json.Marshal(m)
 	}
@@ -227,7 +227,7 @@ func TestHTTPClient_MultipleInterceptorsChain(t *testing.T) {
 
 	req := <-ch
 	var result map[string]any
-	json.Unmarshal(req.body, &result)
+	_ = json.Unmarshal(req.body, &result)
 
 	if result["first"] != true || result["second"] != true {
 		t.Errorf("expected both interceptors to run, got: %v", result)

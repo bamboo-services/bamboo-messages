@@ -39,10 +39,10 @@ func TestChat_NormalStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, sseFrame(`{"id":"1","choices":[{"index":0,"delta":{"content":"Hello"}}]}`))
-		fmt.Fprint(w, sseFrame(`{"id":"2","choices":[{"index":0,"delta":{"content":" world"}}]}`))
-		fmt.Fprint(w, sseFrame(`{"id":"3","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`))
-		fmt.Fprint(w, sseFrame(`[DONE]`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"1","choices":[{"index":0,"delta":{"content":"Hello"}}]}`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"2","choices":[{"index":0,"delta":{"content":" world"}}]}`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"3","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`))
+		_, _ = fmt.Fprint(w, sseFrame(`[DONE]`))
 	}))
 	defer server.Close()
 
@@ -71,7 +71,9 @@ func TestChat_NormalStream(t *testing.T) {
 	var textContent string
 	for _, e := range events {
 		if e.Type == provider.StreamTypeDelta && e.Delta.Type == provider.StreamDeltaTypeTextOutput {
-			textContent += string(e.Delta.Data.(provider.TextData))
+			if textData, ok := e.Delta.Data.(provider.TextData); ok {
+				textContent += string(textData)
+			}
 		}
 	}
 	if textContent != "Hello world" {
@@ -104,11 +106,11 @@ func TestChat_BrokenFrameSkip(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		// 截断的 JSON 帧（SSEScanner 会跳过）
-		fmt.Fprint(w, "data: {\"id\":\"1\",\"choices\":[{\"inde\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"1\",\"choices\":[{\"inde\n\n")
 		// 正常帧
-		fmt.Fprint(w, sseFrame(`{"id":"2","choices":[{"index":0,"delta":{"content":"OK"}}]}`))
-		fmt.Fprint(w, sseFrame(`{"id":"3","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`))
-		fmt.Fprint(w, sseFrame(`[DONE]`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"2","choices":[{"index":0,"delta":{"content":"OK"}}]}`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"3","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`))
+		_, _ = fmt.Fprint(w, sseFrame(`[DONE]`))
 	}))
 	defer server.Close()
 
@@ -127,7 +129,9 @@ func TestChat_BrokenFrameSkip(t *testing.T) {
 	var textContent string
 	for _, e := range events {
 		if e.Type == provider.StreamTypeDelta && e.Delta.Type == provider.StreamDeltaTypeTextOutput {
-			textContent += string(e.Delta.Data.(provider.TextData))
+			if textData, ok := e.Delta.Data.(provider.TextData); ok {
+				textContent += string(textData)
+			}
 		}
 	}
 	if textContent != "OK" {
@@ -152,13 +156,13 @@ func TestChat_ToolCallStream(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		// 工具调用开始帧
-		fmt.Fprint(w, sseFrame(`{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-abc","function":{"name":"get_weather"}}]}}]}`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-abc","function":{"name":"get_weather"}}]}}]}`))
 		// 参数增量帧
-		fmt.Fprint(w, sseFrame(`{"id":"2","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"loc"}}]}}]}`))
-		fmt.Fprint(w, sseFrame(`{"id":"3","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ation\":\"Tokyo\"}"}}]}}]}`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"2","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"loc"}}]}}]}`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"3","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ation\":\"Tokyo\"}"}}]}}]}`))
 		// finish_reason
-		fmt.Fprint(w, sseFrame(`{"id":"4","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`))
-		fmt.Fprint(w, sseFrame(`[DONE]`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"4","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`))
+		_, _ = fmt.Fprint(w, sseFrame(`[DONE]`))
 	}))
 	defer server.Close()
 
@@ -216,7 +220,7 @@ func TestChat_ErrorResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
-		fmt.Fprint(w, `{"error":{"message":"Rate limit exceeded","type":"rate_limit_error","code":"429"}}`)
+		_, _ = fmt.Fprint(w, `{"error":{"message":"Rate limit exceeded","type":"rate_limit_error","code":"429"}}`)
 	}))
 	defer server.Close()
 
@@ -252,10 +256,10 @@ func TestChat_UsageInLastChunk(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		// 文本增量
-		fmt.Fprint(w, sseFrame(`{"id":"1","choices":[{"index":0,"delta":{"content":"Hi"}}]}`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"1","choices":[{"index":0,"delta":{"content":"Hi"}}]}`))
 		// finish_reason + usage（最后一个 chunk）
-		fmt.Fprint(w, sseFrame(`{"id":"2","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`))
-		fmt.Fprint(w, sseFrame(`[DONE]`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"2","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`))
+		_, _ = fmt.Fprint(w, sseFrame(`[DONE]`))
 	}))
 	defer server.Close()
 
@@ -300,9 +304,9 @@ func TestChat_TimingAnchor(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		time.Sleep(150 * time.Millisecond) // 模拟上游 Prefill 延迟
-		fmt.Fprint(w, sseFrame(`{"id":"1","choices":[{"index":0,"delta":{"content":"Hello"}}]}`))
-		fmt.Fprint(w, sseFrame(`{"id":"2","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`))
-		fmt.Fprint(w, sseFrame(`[DONE]`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"1","choices":[{"index":0,"delta":{"content":"Hello"}}]}`))
+		_, _ = fmt.Fprint(w, sseFrame(`{"id":"2","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`))
+		_, _ = fmt.Fprint(w, sseFrame(`[DONE]`))
 	}))
 	defer server.Close()
 

@@ -1073,9 +1073,15 @@ func TestConvertToolWithEnumAndItems(t *testing.T) {
 	}
 
 	result := toolsToProvider(tools)
-	props := result[0].Function.Parameters["properties"].(map[string]any)
+	props, ok := result[0].Function.Parameters["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("properties is not map[string]any: %v", result[0].Function.Parameters["properties"])
+	}
 
-	sortProp := props["sort"].(map[string]any)
+	sortProp, ok := props["sort"].(map[string]any)
+	if !ok {
+		t.Fatalf("sort is not map[string]any: %v", props["sort"])
+	}
 	if sortProp["type"] != "string" {
 		t.Errorf("sort.type = %v", sortProp["type"])
 	}
@@ -1084,7 +1090,10 @@ func TestConvertToolWithEnumAndItems(t *testing.T) {
 		t.Errorf("sort.enum = %v, want [asc desc]", sortProp["enum"])
 	}
 
-	tagsProp := props["tags"].(map[string]any)
+	tagsProp, ok := props["tags"].(map[string]any)
+	if !ok {
+		t.Fatalf("tags is not map[string]any: %v", props["tags"])
+	}
 	if tagsProp["type"] != "array" {
 		t.Errorf("tags.type = %v", tagsProp["type"])
 	}

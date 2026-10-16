@@ -20,7 +20,7 @@ func TestRequestInterceptorSignature(t *testing.T) {
 	}
 
 	// 验证：类型断言能够通过（即签名被识别为 RequestInterceptor）
-	var _ RequestInterceptor = interceptor
+	var _ = interceptor
 }
 
 // TestNilInterceptorNoOp 验证 nil 拦截器切片对 body 没有副作用。

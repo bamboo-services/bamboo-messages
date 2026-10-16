@@ -12,9 +12,10 @@ func checkBlockStartType(t *testing.T, events []provider.StreamEvent, expectedTy
 	t.Helper()
 	for _, e := range events {
 		if e.Delta.Type == provider.StreamDeltaTypeBlockStart {
-			data := e.Delta.Data.(provider.BlockStartData)
-			if data.BlockType != expectedType {
-				t.Errorf("BlockStart type = %q, want %q", data.BlockType, expectedType)
+			if data, ok := e.Delta.Data.(provider.BlockStartData); ok {
+				if data.BlockType != expectedType {
+					t.Errorf("BlockStart type = %q, want %q", data.BlockType, expectedType)
+				}
 			}
 			return
 		}

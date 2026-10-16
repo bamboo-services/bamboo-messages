@@ -119,7 +119,9 @@ func FormatRelayResponse(fn string, inFormat, outFormat any, data []byte) string
 //   - inFormat: 输入协议格式
 //   - outFormat: 输出协议格式
 //   - data: 原始 SSE 帧字节
-func debugRelayResponseFrame(fn string, inFormat, outFormat any, data []byte) {
+//
+// DebugRelayResponseFrame 打印 relay 流式逐帧响应的 debug 信息（受 BAMBOO_DEBUG 开关控制）。
+func DebugRelayResponseFrame(fn string, inFormat, outFormat any, data []byte) {
 	if !provider.DebugEnabled {
 		return
 	}

@@ -8,14 +8,14 @@ Bamboo Messages 是一个**纯 Go SDK 库**，为上层业务提供标准化的 
 
 ### 核心能力
 
-| 能力 | 说明 |
-|------|------|
-| **统一抽象** | 一套 `Message` / `StreamEvent` 模型屏蔽所有协议差异 |
-| **流式 + 非流式** | 同时支持 SSE 流式输出和同步请求-响应两种模式 |
-| **Provider 可插拔** | 每种协议实现独立包，按需引入，互不依赖 |
-| **端点可配置** | 支持自定义 BaseURL，对接任意兼容端点（官方 API / 自建网关 / 第三方代理） |
-| **Options 模式** | Functional Options 灵活配置 API Key、BaseURL、Headers 等 |
-| **参数透传** | 统一 ThinkingConfig(Effort) + 类型化字段(ToolChoice/ResponseFormat等) + ProviderExtra 机制，支持全部参数 |
+| 能力                | 说明                                                                                                     |
+| ------------------- | -------------------------------------------------------------------------------------------------------- |
+| **统一抽象**        | 一套 `Message` / `StreamEvent` 模型屏蔽所有协议差异                                                      |
+| **流式 + 非流式**   | 同时支持 SSE 流式输出和同步请求-响应两种模式                                                             |
+| **Provider 可插拔** | 每种协议实现独立包，按需引入，互不依赖                                                                   |
+| **端点可配置**      | 支持自定义 BaseURL，对接任意兼容端点（官方 API / 自建网关 / 第三方代理）                                 |
+| **Options 模式**    | Functional Options 灵活配置 API Key、BaseURL、Headers 等                                                 |
+| **参数透传**        | 统一 ThinkingConfig(Effort) + 类型化字段(ToolChoice/ResponseFormat等) + ProviderExtra 机制，支持全部参数 |
 
 ## 快速开始
 
@@ -85,7 +85,7 @@ func main() {
 
 通过 `<-chan StreamEvent` 实时接收 AI 模型的增量输出：
 
-```
+```text
 message_start → content_block_start → content_block_delta(text/thinking/tool) → content_block_stop → message_delta → message_stop
 ```
 
@@ -125,14 +125,14 @@ resp, err := client.Complete(ctx, messages, "你是一个有帮助的助手。",
 
 `ContentBlock` 从 struct 改为 interface。迁移方式：
 
-| 旧写法 | 新写法 |
-|--------|--------|
-| `block.Type` | `block.BlockType()` |
-| `block.Text` | `block.(*bamboo.TextBlock).Text` |
+| 旧写法           | 新写法                                   |
+| ---------------- | ---------------------------------------- |
+| `block.Type`     | `block.BlockType()`                      |
+| `block.Text`     | `block.(*bamboo.TextBlock).Text`         |
 | `block.Thinking` | `block.(*bamboo.ThinkingBlock).Thinking` |
-| `block.Name` | `block.(*bamboo.ToolUseBlock).Name` |
-| `block.ID` | `block.(*bamboo.ToolUseBlock).ID` |
-| `block.Input` | `block.(*bamboo.ToolUseBlock).Input` |
+| `block.Name`     | `block.(*bamboo.ToolUseBlock).Name`      |
+| `block.ID`       | `block.(*bamboo.ToolUseBlock).ID`        |
+| `block.Input`    | `block.(*bamboo.ToolUseBlock).Input`     |
 
 使用 type switch 处理不同内容块类型：
 
@@ -149,14 +149,14 @@ case *bamboo.ToolUseBlock:
 
 ## 支持的协议适配器
 
-| 协议适配器 | 包路径 | 目标协议 | 默认端点 | 状态 |
-|------------|--------|---------|---------|------|
-| **Anthropic Messages** | `internal/provider/anthropic` | Anthropic Messages Protocol | api.anthropic.com | ✅ |
-| **OpenAI Completions** | `internal/provider/openai/completions` | Chat Completions Protocol | api.openai.com | ✅ |
-| **OpenAI Responses** | `internal/provider/openai/responses` | Responses Protocol | api.openai.com | ✅ |
-| DeepSeek (兼容) | `internal/provider/deepseek` | OpenAI Completions 兼容 | api.deepseek.com | 📋 规划中 |
-| Google Gemini | `internal/provider/gemini` | Gemini Protocol | generativelanguage.googleapis.com | 📋 规划中 |
-| 自定义端点 | `internal/provider/custom` | 任意兼容协议 | 用户自定义 | 📋 规划中 |
+| 协议适配器             | 包路径                                 | 目标协议                    | 默认端点                          | 状态      |
+| ---------------------- | -------------------------------------- | --------------------------- | --------------------------------- | --------- |
+| **Anthropic Messages** | `internal/provider/anthropic`          | Anthropic Messages Protocol | api.anthropic.com                 | ✅        |
+| **OpenAI Completions** | `internal/provider/openai/completions` | Chat Completions Protocol   | api.openai.com                    | ✅        |
+| **OpenAI Responses**   | `internal/provider/openai/responses`   | Responses Protocol          | api.openai.com                    | ✅        |
+| DeepSeek (兼容)        | `internal/provider/deepseek`           | OpenAI Completions 兼容     | api.deepseek.com                  | 📋 规划中 |
+| Google Gemini          | `internal/provider/gemini`             | Gemini Protocol             | generativelanguage.googleapis.com | 📋 规划中 |
+| 自定义端点             | `internal/provider/custom`             | 任意兼容协议                | 用户自定义                        | 📋 规划中 |
 
 ## Options 配置参考
 
@@ -179,15 +179,15 @@ p := anthropic.NewProvider("sk-ant-xxx")
 client := bamboo.NewClient(p)
 ```
 
-| Option | 类型 | 说明 | 默认值 |
-|--------|------|------|--------|
-| `WithAPIKey(key)` | `string` | API 认证密钥 | 无（必填） |
-| `WithBaseURL(url)` | `string` | 自定义基础 URL | 各协议 SDK 默认端点 |
-| `WithHeader(k, v)` | `string, string` | 附加 HTTP 请求头 | 无 |
+| Option             | 类型             | 说明             | 默认值              |
+| ------------------ | ---------------- | ---------------- | ------------------- |
+| `WithAPIKey(key)`  | `string`         | API 认证密钥     | 无（必填）          |
+| `WithBaseURL(url)` | `string`         | 自定义基础 URL   | 各协议 SDK 默认端点 |
+| `WithHeader(k, v)` | `string, string` | 附加 HTTP 请求头 | 无                  |
 
 > OpenAI Completions / Responses 的 Options 用法完全一致，只需替换包名前缀即可：
 > `completions.NewCompletionsProviderWithOptions(...)` / `responses.NewResponsesProviderWithOptions(...)`
-
+>
 > **注意**: Provider Options（WithAPIKey/WithBaseURL/WithHeader）用于创建 Provider 实例；RequestOption（WithToolChoice/WithResponseFormat 等）用于配置每次请求参数。两者是独立的体系。
 
 ## 请求参数配置
@@ -226,13 +226,13 @@ for _, opt := range opts {
 }
 ```
 
-| Option | 类型 | 说明 |
-|--------|------|------|
-| `WithToolChoice(v)` | `string` | 工具选择: auto/none/required/forced |
-| `WithResponseFormat(v)` | `string` | 响应格式: text/json_object |
-| `WithUserID(v)` | `string` | 用户标识 |
-| `WithParallelToolCalls(v)` | `bool` | 并行工具调用 |
-| `WithExtra(k, v)` | `string, any` | 自定义扩展参数 |
+| Option                     | 类型          | 说明                                |
+| -------------------------- | ------------- | ----------------------------------- |
+| `WithToolChoice(v)`        | `string`      | 工具选择: auto/none/required/forced |
+| `WithResponseFormat(v)`    | `string`      | 响应格式: text/json_object          |
+| `WithUserID(v)`            | `string`      | 用户标识                            |
+| `WithParallelToolCalls(v)` | `bool`        | 并行工具调用                        |
+| `WithExtra(k, v)`          | `string, any` | 自定义扩展参数                      |
 
 ### Provider 特有 Option
 
@@ -249,10 +249,10 @@ opts := []anthropic.AnthropicMessagesOption{
 }
 ```
 
-| Option | 类型 | 说明 |
-|--------|------|------|
-| `WithTopK(v)` | `float64` | Top-K 采样参数 |
-| `WithBudgetTokens(v)` | `int64` | 思考 token 预算（已废弃） |
+| Option                | 类型      | 说明                      |
+| --------------------- | --------- | ------------------------- |
+| `WithTopK(v)`         | `float64` | Top-K 采样参数            |
+| `WithBudgetTokens(v)` | `int64`   | 思考 token 预算（已废弃） |
 
 **OpenAI Completions** (`internal/provider/openai/completions`)
 
@@ -267,12 +267,12 @@ opts := []completions.OpenaiCompletionsOption{
 }
 ```
 
-| Option | 类型 | 说明 |
-|--------|------|------|
+| Option                    | 类型      | 说明     |
+| ------------------------- | --------- | -------- |
 | `WithFrequencyPenalty(v)` | `float64` | 频率惩罚 |
-| `WithPresencePenalty(v)` | `float64` | 存在惩罚 |
-| `WithSeed(v)` | `int64` | 随机种子 |
-| `WithPrediction(v)` | `any` | 预测内容 |
+| `WithPresencePenalty(v)`  | `float64` | 存在惩罚 |
+| `WithSeed(v)`             | `int64`   | 随机种子 |
+| `WithPrediction(v)`       | `any`     | 预测内容 |
 
 **OpenAI Responses** (`internal/provider/openai/responses`)
 
@@ -287,12 +287,12 @@ opts := []responses.OpenaiResponsesOption{
 }
 ```
 
-| Option | 类型 | 说明 |
-|--------|------|------|
-| `WithStore(v)` | `bool` | 是否在 OpenAI 端存储响应 |
-| `WithModalities(v)` | `any` | 输出模态 |
-| `WithPreviousResponseID(v)` | `string` | 前置响应 ID |
-| `WithTruncation(v)` | `string` | 消息截断策略 |
+| Option                      | 类型     | 说明                     |
+| --------------------------- | -------- | ------------------------ |
+| `WithStore(v)`              | `bool`   | 是否在 OpenAI 端存储响应 |
+| `WithModalities(v)`         | `any`    | 输出模态                 |
+| `WithPreviousResponseID(v)` | `string` | 前置响应 ID              |
+| `WithTruncation(v)`         | `string` | 消息截断策略             |
 
 ## 核心类型
 
@@ -354,14 +354,14 @@ case *bamboo.DocumentBlock:
 
 支持的构造函数：
 
-| 构造函数 | 返回类型 | 说明 |
-|----------|----------|------|
-| `NewTextBlock(text)` | `ContentBlock` | 纯文本内容块 |
-| `NewThinkingBlock(thinking, signature)` | `ContentBlock` | 思考过程内容块 |
-| `NewToolUseBlock(id, name, input)` | `ContentBlock` | 工具调用内容块 |
+| 构造函数                                          | 返回类型       | 说明           |
+| ------------------------------------------------- | -------------- | -------------- |
+| `NewTextBlock(text)`                              | `ContentBlock` | 纯文本内容块   |
+| `NewThinkingBlock(thinking, signature)`           | `ContentBlock` | 思考过程内容块 |
+| `NewToolUseBlock(id, name, input)`                | `ContentBlock` | 工具调用内容块 |
 | `NewToolResultBlock(toolUseID, content, isError)` | `ContentBlock` | 工具结果内容块 |
-| `NewImageBlock(source)` | `ContentBlock` | 图片内容块 |
-| `NewDocumentBlock(source)` | `ContentBlock` | 文档内容块 |
+| `NewImageBlock(source)`                           | `ContentBlock` | 图片内容块     |
+| `NewDocumentBlock(source)`                        | `ContentBlock` | 文档内容块     |
 
 ### RequestConfig — 请求配置
 
@@ -392,7 +392,7 @@ type StreamEvent struct {
 
 ### Response — 非流式结果
 
-```go
+````go
 type Response struct {
     ID           string          // 消息 ID
     Type         string          // "message"
@@ -408,7 +408,7 @@ type Response struct {
 
 ## 项目结构
 
-```
+```text
 bamboo-messages/
 ├── bamboo/                          # 公共 SDK 层 — 面向上层业务的统一 API
 │   ├── bamboo.go                   # BambooClient 接口 + Chat/Complete 实现
@@ -444,16 +444,16 @@ bamboo-messages/
 │
 ├── go.mod · go.sum · LICENSE
 └── README.md
-```
+````
 
 ## 技术栈
 
-| 类别 | 选型 | 版本要求 |
-|------|------|---------|
-| 语言 | Go | 1.25+ |
-| Anthropic 协议 SDK | [anthropic-sdk-go](https://github.com/anthropics/anthropic-sdk-go) | v1.27+ |
-| OpenAI 协议 SDK | [openai-go](https://github.com/openai/openai-go) | v3.30+ |
-| 基础库 | [bamboo-base-go](https://github.com/bamboo-services/bamboo-base-go) | v1.0+ |
+| 类别               | 选型                                                                | 版本要求 |
+| ------------------ | ------------------------------------------------------------------- | -------- |
+| 语言               | Go                                                                  | 1.25+    |
+| Anthropic 协议 SDK | [anthropic-sdk-go](https://github.com/anthropics/anthropic-sdk-go)  | v1.27+   |
+| OpenAI 协议 SDK    | [openai-go](https://github.com/openai/openai-go)                    | v3.30+   |
+| 基础库             | [bamboo-base-go](https://github.com/bamboo-services/bamboo-base-go) | v1.0+    |
 
 ## 设计原则
 

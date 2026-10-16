@@ -57,8 +57,8 @@ func DebugRequest(providerType, endpoint string, headers map[string]string, para
 		return
 	}
 
-	fmt.Println(fmt.Sprintf("provider=%s endpoint=%s | headers: {%s} | body: %s",
-		providerType, endpoint, formatHeaders(headers), formatParams(params)))
+	fmt.Printf("provider=%s endpoint=%s | headers: {%s} | body: %s\n",
+		providerType, endpoint, formatHeaders(headers), formatParams(params))
 }
 
 // FormatDebugRequest 格式化请求的 debug 信息并返回字符串。

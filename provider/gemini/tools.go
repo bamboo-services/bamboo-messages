@@ -37,8 +37,3 @@ func buildTools(tools []provider.Tool) []map[string]any {
 	}
 	return []map[string]any{{"functionDeclarations": decls}}
 }
-
-// jsonUnmarshal 是 encoding/json.Unmarshal 的薄包装，便于测试 mock。
-func jsonUnmarshal(data []byte, v any) error {
-	return json.Unmarshal(data, v)
-}

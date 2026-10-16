@@ -83,8 +83,9 @@ func TestAudit_ToolUse_StreamConverterSimulation(t *testing.T) {
 	for _, pe := range allEvents {
 		switch pe.Delta.Type {
 		case provider.StreamDeltaTypeBlockStart:
-			data := pe.Delta.Data.(provider.BlockStartData)
-			eventLog = append(eventLog, fmt.Sprintf("block_start(%s,idx=%d)", data.BlockType, blockIndex))
+			if data, ok := pe.Delta.Data.(provider.BlockStartData); ok {
+				eventLog = append(eventLog, fmt.Sprintf("block_start(%s,idx=%d)", data.BlockType, blockIndex))
+			}
 		case provider.StreamDeltaTypeTextOutput:
 			eventLog = append(eventLog, fmt.Sprintf("text(idx=%d)", blockIndex))
 		case provider.StreamDeltaTypeToolCall:

@@ -16,8 +16,9 @@ func findBlockStartType(t *testing.T, events []provider.StreamEvent) string {
 	t.Helper()
 	for _, e := range events {
 		if e.Delta.Type == provider.StreamDeltaTypeBlockStart {
-			data := e.Delta.Data.(provider.BlockStartData)
-			return data.BlockType
+			if data, ok := e.Delta.Data.(provider.BlockStartData); ok {
+				return data.BlockType
+			}
 		}
 	}
 	return ""

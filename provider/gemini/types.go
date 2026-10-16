@@ -2,57 +2,6 @@ package gemini
 
 import "encoding/json"
 
-// generateContentRequest 是 Gemini 流式 / 非流式生成内容请求的 DTO。
-//
-// 包含对话历史、系统提示、生成配置、工具声明与工具调用策略，
-// 直接对应 Gemini generateContent / streamGenerateContent 端点的 JSON 结构。
-type generateContentRequest struct {
-	Contents          []geminiContent   `json:"contents"`
-	SystemInstruction *geminiContent    `json:"systemInstruction,omitempty"`
-	GenerationConfig  *generationConfig `json:"generationConfig,omitempty"`
-	Tools             []geminiTool      `json:"tools,omitempty"`
-	ToolConfig        *toolConfig       `json:"toolConfig,omitempty"`
-	SafetySettings    []safetySetting   `json:"safetySettings,omitempty"`
-	CachedContent     string            `json:"cachedContent,omitempty"`
-}
-
-// generationConfig 是 Gemini 的生成配置，控制采样、输出长度、思考模式与安全策略等。
-type generationConfig struct {
-	Temperature      *float64        `json:"temperature,omitempty"`
-	TopP             *float64        `json:"topP,omitempty"`
-	TopK             *float64        `json:"topK,omitempty"`
-	MaxOutputTokens  *int            `json:"maxOutputTokens,omitempty"`
-	StopSequences    []string        `json:"stopSequences,omitempty"`
-	ThinkingConfig   *thinkingConfig `json:"thinkingConfig,omitempty"`
-	ResponseMimeType string          `json:"responseMimeType,omitempty"`
-}
-
-// thinkingConfig 是 Gemini 思考 / 推理配置。
-//
-// ThinkingLevel 取值通常为 "low" / "medium" / "high"，
-// ThinkingBudget 用于控制思考阶段的最大 token 消耗。
-type thinkingConfig struct {
-	IncludeThoughts bool   `json:"includeThoughts,omitempty"`
-	ThinkingLevel   string `json:"thinkingLevel,omitempty"`
-	ThinkingBudget  *int   `json:"thinkingBudget,omitempty"`
-}
-
-// safetySetting 是 Gemini 的安全策略设置，按危害类别设定屏蔽阈值。
-type safetySetting struct {
-	Category  string `json:"category,omitempty"`
-	Threshold string `json:"threshold,omitempty"`
-}
-
-// toolConfig 用于配置工具调用行为，例如是否强制 / 禁用函数调用。
-type toolConfig struct {
-	FunctionCallingConfig *functionCallingConfig `json:"functionCallingConfig,omitempty"`
-}
-
-// functionCallingConfig 定义工具调用模式：AUTO / NONE / ANY。
-type functionCallingConfig struct {
-	Mode string `json:"mode,omitempty"`
-}
-
 // geminiContent 表示 Gemini 的一条消息内容，包含角色与 Part 数组。
 //
 // Role 取值通常为 "user"（用户）或 "model"（模型），
@@ -99,20 +48,6 @@ type functionResponse struct {
 type inlineData struct {
 	MimeType string `json:"mimeType,omitempty"`
 	Data     string `json:"data,omitempty"`
-}
-
-// geminiTool 声明一个工具，包含若干函数声明。
-type geminiTool struct {
-	FunctionDeclarations []functionDeclaration `json:"functionDeclarations,omitempty"`
-}
-
-// functionDeclaration 声明一个可调用的函数，包括名称、描述与参数 Schema。
-//
-// Parameters 使用 json.RawMessage，允许直接透传 JSON Schema 而不引入外部类型。
-type functionDeclaration struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters,omitempty"`
 }
 
 // generateContentResponse 是 Gemini 生成内容响应的 DTO，流式与非流式共享同一结构。

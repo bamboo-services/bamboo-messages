@@ -135,199 +135,199 @@ bamboo-messages/
 
 ## 导航指南
 
-| 想做什么 | 去哪里 | 备注 |
-|----------|--------|------|
-| 理解核心接口 | `provider/provider.go` | 6 个方法，Chat/Complete 各有带 System 变体 |
-| 理解通用类型 | `provider/type.go` | Message, ChatConfig, Tool, CompletionResult, ThinkingConfig, CacheControl, ContentBlock, ProviderExtra |
-| 理解流式模型 | `provider/stream.go` | StreamEvent channel + 6 种 DeltaData 类型 + 含缓存的 UsageData + IndexedToolCallDeltaData |
-| 理解 Debug 机制 | `provider/debug.go` | `DebugEnabled` 全局开关 + 环境变量 `BAMBOO_DEBUG` 唯一入口 |
-| 理解 UserAgent/版本 | `provider/version.go` | SDKName + GetUserAgent() + GetSDKVersion() |
-| 理解请求拦截器 | `provider/interceptor.go` + `interceptor_transport.go` | RequestInterceptor + ApplyInterceptors + NewInterceptorHTTPClient |
-| 理解公共 Options | `provider/options.go` | Options 结构体 + WithInterceptor + ApplyOptions |
-| 理解流式耗时统计 | `provider/timing.go` | TimingCollector + TimingStats + TokenRates + RateSample + 不可靠速率标记 |
-| 添加新协议适配器 | 参见 `provider/AGENTS.md` | 结构完全模板化 |
-| 理解消息转换 | `*/message.go` | 各适配器的 协议类型 ↔ provider 类型映射 |
-| 理解参数构建 | `*/params.go` | 各适配器的 buildParams / buildContentConfig 共享入口 |
-| 理解流式解析 | `*/stream.go` | 各适配器的 SSE 事件 → StreamEvent 转换 |
-| 查看模型定义 | `*/models.go` | 各协议的模型常量 |
-| 运行测试 | `*/provider_test.go` | 每个适配器独立测试 |
-| 理解参数透传 | `bamboo/option.go` + `bamboo/convert.go` | ThinkingConfig + ProviderExtra + CacheControl 映射 |
-| 理解 BlockStart 事件 | `provider/stream.go` | BlockStartData + 构造函数 |
-| 理解 Prompt Caching | `provider/type.go` + `bamboo/option.go` + `bamboo/content.go` | CacheControl / SystemCacheControl / PromptCacheKey / WithCache 构造函数 |
-| 查看使用示例 | `example/main.go` | 完整示例代码 |
-| 查阅协议设计文档 | `develop/docs/` | spec / roadmap / message-format / stream-design / provider-interface / overview |
-| 理解 N-to-N 协议互转 | `bamboo/codec/` + `bamboo/relay/` | codec 编解码 + relay 中继 |
-| 理解流式纯透传 | `bamboo/relay/relay.go` | RelayStream 直接透传上游 SSE 帧到输出 channel |
-| 理解内部错误类型 | `internal/xerr/error.go` | 最小错误包装，替代外部依赖 |
-| 使用通用 Options 模式 | `pkg/option/option.go` | WithAPIKey/WithBaseURL/WithHeader + ApplyOptions |
-| 使用通用工具函数 | `pkg/helpers/helpers.go` | PtrFloat64/PtrBool/PtrInt64/PtrString + GetExtra* 安全取值 |
-| 使用通用错误类型 | `pkg/errors/errors.go` | BambooError 统一错误类型 |
-| 理解 bamboo 原生协议编解码 | `bamboo/codec/bamboo/codec.go` | 恒等变换：直接使用 `bamboo.BambooMessage` / `RequestConfig` / `Response` |
-| 理解 bamboo 原生 Provider 适配器 | `provider/bamboo/provider.go` | 面向 bamboo 原生端点（`/v1/bamboo`）的 Provider 实现 |
+| 想做什么                         | 去哪里                                                        | 备注                                                                                                   |
+| -------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 理解核心接口                     | `provider/provider.go`                                        | 6 个方法，Chat/Complete 各有带 System 变体                                                             |
+| 理解通用类型                     | `provider/type.go`                                            | Message, ChatConfig, Tool, CompletionResult, ThinkingConfig, CacheControl, ContentBlock, ProviderExtra |
+| 理解流式模型                     | `provider/stream.go`                                          | StreamEvent channel + 6 种 DeltaData 类型 + 含缓存的 UsageData + IndexedToolCallDeltaData              |
+| 理解 Debug 机制                  | `provider/debug.go`                                           | `DebugEnabled` 全局开关 + 环境变量 `BAMBOO_DEBUG` 唯一入口                                             |
+| 理解 UserAgent/版本              | `provider/version.go`                                         | SDKName + GetUserAgent() + GetSDKVersion()                                                             |
+| 理解请求拦截器                   | `provider/interceptor.go` + `interceptor_transport.go`        | RequestInterceptor + ApplyInterceptors + NewInterceptorHTTPClient                                      |
+| 理解公共 Options                 | `provider/options.go`                                         | Options 结构体 + WithInterceptor + ApplyOptions                                                        |
+| 理解流式耗时统计                 | `provider/timing.go`                                          | TimingCollector + TimingStats + TokenRates + RateSample + 不可靠速率标记                               |
+| 添加新协议适配器                 | 参见 `provider/AGENTS.md`                                     | 结构完全模板化                                                                                         |
+| 理解消息转换                     | `*/message.go`                                                | 各适配器的 协议类型 ↔ provider 类型映射                                                                |
+| 理解参数构建                     | `*/params.go`                                                 | 各适配器的 buildParams / buildContentConfig 共享入口                                                   |
+| 理解流式解析                     | `*/stream.go`                                                 | 各适配器的 SSE 事件 → StreamEvent 转换                                                                 |
+| 查看模型定义                     | `*/models.go`                                                 | 各协议的模型常量                                                                                       |
+| 运行测试                         | `*/provider_test.go`                                          | 每个适配器独立测试                                                                                     |
+| 理解参数透传                     | `bamboo/option.go` + `bamboo/convert.go`                      | ThinkingConfig + ProviderExtra + CacheControl 映射                                                     |
+| 理解 BlockStart 事件             | `provider/stream.go`                                          | BlockStartData + 构造函数                                                                              |
+| 理解 Prompt Caching              | `provider/type.go` + `bamboo/option.go` + `bamboo/content.go` | CacheControl / SystemCacheControl / PromptCacheKey / WithCache 构造函数                                |
+| 查看使用示例                     | `example/main.go`                                             | 完整示例代码                                                                                           |
+| 查阅协议设计文档                 | `develop/docs/`                                               | spec / roadmap / message-format / stream-design / provider-interface / overview                        |
+| 理解 N-to-N 协议互转             | `bamboo/codec/` + `bamboo/relay/`                             | codec 编解码 + relay 中继                                                                              |
+| 理解流式纯透传                   | `bamboo/relay/relay.go`                                       | RelayStream 直接透传上游 SSE 帧到输出 channel                                                          |
+| 理解内部错误类型                 | `internal/xerr/error.go`                                      | 最小错误包装，替代外部依赖                                                                             |
+| 使用通用 Options 模式            | `pkg/option/option.go`                                        | WithAPIKey/WithBaseURL/WithHeader + ApplyOptions                                                       |
+| 使用通用工具函数                 | `pkg/helpers/helpers.go`                                      | PtrFloat64/PtrBool/PtrInt64/PtrString + GetExtra* 安全取值                                             |
+| 使用通用错误类型                 | `pkg/errors/errors.go`                                        | BambooError 统一错误类型                                                                               |
+| 理解 bamboo 原生协议编解码       | `bamboo/codec/bamboo/codec.go`                                | 恒等变换：直接使用 `bamboo.BambooMessage` / `RequestConfig` / `Response`                               |
+| 理解 bamboo 原生 Provider 适配器 | `provider/bamboo/provider.go`                                 | 面向 bamboo 原生端点（`/v1/bamboo`）的 Provider 实现                                                   |
 
 ## 代码地图
 
 ### 核心抽象层 (`provider/`)
 
-| 符号 | 类型 | 文件 | 作用 |
-|------|------|------|------|
-| `Provider` | 接口 | provider.go | 6 方法：Chat, ChatWithSystem, Complete, CompleteWithSystem, GetProviderType, GetAvailableModels |
-| `HTTPClient` | 结构体 | http_client.go | 统一 HTTP 通信基座（认证/自定义头/拦截器/User-Agent/URL 拼接） |
-| `NewHTTPClient` | 函数 | http_client.go | 创建统一 HTTP 客户端实例 |
-| `HTTPClient.Do` | 方法 | http_client.go | 发起 HTTP 请求 `(ctx, method, path, body) → (*http.Response, error)` — 适配器统一入口 |
-| `HTTPClient.DoWithDebug` | 方法 | http_client.go | 发起 HTTP 请求并输出 debug 日志（headers 脱敏 + body 截断） |
-| `HTTPClient.GetBaseURL` | 方法 | http_client.go | 返回基础 URL 字符串 |
-| `SSEScanner` | 结构体 | sse_scanner.go | 共享 SSE 帧解析器，内置 json.Valid 容错与 GLM 截断恢复 |
-| `NewSSEScanner` | 函数 | sse_scanner.go | 从 io.ReadCloser 创建 SSE 帧解析器 |
-| `Message` | 结构体 | type.go | 统一消息模型 (Role + Content + ContentBlocks + ToolCalls + ToolCallID + ToolName + IsError + CacheControl + ThinkingContent + ThinkingSignature + ReasoningID) |
-| `ChatConfig` | 结构体 | type.go | 请求配置 (Model, Temperature, TopP, MaxTokens, Stop, Tools, Metadata, UserID, ToolChoice, ResponseFormat, ParallelToolCalls, ThinkingConfig, SystemCacheControl, PromptCacheKey, ProviderExtra) |
-| `ThinkingConfig` | 结构体 | type.go | 思考/推理配置 (Effort: none/low/medium/high) |
-| `CacheControl` | 结构体 | type.go | 缓存控制标记 (Type + TTL)，Anthropic prompt caching 使用 |
-| `NewEphemeralCacheControl` | 函数 | type.go | 创建 ephemeral CacheControl 标记 |
-| `ProviderExtra` | map[string]any | type.go (ChatConfig 字段) | Provider 特有参数透传 |
-| `GetExtraFloat64/Int64/String/Bool/Any` | 函数 | type.go | ProviderExtra 安全取值 helpers |
-| `ContentBlock` | 接口 | type.go | 多媒体内容块接口 (BlockType() string) |
-| `ImageContentBlock` | 结构体 | type.go | 图片内容块 (Source: ImageSource) |
-| `DocumentContentBlock` | 结构体 | type.go | 文档内容块 (Source: DocumentSource) |
-| `StreamEvent` | 结构体 | stream.go | 流事件 (Type + Delta + Err + FinishReason)，值类型，Err 为 `*xerr.Error` |
-| `StreamDelta[E]` | 泛型结构体 | stream.go | 流增量 (Type + Data)，泛型确保类型安全 |
-| `UsageData` | 结构体 | stream.go | Token 用量（含 CacheCreationInputTokens / CacheReadInputTokens） |
-| `CompletionResult` | 结构体 | type.go | 非流式完整响应 (Content + ToolCalls + FinishReason + Usage + Thinking + ThinkingSignature + ResponseID) |
-| `BlockStartData` | 结构体 | stream.go | 内容块开始数据 (BlockType + ID + Name) |
-| `IndexedToolCallDeltaData` | 结构体 | stream.go | 带 Provider 原生索引的工具调用参数增量 (PartialJSON + Index + HasIndex) |
-| `RequestInterceptor` | 函数类型 | interceptor.go | `func(ctx, body []byte) ([]byte, error)` — 请求拦截器 |
-| `ApplyInterceptors` | 函数 | interceptor.go | 按注册顺序链式应用拦截器 |
-| `NewInterceptorHTTPClient` | 函数 | interceptor_transport.go | 构造注入拦截器的 `*http.Client`；无拦截器返回 nil |
-| `Options` | 结构体 | options.go | 公共运行时选项 (`Interceptors []RequestInterceptor`) |
-| `Option` | 函数类型 | options.go | `func(*Options)` — 公共配置选项 |
-| `WithInterceptor` | 函数 | options.go | 注册请求拦截器 |
-| `ApplyOptions` | 函数 | options.go | 应用公共选项列表 |
-| `TimingCollector` | 结构体 | timing.go | 流式请求耗时收集器（零侵入 Observe 模式） |
-| `NewTimingCollector` | 函数 | timing.go | 创建耗时收集器实例 |
-| `TimingStats` | 结构体 | timing.go | 流式耗时统计 (TotalDuration, FirstByteDuration/TTFT, ResponseHeaderDuration, ThinkingDuration, ContentDuration, ToolDuration, ThinkingTokens, OutputTokens, ToolTokens, TotalTokens, TokenSource) |
-| `TokenRates` | 结构体 | timing.go | Token 生成速率 (.2f): ThinkingTokensPerSec, OutputTokensPerSec, ToolTokensPerSec（负值=不可靠） |
-| `RateSample` | 结构体 | timing.go | 速率采样点 (ElapsedSec, TokensPerSec, Kind) |
-| `RateSampleKind` | 类型 | timing.go | 速率采样类型: `"thinking"` / `"output"` / `"tool"` |
-| `DebugEnabled` | 变量 | debug.go | Debug 全局开关，通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用（唯一入口） |
-| `DebugRequest` | 函数 | debug.go | 输出请求 debug 日志（headers 敏感脱敏、body 长文本截断） |
-| `FormatDebugRequest` | 函数 | debug.go | 返回格式化 debug 字符串（不受开关限制） |
-| `GetUserAgent` | 函数 | version.go | 生成统一 User-Agent 字符串 |
-| `GetSDKVersion` | 函数 | version.go | 读取 SDK 版本号 (runtime/debug) |
-| `NewBlockStartDelta` / `NewBlockStartDeltaWithID` | 构造函数 | stream.go | BlockStart Delta 工厂函数 |
-| `NewToolCallDeltaWithIndex` / `NewToolCallDeltaDataWithIndex` | 构造函数 | stream.go | 带索引的工具调用 Delta 工厂函数 |
-| `NewUsageDeltaWithCache` | 构造函数 | stream.go | 带缓存统计的 Usage Delta 工厂函数 |
-| `NewTextDelta` 等 | 构造函数 | stream.go | 7 种 Delta 工厂函数 |
+| 符号                                                          | 类型           | 文件                      | 作用                                                                                                                                                                                              |
+| ------------------------------------------------------------- | -------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Provider`                                                    | 接口           | provider.go               | 6 方法：Chat, ChatWithSystem, Complete, CompleteWithSystem, GetProviderType, GetAvailableModels                                                                                                   |
+| `HTTPClient`                                                  | 结构体         | http_client.go            | 统一 HTTP 通信基座（认证/自定义头/拦截器/User-Agent/URL 拼接）                                                                                                                                    |
+| `NewHTTPClient`                                               | 函数           | http_client.go            | 创建统一 HTTP 客户端实例                                                                                                                                                                          |
+| `HTTPClient.Do`                                               | 方法           | http_client.go            | 发起 HTTP 请求 `(ctx, method, path, body) → (*http.Response, error)` — 适配器统一入口                                                                                                             |
+| `HTTPClient.DoWithDebug`                                      | 方法           | http_client.go            | 发起 HTTP 请求并输出 debug 日志（headers 脱敏 + body 截断）                                                                                                                                       |
+| `HTTPClient.GetBaseURL`                                       | 方法           | http_client.go            | 返回基础 URL 字符串                                                                                                                                                                               |
+| `SSEScanner`                                                  | 结构体         | sse_scanner.go            | 共享 SSE 帧解析器，内置 json.Valid 容错与 GLM 截断恢复                                                                                                                                            |
+| `NewSSEScanner`                                               | 函数           | sse_scanner.go            | 从 io.ReadCloser 创建 SSE 帧解析器                                                                                                                                                                |
+| `Message`                                                     | 结构体         | type.go                   | 统一消息模型 (Role + Content + ContentBlocks + ToolCalls + ToolCallID + ToolName + IsError + CacheControl + ThinkingContent + ThinkingSignature + ReasoningID)                                    |
+| `ChatConfig`                                                  | 结构体         | type.go                   | 请求配置 (Model, Temperature, TopP, MaxTokens, Stop, Tools, Metadata, UserID, ToolChoice, ResponseFormat, ParallelToolCalls, ThinkingConfig, SystemCacheControl, PromptCacheKey, ProviderExtra)   |
+| `ThinkingConfig`                                              | 结构体         | type.go                   | 思考/推理配置 (Effort: none/low/medium/high)                                                                                                                                                      |
+| `CacheControl`                                                | 结构体         | type.go                   | 缓存控制标记 (Type + TTL)，Anthropic prompt caching 使用                                                                                                                                          |
+| `NewEphemeralCacheControl`                                    | 函数           | type.go                   | 创建 ephemeral CacheControl 标记                                                                                                                                                                  |
+| `ProviderExtra`                                               | map[string]any | type.go (ChatConfig 字段) | Provider 特有参数透传                                                                                                                                                                             |
+| `GetExtraFloat64/Int64/String/Bool/Any`                       | 函数           | type.go                   | ProviderExtra 安全取值 helpers                                                                                                                                                                    |
+| `ContentBlock`                                                | 接口           | type.go                   | 多媒体内容块接口 (BlockType() string)                                                                                                                                                             |
+| `ImageContentBlock`                                           | 结构体         | type.go                   | 图片内容块 (Source: ImageSource)                                                                                                                                                                  |
+| `DocumentContentBlock`                                        | 结构体         | type.go                   | 文档内容块 (Source: DocumentSource)                                                                                                                                                               |
+| `StreamEvent`                                                 | 结构体         | stream.go                 | 流事件 (Type + Delta + Err + FinishReason)，值类型，Err 为 `*xerr.Error`                                                                                                                          |
+| `StreamDelta[E]`                                              | 泛型结构体     | stream.go                 | 流增量 (Type + Data)，泛型确保类型安全                                                                                                                                                            |
+| `UsageData`                                                   | 结构体         | stream.go                 | Token 用量（含 CacheCreationInputTokens / CacheReadInputTokens）                                                                                                                                  |
+| `CompletionResult`                                            | 结构体         | type.go                   | 非流式完整响应 (Content + ToolCalls + FinishReason + Usage + Thinking + ThinkingSignature + ResponseID)                                                                                           |
+| `BlockStartData`                                              | 结构体         | stream.go                 | 内容块开始数据 (BlockType + ID + Name)                                                                                                                                                            |
+| `IndexedToolCallDeltaData`                                    | 结构体         | stream.go                 | 带 Provider 原生索引的工具调用参数增量 (PartialJSON + Index + HasIndex)                                                                                                                           |
+| `RequestInterceptor`                                          | 函数类型       | interceptor.go            | `func(ctx, body []byte) ([]byte, error)` — 请求拦截器                                                                                                                                             |
+| `ApplyInterceptors`                                           | 函数           | interceptor.go            | 按注册顺序链式应用拦截器                                                                                                                                                                          |
+| `NewInterceptorHTTPClient`                                    | 函数           | interceptor_transport.go  | 构造注入拦截器的 `*http.Client`；无拦截器返回 nil                                                                                                                                                 |
+| `Options`                                                     | 结构体         | options.go                | 公共运行时选项 (`Interceptors []RequestInterceptor`)                                                                                                                                              |
+| `Option`                                                      | 函数类型       | options.go                | `func(*Options)` — 公共配置选项                                                                                                                                                                   |
+| `WithInterceptor`                                             | 函数           | options.go                | 注册请求拦截器                                                                                                                                                                                    |
+| `ApplyOptions`                                                | 函数           | options.go                | 应用公共选项列表                                                                                                                                                                                  |
+| `TimingCollector`                                             | 结构体         | timing.go                 | 流式请求耗时收集器（零侵入 Observe 模式）                                                                                                                                                         |
+| `NewTimingCollector`                                          | 函数           | timing.go                 | 创建耗时收集器实例                                                                                                                                                                                |
+| `TimingStats`                                                 | 结构体         | timing.go                 | 流式耗时统计 (TotalDuration, FirstByteDuration/TTFT, ResponseHeaderDuration, ThinkingDuration, ContentDuration, ToolDuration, ThinkingTokens, OutputTokens, ToolTokens, TotalTokens, TokenSource) |
+| `TokenRates`                                                  | 结构体         | timing.go                 | Token 生成速率 (.2f): ThinkingTokensPerSec, OutputTokensPerSec, ToolTokensPerSec（负值=不可靠）                                                                                                   |
+| `RateSample`                                                  | 结构体         | timing.go                 | 速率采样点 (ElapsedSec, TokensPerSec, Kind)                                                                                                                                                       |
+| `RateSampleKind`                                              | 类型           | timing.go                 | 速率采样类型: `"thinking"` / `"output"` / `"tool"`                                                                                                                                                |
+| `DebugEnabled`                                                | 变量           | debug.go                  | Debug 全局开关，通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用（唯一入口）                                                                                                                            |
+| `DebugRequest`                                                | 函数           | debug.go                  | 输出请求 debug 日志（headers 敏感脱敏、body 长文本截断）                                                                                                                                          |
+| `FormatDebugRequest`                                          | 函数           | debug.go                  | 返回格式化 debug 字符串（不受开关限制）                                                                                                                                                           |
+| `GetUserAgent`                                                | 函数           | version.go                | 生成统一 User-Agent 字符串                                                                                                                                                                        |
+| `GetSDKVersion`                                               | 函数           | version.go                | 读取 SDK 版本号 (runtime/debug)                                                                                                                                                                   |
+| `NewBlockStartDelta` / `NewBlockStartDeltaWithID`             | 构造函数       | stream.go                 | BlockStart Delta 工厂函数                                                                                                                                                                         |
+| `NewToolCallDeltaWithIndex` / `NewToolCallDeltaDataWithIndex` | 构造函数       | stream.go                 | 带索引的工具调用 Delta 工厂函数                                                                                                                                                                   |
+| `NewUsageDeltaWithCache`                                      | 构造函数       | stream.go                 | 带缓存统计的 Usage Delta 工厂函数                                                                                                                                                                 |
+| `NewTextDelta` 等                                             | 构造函数       | stream.go                 | 7 种 Delta 工厂函数                                                                                                                                                                               |
 
 ### 适配器层 (结构完全一致)
 
-| 适配器 | 包路径 | 底层传输 | Provider 类型名 |
-|--------|--------|----------|----------------|
-| Anthropic Messages | `provider/anthropic` | `*provider.HTTPClient` (x-api-key) | `Provider` |
+| 适配器             | 包路径                        | 底层传输                                      | Provider 类型名       |
+| ------------------ | ----------------------------- | --------------------------------------------- | --------------------- |
+| Anthropic Messages | `provider/anthropic`          | `*provider.HTTPClient` (x-api-key)            | `Provider`            |
 | OpenAI Completions | `provider/openai/completions` | `*provider.HTTPClient` (Authorization Bearer) | `CompletionsProvider` |
-| OpenAI Responses | `provider/openai/responses` | `*provider.HTTPClient` (Authorization Bearer) | `ResponsesProvider` |
-| Google Gemini | `provider/gemini` | `*provider.HTTPClient` (x-goog-api-key) | `Provider` |
-| bamboo 原生 | `provider/bamboo` | `*provider.HTTPClient` (Authorization Bearer) | `Provider` |
+| OpenAI Responses   | `provider/openai/responses`   | `*provider.HTTPClient` (Authorization Bearer) | `ResponsesProvider`   |
+| Google Gemini      | `provider/gemini`             | `*provider.HTTPClient` (x-goog-api-key)       | `Provider`            |
+| bamboo 原生        | `provider/bamboo`             | `*provider.HTTPClient` (Authorization Bearer) | `Provider`            |
 
 ### bamboo 原生适配器 (`provider/bamboo/`)
 
-| 符号 | 类型 | 文件 | 作用 |
-|------|------|------|------|
-| `Provider` | 结构体 | `provider.go` | 持有 `*provider.HTTPClient` 的 bamboo 原生协议适配器 |
-| `Option` | 函数类型 | `provider.go` | `func(*config)` — Provider 配置选项 |
-| `NewProvider` | 函数 | `provider.go` | 最简构造函数 |
-| `NewProviderWithOptions` | 函数 | `provider.go` | Options 构造函数（APIKey/BaseURL/Headers/Interceptor） |
-| `WithAPIKey` / `WithBaseURL` / `WithHeader` / `WithInterceptor` | 函数 | `provider.go` | 配置选项 |
-| `GetProviderType` | 方法 | `provider.go` | 返回 `provider.ProviderBamboo` |
-| `GetAvailableModels` | 方法 | `models.go` | 返回空列表（开放端点无固定模型白名单） |
-| `CompleteWithSystem` | 方法 | `complete.go` | 带系统提示的非流式对话 |
-| `ChatWithSystem` | 方法 | `chat.go` | 带系统提示的流式对话 |
-| `handleStreamEvent` | 方法 | `stream.go` | SSE 事件分发（message_start/delta/stop/ping/error） |
-| `mapBambooFinishReason` | 函数 | `stream.go` | 7 值停止原因映射（end_turn/max_tokens/tool_use/stop_sequence/pause_turn/refusal/server_tool_use） |
-| `buildMessages` | 函数 | `message.go` | `provider.Message` → `wireMessage` |
-| `buildParams` | 函数 | `params.go` | Chat/Complete 共享参数构建入口 |
-| `buildTools` | 函数 | `params.go` | `provider.Tool` → `wireTool` |
+| 符号                                                            | 类型     | 文件          | 作用                                                                                              |
+| --------------------------------------------------------------- | -------- | ------------- | ------------------------------------------------------------------------------------------------- |
+| `Provider`                                                      | 结构体   | `provider.go` | 持有 `*provider.HTTPClient` 的 bamboo 原生协议适配器                                              |
+| `Option`                                                        | 函数类型 | `provider.go` | `func(*config)` — Provider 配置选项                                                               |
+| `NewProvider`                                                   | 函数     | `provider.go` | 最简构造函数                                                                                      |
+| `NewProviderWithOptions`                                        | 函数     | `provider.go` | Options 构造函数（APIKey/BaseURL/Headers/Interceptor）                                            |
+| `WithAPIKey` / `WithBaseURL` / `WithHeader` / `WithInterceptor` | 函数     | `provider.go` | 配置选项                                                                                          |
+| `GetProviderType`                                               | 方法     | `provider.go` | 返回 `provider.ProviderBamboo`                                                                    |
+| `GetAvailableModels`                                            | 方法     | `models.go`   | 返回空列表（开放端点无固定模型白名单）                                                            |
+| `CompleteWithSystem`                                            | 方法     | `complete.go` | 带系统提示的非流式对话                                                                            |
+| `ChatWithSystem`                                                | 方法     | `chat.go`     | 带系统提示的流式对话                                                                              |
+| `handleStreamEvent`                                             | 方法     | `stream.go`   | SSE 事件分发（message_start/delta/stop/ping/error）                                               |
+| `mapBambooFinishReason`                                         | 函数     | `stream.go`   | 7 值停止原因映射（end_turn/max_tokens/tool_use/stop_sequence/pause_turn/refusal/server_tool_use） |
+| `buildMessages`                                                 | 函数     | `message.go`  | `provider.Message` → `wireMessage`                                                                |
+| `buildParams`                                                   | 函数     | `params.go`   | Chat/Complete 共享参数构建入口                                                                    |
+| `buildTools`                                                    | 函数     | `params.go`   | `provider.Tool` → `wireTool`                                                                      |
 
 ### 公共 SDK 层 (`bamboo/`)
 
-| 符号 | 类型 | 文件 | 作用 |
-|------|------|------|------|
-| `BambooClient` | 接口 | bamboo.go | 公共接口：Chat + Complete |
-| `NewClientWithOptions` | 函数 | bamboo.go | 通过 Functional Options 创建客户端 |
-| `WithProvider` | ClientOption | option.go | 设置底层协议适配器 |
-| `WithDefaultModel` | ClientOption | option.go | 设置默认模型名称 |
-| `BambooMessage` | 结构体 | message.go | 上层消息模型 (Role + ContentBlock 数组 + ReasoningID) |
-| `Response` | 结构体 | response.go | 非流式响应 (Content + StopReason + Usage + ProviderType + RequestID + ResponseID + CreatedAt) |
-| `RequestConfig` | 结构体 | config.go | 请求配置 (Model, Temperature, ThinkingConfig, SystemCacheControl, PromptCacheKey, Metadata, ProviderExtra 等) |
-| `ThinkingConfig` | 类型别名 | config.go | = provider.ThinkingConfig |
-| `PtrFloat64/PtrBool/PtrInt64` | 函数 | config.go | 指针辅助函数 |
-| `ClientOption` | 函数类型 | option.go | 客户端配置选项 func(*clientConfig) |
-| `RequestOption` | 函数类型 | option.go | 请求配置选项 func(*RequestConfig) |
-| `WithToolChoice/WithResponseFormat/WithUserID/WithParallelToolCalls` | 函数 | option.go | 类型化请求配置函数 |
-| `WithSystemCacheControl/WithPromptCacheKey` | 函数 | option.go | Prompt Caching 请求配置函数 |
-| `WithExtra` | 函数 | option.go | 兜底扩展参数传递 |
-| `ContentBlock` | 接口 | content.go | 内容块接口 (`BlockType() ContentBlockType`) |
-| `TextBlock/ThinkingBlock/ToolUseBlock/ToolResultBlock/ImageBlock/DocumentBlock` | 结构体 | content.go | 6 种内容块实现 |
-| `New*Block` / `New*BlockWithCache` | 函数 | content.go | 12 种内容块构造函数（普通 + 带 CacheControl） |
-| `RegisterBlockType` | 函数 | content.go | 注册自定义 ContentBlock 类型用于 JSON 反序列化 |
-| `ContentBlocks` | 类型 | content.go | `[]ContentBlock` 别名，带自定义 UnmarshalJSON |
-| `EventPing` | 常量 | stream.go | `"ping"` — 心跳/Usage relay 事件类型 |
-| `StreamConverter` | 结构体 | convert.go | 将 provider.StreamEvent 序列转换为 Anthropic 风格事件序列 |
-| `NewStreamConverter` | 构造函数 | convert.go | StreamConverter 实例化 |
+| 符号                                                                            | 类型         | 文件        | 作用                                                                                                          |
+| ------------------------------------------------------------------------------- | ------------ | ----------- | ------------------------------------------------------------------------------------------------------------- |
+| `BambooClient`                                                                  | 接口         | bamboo.go   | 公共接口：Chat + Complete                                                                                     |
+| `NewClientWithOptions`                                                          | 函数         | bamboo.go   | 通过 Functional Options 创建客户端                                                                            |
+| `WithProvider`                                                                  | ClientOption | option.go   | 设置底层协议适配器                                                                                            |
+| `WithDefaultModel`                                                              | ClientOption | option.go   | 设置默认模型名称                                                                                              |
+| `BambooMessage`                                                                 | 结构体       | message.go  | 上层消息模型 (Role + ContentBlock 数组 + ReasoningID)                                                         |
+| `Response`                                                                      | 结构体       | response.go | 非流式响应 (Content + StopReason + Usage + ProviderType + RequestID + ResponseID + CreatedAt)                 |
+| `RequestConfig`                                                                 | 结构体       | config.go   | 请求配置 (Model, Temperature, ThinkingConfig, SystemCacheControl, PromptCacheKey, Metadata, ProviderExtra 等) |
+| `ThinkingConfig`                                                                | 类型别名     | config.go   | = provider.ThinkingConfig                                                                                     |
+| `PtrFloat64/PtrBool/PtrInt64`                                                   | 函数         | config.go   | 指针辅助函数                                                                                                  |
+| `ClientOption`                                                                  | 函数类型     | option.go   | 客户端配置选项 func(*clientConfig)                                                                            |
+| `RequestOption`                                                                 | 函数类型     | option.go   | 请求配置选项 func(*RequestConfig)                                                                             |
+| `WithToolChoice/WithResponseFormat/WithUserID/WithParallelToolCalls`            | 函数         | option.go   | 类型化请求配置函数                                                                                            |
+| `WithSystemCacheControl/WithPromptCacheKey`                                     | 函数         | option.go   | Prompt Caching 请求配置函数                                                                                   |
+| `WithExtra`                                                                     | 函数         | option.go   | 兜底扩展参数传递                                                                                              |
+| `ContentBlock`                                                                  | 接口         | content.go  | 内容块接口 (`BlockType() ContentBlockType`)                                                                   |
+| `TextBlock/ThinkingBlock/ToolUseBlock/ToolResultBlock/ImageBlock/DocumentBlock` | 结构体       | content.go  | 6 种内容块实现                                                                                                |
+| `New*Block` / `New*BlockWithCache`                                              | 函数         | content.go  | 12 种内容块构造函数（普通 + 带 CacheControl）                                                                 |
+| `RegisterBlockType`                                                             | 函数         | content.go  | 注册自定义 ContentBlock 类型用于 JSON 反序列化                                                                |
+| `ContentBlocks`                                                                 | 类型         | content.go  | `[]ContentBlock` 别名，带自定义 UnmarshalJSON                                                                 |
+| `EventPing`                                                                     | 常量         | stream.go   | `"ping"` — 心跳/Usage relay 事件类型                                                                          |
+| `StreamConverter`                                                               | 结构体       | convert.go  | 将 provider.StreamEvent 序列转换为 Anthropic 风格事件序列                                                     |
+| `NewStreamConverter`                                                            | 构造函数     | convert.go  | StreamConverter 实例化                                                                                        |
 
 ### 编解码层 (`bamboo/codec/`)
 
-| 符号 | 类型 | 文件 | 作用 |
-|------|------|------|------|
-| `Codec` | 接口 | codec.go | 协议编解码接口 (Format/ParseRequest/SerializeResponse/SerializeError/NewSerializer) |
-| `StreamSerializer` | 接口 | codec.go | 流式序列化器 (Serialize/Flush) |
-| `FormatType` | 类型 | codec.go | 协议格式标识 (openai/anthropic/responses/gemini/bamboo) |
-| `RelayRequest` | 结构体 | types.go | 解析后的统一请求中间表示 (Messages/System/Config/IsStream) |
-| `Get` | 函数 | registry.go | 根据格式标识查找已注册的 Codec |
-| `CodecError` | 结构体 | errors.go | Codec 层统一错误类型 (Type/Message/Cause) |
-| `bambooCodec` | 结构体 | `bamboo/codec/bamboo/codec.go` | bamboo 原生协议 Codec 实现（恒等变换） |
-| `Codec` | 变量 | `bamboo/codec/bamboo/codec.go` | 全局 `bmcodec.Codec` 实例（包内注册到 `bmcodec.Bamboo`） |
-| `parseRequest` | 函数 | `bamboo/codec/bamboo/request.go` | `json.Unmarshal` 原生信封 → `RelayRequest` |
-| `serializeResponse` | 函数 | `bamboo/codec/bamboo/response.go` | `json.Marshal(*bamboo.Response)` 恒等输出 |
-| `serializeError` | 函数 | `bamboo/codec/bamboo/error.go` | 提取 `*bamboo.BambooError` 字段输出原生错误 JSON |
-| `bambooStreamSerializer` | 结构体 | `bamboo/codec/bamboo/stream.go` | 流式 `json.Marshal(StreamEvent)` + Anthropic SSE 帧 |
-| `newStreamSerializer` | 函数 | `bamboo/codec/bamboo/stream.go` | 创建新的流式序列化器 |
+| 符号                     | 类型   | 文件                              | 作用                                                                                |
+| ------------------------ | ------ | --------------------------------- | ----------------------------------------------------------------------------------- |
+| `Codec`                  | 接口   | codec.go                          | 协议编解码接口 (Format/ParseRequest/SerializeResponse/SerializeError/NewSerializer) |
+| `StreamSerializer`       | 接口   | codec.go                          | 流式序列化器 (Serialize/Flush)                                                      |
+| `FormatType`             | 类型   | codec.go                          | 协议格式标识 (openai/anthropic/responses/gemini/bamboo)                             |
+| `RelayRequest`           | 结构体 | types.go                          | 解析后的统一请求中间表示 (Messages/System/Config/IsStream)                          |
+| `Get`                    | 函数   | registry.go                       | 根据格式标识查找已注册的 Codec                                                      |
+| `CodecError`             | 结构体 | errors.go                         | Codec 层统一错误类型 (Type/Message/Cause)                                           |
+| `bambooCodec`            | 结构体 | `bamboo/codec/bamboo/codec.go`    | bamboo 原生协议 Codec 实现（恒等变换）                                              |
+| `Codec`                  | 变量   | `bamboo/codec/bamboo/codec.go`    | 全局 `bmcodec.Codec` 实例（包内注册到 `bmcodec.Bamboo`）                            |
+| `parseRequest`           | 函数   | `bamboo/codec/bamboo/request.go`  | `json.Unmarshal` 原生信封 → `RelayRequest`                                          |
+| `serializeResponse`      | 函数   | `bamboo/codec/bamboo/response.go` | `json.Marshal(*bamboo.Response)` 恒等输出                                           |
+| `serializeError`         | 函数   | `bamboo/codec/bamboo/error.go`    | 提取 `*bamboo.BambooError` 字段输出原生错误 JSON                                    |
+| `bambooStreamSerializer` | 结构体 | `bamboo/codec/bamboo/stream.go`   | 流式 `json.Marshal(StreamEvent)` + Anthropic SSE 帧                                 |
+| `newStreamSerializer`    | 函数   | `bamboo/codec/bamboo/stream.go`   | 创建新的流式序列化器                                                                |
 
 ### 中继层 (`bamboo/relay/`)
 
-| 符号 | 类型 | 文件 | 作用 |
-|------|------|------|------|
-| `Relay` | 函数 | relay.go | 非流式协议互转（含 SerializeError 错误格式化） |
-| `RelayStream` | 函数 | relay.go | 流式协议互转（含速率采样集成） |
-| `Config` | 结构体 | config.go | relay 运行时配置 (OnUsage/OnError/EstimateOnMissingUsage) |
-| `Option` | 函数类型 | config.go | Functional Options 配置 |
-| `WithUsageCallback` | 函数 | config.go | 设置 Token 用量回调 |
-| `WithErrorCallback` | 函数 | config.go | 设置错误回调 |
-| `FormatRelayInput/FormatRelayParsed` | 函数 | debug.go | 返回格式化 debug 字符串（不受开关限制） |
-| `FormatRelayResponse` | 函数 | debug.go | 返回非流式响应的格式化 debug 字符串 |
+| 符号                                 | 类型     | 文件      | 作用                                                      |
+| ------------------------------------ | -------- | --------- | --------------------------------------------------------- |
+| `Relay`                              | 函数     | relay.go  | 非流式协议互转（含 SerializeError 错误格式化）            |
+| `RelayStream`                        | 函数     | relay.go  | 流式协议互转（含速率采样集成）                            |
+| `Config`                             | 结构体   | config.go | relay 运行时配置 (OnUsage/OnError/EstimateOnMissingUsage) |
+| `Option`                             | 函数类型 | config.go | Functional Options 配置                                   |
+| `WithUsageCallback`                  | 函数     | config.go | 设置 Token 用量回调                                       |
+| `WithErrorCallback`                  | 函数     | config.go | 设置错误回调                                              |
+| `FormatRelayInput/FormatRelayParsed` | 函数     | debug.go  | 返回格式化 debug 字符串（不受开关限制）                   |
+| `FormatRelayResponse`                | 函数     | debug.go  | 返回非流式响应的格式化 debug 字符串                       |
 
 ### 内部工具 (`internal/xerr/`)
 
-| 符号 | 类型 | 文件 | 作用 |
-|------|------|------|------|
-| `Error` | 结构体 | error.go | 内部最小错误类型 (err + Message)，替代 bamboo-base-go/common/error |
-| `NewError` | 函数 | error.go | 兼容原 xError.NewError 签名的构造函数 |
+| 符号       | 类型   | 文件     | 作用                                                               |
+| ---------- | ------ | -------- | ------------------------------------------------------------------ |
+| `Error`    | 结构体 | error.go | 内部最小错误类型 (err + Message)，替代 bamboo-base-go/common/error |
+| `NewError` | 函数   | error.go | 兼容原 xError.NewError 签名的构造函数                              |
 
 ### 通用组件工具包 (`pkg/`)
 
-| 符号 | 类型 | 文件 | 作用 |
-|------|------|------|------|
-| `Option` | 函数类型 | option/option.go | 通用配置选项 func(*Config) |
-| `Config` | 结构体 | option/option.go | 通用 Provider 配置 (APIKey/BaseURL/Headers) |
-| `WithAPIKey` | 函数 | option/option.go | 设置 API 密钥 |
-| `WithBaseURL` | 函数 | option/option.go | 设置自定义基础 URL |
-| `WithHeader` | 函数 | option/option.go | 添加自定义 HTTP 请求头 |
-| `ApplyOptions` | 函数 | option/option.go | 将选项列表应用到默认配置 |
-| `Config.GetAPIKey/GetBaseURL/GetHeaders` | 方法 | option/option.go | Config Getter 方法 |
-| `Config.SetAPIKey/SetBaseURL/SetHeader` | 方法 | option/option.go | Config Setter 方法 |
-| `PtrFloat64/PtrBool/PtrInt64/PtrString` | 函数 | helpers/helpers.go | 指针辅助函数 |
-| `GetExtraFloat64/Int64/String/Bool/Any` | 函数 | helpers/helpers.go | ProviderExtra 安全取值 helpers |
-| `BambooError` | 结构体 | errors/errors.go | Bamboo SDK 统一错误类型 (Category + Message + StatusCode) |
-| `NewBambooError` | 函数 | errors/errors.go | 创建 BambooError 实例 `(category, message, statusCode) → *BambooError` |
+| 符号                                     | 类型     | 文件               | 作用                                                                   |
+| ---------------------------------------- | -------- | ------------------ | ---------------------------------------------------------------------- |
+| `Option`                                 | 函数类型 | option/option.go   | 通用配置选项 func(*Config)                                             |
+| `Config`                                 | 结构体   | option/option.go   | 通用 Provider 配置 (APIKey/BaseURL/Headers)                            |
+| `WithAPIKey`                             | 函数     | option/option.go   | 设置 API 密钥                                                          |
+| `WithBaseURL`                            | 函数     | option/option.go   | 设置自定义基础 URL                                                     |
+| `WithHeader`                             | 函数     | option/option.go   | 添加自定义 HTTP 请求头                                                 |
+| `ApplyOptions`                           | 函数     | option/option.go   | 将选项列表应用到默认配置                                               |
+| `Config.GetAPIKey/GetBaseURL/GetHeaders` | 方法     | option/option.go   | Config Getter 方法                                                     |
+| `Config.SetAPIKey/SetBaseURL/SetHeader`  | 方法     | option/option.go   | Config Setter 方法                                                     |
+| `PtrFloat64/PtrBool/PtrInt64/PtrString`  | 函数     | helpers/helpers.go | 指针辅助函数                                                           |
+| `GetExtraFloat64/Int64/String/Bool/Any`  | 函数     | helpers/helpers.go | ProviderExtra 安全取值 helpers                                         |
+| `BambooError`                            | 结构体   | errors/errors.go   | Bamboo SDK 统一错误类型 (Category + Message + StatusCode)              |
+| `NewBambooError`                         | 函数     | errors/errors.go   | 创建 BambooError 实例 `(category, message, statusCode) → *BambooError` |
 
 ## 模块架构
 
@@ -390,41 +390,41 @@ bamboo-messages/
 5. **文件分工固定** — 每个适配器固定文件：`provider.go` / `params.go` / `chat.go` / `complete.go` / `stream.go` / `message.go` / `models.go` / `option.go` / `tools.go` / `types.go` / `provider_test.go`
 6. **本地 DTO 与统一 HTTP 传输** — 每个适配器通过 `types.go` 定义协议原生的请求/响应 DTO，通过 `*provider.HTTPClient` 发起请求，流式响应统一使用 `provider.SSEScanner` 解析
 7. **中文注释** — 所有文档注释使用中文，遵循 Go doc 规范
-7. **错误透传** — 使用 `internal/xerr.Error` 类型（替代原 bamboo-base-go 的 xError.Error），`StreamEvent.Err` 字段为 `*xerr.Error`，保留完整上下文
-8. **统一 HTTP 基座** — 所有适配器统一持有 `*provider.HTTPClient` 字段，通过 `provider.NewHTTPClient` 创建，认证头、User-Agent、自定义头、请求拦截器均由其统一处理
-9. **参数透传三层方案** — Layer 1: `ChatConfig` 类型化字段 (UserID/ToolChoice/ResponseFormat/ParallelToolCalls/TopP/Stop/SystemCacheControl/PromptCacheKey/Metadata)；Layer 2: Provider 包独立的 Options 体系 + 公共 `provider.Options` (拦截器)；Layer 3: `WithExtra()` 兜底传递任意 key-value
-10. **BlockStart 事件** — 所有适配器在首个文本增量前必须发出 BlockStart delta；Anthropic 原生支持，OpenAI/Gemini 适配器通过 textBlockStarted/thinkingBlockStarted 参数合成
-11. **ProviderExtra 取值** — 适配器中使用 GetExtra* 类型安全 helper，不做裸类型断言
-12. **统一 UserAgent** — 所有适配器通过 `provider.HTTPClient` 自动注入统一 UserAgent，格式为 `BM-SDK/{version}`
-13. **Reasoning 内容独立追踪** — OpenAI/Gemini 适配器使用 `textBlockStarted` 和 `thinkingBlockStarted` 两个独立布尔标志追踪不同内容块状态
-14. **StreamConverter 防御性自动补发** — 若 Provider 未发送 BlockStart，在首个文本/推理增量时自动合成对应类型的 BlockStart
-15. **Legacy 兼容模式** — OpenAI Completions 适配器通过 `legacyCompat` 标志支持旧版端点兼容（max_tokens 旧字段名、条件性 ParallelToolCalls、跳过 ReasoningEffort 映射）
-16. **Codec 无状态** — `Codec` 接口无状态可并发使用，有状态操作通过 `NewSerializer()` 创建独立 `StreamSerializer`
-17. **Debug 环境变量唯一入口** — 仅通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；`provider.DebugEnabled` 为全局开关变量；`SetDebug()` 函数和 `WithDebug()` Option 已移除；relay 层 debug 函数直接检查 `provider.DebugEnabled`
-18. **Debug 脱敏与截断** — 敏感 header（Authorization/X-API-Key/API-Key/X-Goog-API-Key）自动脱敏（保留前 4 后 4）；长文本字段（content/text/system/thinking/reasoning_content/arguments）超过 500 字符自动截断
-19. **Prompt Caching 三层方案** — Layer 1: Anthropic 显式 CacheControl 断点（system/messages/tools）；Layer 2: OpenAI PromptCacheKey 路由粘性键；Layer 3: Gemini 通过 ProviderExtra 的 `cached_content` 引用外部资源
-20. **Usage 缓存统计透传** — `UsageData` / `Usage` 结构体包含 `CacheCreationInputTokens` / `CacheReadInputTokens`，从 Provider → convert → codec 完整透传
-21. **Thinking 内容全链路保留** — `BambooMessage.ThinkingBlock` → `provider.Message.ThinkingContent/ThinkingSignature/ReasoningID` → 适配器 → `provider.CompletionResult.Thinking/ThinkingSignature/ResponseID` → `bamboo.Response.ThinkingBlock` 双向透传
-22. **FinishReason 流式透传** — `provider.StreamEvent.FinishReason` 由适配器填充，`StreamConverter.handleStop` 使用实际完成原因，不再硬编码 `FinishReasonEndTurn`
-23. **ToolName/ToolCallID 分离** — `ToolResultBlock` 和 `provider.Message` 同时保存 `ToolName`（函数名）和 `ToolCallID`（调用 ID），Gemini `FunctionResponse` 需要两者同时存在
-24. **StreamConverter 类型安全** — `handleDelta` 中对 `delta.Data` 的断言使用 `ok` 模式，避免自定义 Provider 触发 panic
-25. **未知角色降级** — `messagesToProvider` 对 `system` 角色显式 warning 并降级为 `RoleUser`
-26. **流式纯透传** — relay 层 `RelayStream` 直接将上游 provider 产生的 SSE 帧经 codec 序列化后写入输出 channel，无中间缓冲、无调速、无 token 切分
-27. **请求拦截器链** — `RequestInterceptor` 在 HTTP Transport 层对已序列化的请求 body 进行任意修改；nil 拦截器防御性跳过；空切片零开销原样返回
-28. **拦截器 Transport 零包装** — `NewInterceptorHTTPClient` 无拦截器时返回 nil，Provider 保留标准库默认 client
-29. **公共 Options 嵌入模式** — `provider.Options` 通过匿名嵌入为各 Provider 提供统一的拦截器注册能力
-30. **TimingCollector 零侵入** — 用户代码主动创建并调用 `Observe(event)`；非并发安全，单 goroutine 使用
-30a. **物理时间锚点** — 适配器在 HTTP 请求发出前打点 `RequestSentAt`、响应头到达后打点 `ResponseHeaderAt`，随首个 `StreamTypeStart` 事件的 `Timing *TimingAnchor` 携带；每个事件在 SSE 帧解析时打点 `ReceivedAt`；TimingCollector 优先消费事件自带物理时间戳（零值回退本地时刻），TTFT/TotalDuration 锚定到请求发出时刻，恒满足 TTFT ≤ TotalDuration；新字段均 `json:"-"` 不参与线上序列化
-30b. **TPS 不可靠阈值 100ms** — 阶段耗时低于 `minReliableDuration`(100ms) 时速率为负值不可靠标记（缓冲代理倒灌防护），绝对值以阈值为分母的参考估算
-31. **Token 估算规则标准化** — TimingCollector: CJK 1:1, Latin 4:1, Other 2:1
-32. **优先级 FinishReason** — `recordFinishReason` 优先级策略：tool_use(2) > max_tokens(1) > end_turn(0)
-33. **Error 自动 flush** — `handleError` 在流式错误时自动补发 stop 事件（Vercel AI SDK flush 模式）
-34. **跨类型 Block 自动切换** — `stopForNewBlock` 在 text→thinking / thinking→text 过渡时自动关闭前一个 block
-35. **Block 类型注册表** — `RegisterBlockType` + `ContentBlocks.UnmarshalJSON` 实现 JSON 多态反序列化
-36. **Chat 首事件 peek 模式** — `Chat` 同步 peek 首个 provider 事件，若为 Error 立即返回 `(nil, error)`
-37. **Relay 失败返回协议格式错误** — `Relay` 在 provider 失败时调用 `outCodec.SerializeError(err)` 返回协议格式化错误
-38. **Adapter 本地 DTO 不暴露外部类型** — 适配器内部使用本地 `types.go` 定义的请求/响应结构，禁止在公共 API 或返回类型中暴露任何外部 SDK 类型
-39. **错误透传简化** — `BambooError` 简化为 `Category + Message + StatusCode` 三字段（移除 `Type`/`Code`/`ProviderType`）；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError` 直接透传，避免重复包装；非 BambooError 降级为 `NewBambooError("SDK", err.Error(), 0)`
+8. **错误透传** — 使用 `internal/xerr.Error` 类型（替代原 bamboo-base-go 的 xError.Error），`StreamEvent.Err` 字段为 `*xerr.Error`，保留完整上下文
+9. **统一 HTTP 基座** — 所有适配器统一持有 `*provider.HTTPClient` 字段，通过 `provider.NewHTTPClient` 创建，认证头、User-Agent、自定义头、请求拦截器均由其统一处理
+10. **参数透传三层方案** — Layer 1: `ChatConfig` 类型化字段 (UserID/ToolChoice/ResponseFormat/ParallelToolCalls/TopP/Stop/SystemCacheControl/PromptCacheKey/Metadata)；Layer 2: Provider 包独立的 Options 体系 + 公共 `provider.Options` (拦截器)；Layer 3: `WithExtra()` 兜底传递任意 key-value
+11. **BlockStart 事件** — 所有适配器在首个文本增量前必须发出 BlockStart delta；Anthropic 原生支持，OpenAI/Gemini 适配器通过 textBlockStarted/thinkingBlockStarted 参数合成
+12. **ProviderExtra 取值** — 适配器中使用 GetExtra* 类型安全 helper，不做裸类型断言
+13. **统一 UserAgent** — 所有适配器通过 `provider.HTTPClient` 自动注入统一 UserAgent，格式为 `BM-SDK/{version}`
+14. **Reasoning 内容独立追踪** — OpenAI/Gemini 适配器使用 `textBlockStarted` 和 `thinkingBlockStarted` 两个独立布尔标志追踪不同内容块状态
+15. **StreamConverter 防御性自动补发** — 若 Provider 未发送 BlockStart，在首个文本/推理增量时自动合成对应类型的 BlockStart
+16. **Legacy 兼容模式** — OpenAI Completions 适配器通过 `legacyCompat` 标志支持旧版端点兼容（max_tokens 旧字段名、条件性 ParallelToolCalls、跳过 ReasoningEffort 映射）
+17. **Codec 无状态** — `Codec` 接口无状态可并发使用，有状态操作通过 `NewSerializer()` 创建独立 `StreamSerializer`
+18. **Debug 环境变量唯一入口** — 仅通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；`provider.DebugEnabled` 为全局开关变量；`SetDebug()` 函数和 `WithDebug()` Option 已移除；relay 层 debug 函数直接检查 `provider.DebugEnabled`
+19. **Debug 脱敏与截断** — 敏感 header（Authorization/X-API-Key/API-Key/X-Goog-API-Key）自动脱敏（保留前 4 后 4）；长文本字段（content/text/system/thinking/reasoning_content/arguments）超过 500 字符自动截断
+20. **Prompt Caching 三层方案** — Layer 1: Anthropic 显式 CacheControl 断点（system/messages/tools）；Layer 2: OpenAI PromptCacheKey 路由粘性键；Layer 3: Gemini 通过 ProviderExtra 的 `cached_content` 引用外部资源
+21. **Usage 缓存统计透传** — `UsageData` / `Usage` 结构体包含 `CacheCreationInputTokens` / `CacheReadInputTokens`，从 Provider → convert → codec 完整透传
+22. **Thinking 内容全链路保留** — `BambooMessage.ThinkingBlock` → `provider.Message.ThinkingContent/ThinkingSignature/ReasoningID` → 适配器 → `provider.CompletionResult.Thinking/ThinkingSignature/ResponseID` → `bamboo.Response.ThinkingBlock` 双向透传
+23. **FinishReason 流式透传** — `provider.StreamEvent.FinishReason` 由适配器填充，`StreamConverter.handleStop` 使用实际完成原因，不再硬编码 `FinishReasonEndTurn`
+24. **ToolName/ToolCallID 分离** — `ToolResultBlock` 和 `provider.Message` 同时保存 `ToolName`（函数名）和 `ToolCallID`（调用 ID），Gemini `FunctionResponse` 需要两者同时存在
+25. **StreamConverter 类型安全** — `handleDelta` 中对 `delta.Data` 的断言使用 `ok` 模式，避免自定义 Provider 触发 panic
+26. **未知角色降级** — `messagesToProvider` 对 `system` 角色显式 warning 并降级为 `RoleUser`
+27. **流式纯透传** — relay 层 `RelayStream` 直接将上游 provider 产生的 SSE 帧经 codec 序列化后写入输出 channel，无中间缓冲、无调速、无 token 切分
+28. **请求拦截器链** — `RequestInterceptor` 在 HTTP Transport 层对已序列化的请求 body 进行任意修改；nil 拦截器防御性跳过；空切片零开销原样返回
+29. **拦截器 Transport 零包装** — `NewInterceptorHTTPClient` 无拦截器时返回 nil，Provider 保留标准库默认 client
+30. **公共 Options 嵌入模式** — `provider.Options` 通过匿名嵌入为各 Provider 提供统一的拦截器注册能力
+31. **TimingCollector 零侵入** — 用户代码主动创建并调用 `Observe(event)`；非并发安全，单 goroutine 使用
+    30a. **物理时间锚点** — 适配器在 HTTP 请求发出前打点 `RequestSentAt`、响应头到达后打点 `ResponseHeaderAt`，随首个 `StreamTypeStart` 事件的 `Timing *TimingAnchor` 携带；每个事件在 SSE 帧解析时打点 `ReceivedAt`；TimingCollector 优先消费事件自带物理时间戳（零值回退本地时刻），TTFT/TotalDuration 锚定到请求发出时刻，恒满足 TTFT ≤ TotalDuration；新字段均 `json:"-"` 不参与线上序列化
+    30b. **TPS 不可靠阈值 100ms** — 阶段耗时低于 `minReliableDuration`(100ms) 时速率为负值不可靠标记（缓冲代理倒灌防护），绝对值以阈值为分母的参考估算
+32. **Token 估算规则标准化** — TimingCollector: CJK 1:1, Latin 4:1, Other 2:1
+33. **优先级 FinishReason** — `recordFinishReason` 优先级策略：tool_use(2) > max_tokens(1) > end_turn(0)
+34. **Error 自动 flush** — `handleError` 在流式错误时自动补发 stop 事件（Vercel AI SDK flush 模式）
+35. **跨类型 Block 自动切换** — `stopForNewBlock` 在 text→thinking / thinking→text 过渡时自动关闭前一个 block
+36. **Block 类型注册表** — `RegisterBlockType` + `ContentBlocks.UnmarshalJSON` 实现 JSON 多态反序列化
+37. **Chat 首事件 peek 模式** — `Chat` 同步 peek 首个 provider 事件，若为 Error 立即返回 `(nil, error)`
+38. **Relay 失败返回协议格式错误** — `Relay` 在 provider 失败时调用 `outCodec.SerializeError(err)` 返回协议格式化错误
+39. **Adapter 本地 DTO 不暴露外部类型** — 适配器内部使用本地 `types.go` 定义的请求/响应结构，禁止在公共 API 或返回类型中暴露任何外部 SDK 类型
+40. **错误透传简化** — `BambooError` 简化为 `Category + Message + StatusCode` 三字段（移除 `Type`/`Code`/`ProviderType`）；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError` 直接透传，避免重复包装；非 BambooError 降级为 `NewBambooError("SDK", err.Error(), 0)`
 41. **bamboo 原生格式 = 恒等变换 codec + 镜像 DTO provider** — `bamboo/codec/bamboo` 直接复用 `bamboo.BambooMessage` / `RequestConfig` / `Response` 做 identity transform；`provider/bamboo` 使用本地 wire DTO 镜像 facade JSON 形状，不 import 上层 facade 包，避免循环依赖
 
 ## 反模式
@@ -445,6 +445,7 @@ bamboo-messages/
 ## 调试路径
 
 全局问题排查顺序：
+
 1. **请求/响应协议格式错误** → 优先检查 `bamboo/codec/` 对应子包的请求解析与响应序列化逻辑；启用 `BAMBOO_DEBUG=1` 观察原始请求体与解析后的 `RelayRequest`。
 2. **Provider 适配异常** → 检查 `provider/` 下对应适配器的 `buildParams`（Gemini 为 `buildContentConfig`）与 `chat.go` / `complete.go`；确认端点 BaseURL 是否满足协议要求（如 OpenAI 必须带 `/v1`，Anthropic 不带 `/v1`）。
 3. **流式截断或乱序** → 检查 `provider/sse_scanner.go` 帧解析器容错逻辑；检查适配器 `stream.go` 的 BlockStart 合成状态追踪与 FinishReason 传递。

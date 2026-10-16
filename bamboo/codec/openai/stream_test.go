@@ -16,7 +16,7 @@ func parseSSEChunk(t *testing.T, raw []byte) openaiChunk {
 		t.Fatalf("expected SSE data prefix, got: %q", str)
 	}
 	str = strings.TrimPrefix(str, "data: ")
-	str = strings.TrimRight(str, "\n\n")
+	str = strings.TrimSuffix(str, "\n\n")
 
 	var chunk openaiChunk
 	if err := json.Unmarshal([]byte(str), &chunk); err != nil {
@@ -123,7 +123,7 @@ func TestStreamSerializer_ThinkingStream(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -147,7 +147,7 @@ func TestStreamSerializer_ToolCallStream(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -218,7 +218,7 @@ func TestStreamSerializer_UsageDeltaNoFinishReason(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -316,13 +316,13 @@ func TestStreamSerializer_MultipleToolCalls(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
 
 	// 第一个 tool_use
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        0,
 		ContentBlock: bamboo.NewToolUseBlock("call_1", "tool_a", nil),
@@ -368,7 +368,7 @@ func TestStreamSerializer_ToolCallIndexConsistency_NoPrecedingText(t *testing.T)
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -580,23 +580,23 @@ func TestStreamSerializer_ToolCallIndexConsistency_WithPrecedingText(t *testing.
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
 
 	// text block (Index=0)
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        0,
 		ContentBlock: bamboo.NewTextBlock(""),
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockDelta,
 		Index: 0,
 		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaTextDelta, Text: "Let me check."},
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockStop,
 		Index: 0,
 	})
@@ -604,7 +604,7 @@ func TestStreamSerializer_ToolCallIndexConsistency_WithPrecedingText(t *testing.
 	// 模拟 StreamConverter 在 ToolCall 事件中的行为：
 	// stopIdx = sc.blockIndex = 0, sc.blockIndex++ → 1
 	// content_block_stop Index=0
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockStop,
 		Index: 0,
 	})
@@ -645,23 +645,23 @@ func TestParallelToolCalls_IsolatedIndices(t *testing.T) {
 	s := newStreamSerializer("gpt-4o")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
 
 	// 三个并行工具调用的 start，块索引分别为 1, 2, 3
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        1,
 		ContentBlock: bamboo.NewToolUseBlock("call_1", "tool_one", nil),
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        2,
 		ContentBlock: bamboo.NewToolUseBlock("call_2", "tool_two", nil),
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        3,
 		ContentBlock: bamboo.NewToolUseBlock("call_3", "tool_three", nil),

@@ -21,7 +21,8 @@ func TestThinkTagStripper_NoThinkTags(t *testing.T) {
 	if events[0].Delta.Type != provider.StreamDeltaTypeTextOutput {
 		t.Fatalf("expected text_output, got %s", events[0].Delta.Type)
 	}
-	if string(events[0].Delta.Data.(provider.TextData)) != "Hello world" {
+	data, ok := events[0].Delta.Data.(provider.TextData)
+	if !ok || string(data) != "Hello world" {
 		t.Fatalf("expected 'Hello world', got %q", events[0].Delta.Data)
 	}
 }
@@ -39,9 +40,13 @@ func TestThinkTagStripper_InlineThinkTag(t *testing.T) {
 	for _, e := range events {
 		switch e.Delta.Type {
 		case provider.StreamDeltaTypeThinking:
-			thinkingParts = append(thinkingParts, string(e.Delta.Data.(provider.ThinkingData)))
+			if td, ok := e.Delta.Data.(provider.ThinkingData); ok {
+				thinkingParts = append(thinkingParts, string(td))
+			}
 		case provider.StreamDeltaTypeTextOutput:
-			textParts = append(textParts, string(e.Delta.Data.(provider.TextData)))
+			if td, ok := e.Delta.Data.(provider.TextData); ok {
+				textParts = append(textParts, string(td))
+			}
 		}
 	}
 	if join(thinkingParts) != "reasoning" {
@@ -99,7 +104,9 @@ func TestThinkTagStripper_OnlyThinkContent(t *testing.T) {
 	var thinkingParts []string
 	for _, e := range events {
 		if e.Delta.Type == provider.StreamDeltaTypeThinking {
-			thinkingParts = append(thinkingParts, string(e.Delta.Data.(provider.ThinkingData)))
+			if td, ok := e.Delta.Data.(provider.ThinkingData); ok {
+				thinkingParts = append(thinkingParts, string(td))
+			}
 		}
 	}
 	if join(thinkingParts) != "deep thought" {
@@ -129,7 +136,9 @@ func TestThinkTagStripper_LegitLessThan(t *testing.T) {
 	var textParts []string
 	for _, e := range events {
 		if e.Delta.Type == provider.StreamDeltaTypeTextOutput {
-			textParts = append(textParts, string(e.Delta.Data.(provider.TextData)))
+			if td, ok := e.Delta.Data.(provider.TextData); ok {
+				textParts = append(textParts, string(td))
+			}
 		}
 	}
 	result := join(textParts)
@@ -146,9 +155,13 @@ func TestThinkTagStripper_MultipleThinkBlocks(t *testing.T) {
 	for _, e := range events {
 		switch e.Delta.Type {
 		case provider.StreamDeltaTypeThinking:
-			thinkingParts = append(thinkingParts, string(e.Delta.Data.(provider.ThinkingData)))
+			if td, ok := e.Delta.Data.(provider.ThinkingData); ok {
+				thinkingParts = append(thinkingParts, string(td))
+			}
 		case provider.StreamDeltaTypeTextOutput:
-			textParts = append(textParts, string(e.Delta.Data.(provider.TextData)))
+			if td, ok := e.Delta.Data.(provider.TextData); ok {
+				textParts = append(textParts, string(td))
+			}
 		}
 	}
 	if join(thinkingParts) != "firstsecond" {
@@ -307,9 +320,13 @@ func TestCompletionsProvider_handleChoice_StripThinkTags(t *testing.T) {
 		for _, e := range evts {
 			switch e.Delta.Type {
 			case provider.StreamDeltaTypeThinking:
-				thinking = append(thinking, string(e.Delta.Data.(provider.ThinkingData)))
+				if td, ok := e.Delta.Data.(provider.ThinkingData); ok {
+					thinking = append(thinking, string(td))
+				}
 			case provider.StreamDeltaTypeTextOutput:
-				text = append(text, string(e.Delta.Data.(provider.TextData)))
+				if td, ok := e.Delta.Data.(provider.TextData); ok {
+					text = append(text, string(td))
+				}
 			}
 		}
 	}
@@ -367,7 +384,9 @@ func TestCompletionsProvider_handleChoice_StripStrayCloseTag(t *testing.T) {
 	var text []string
 	for _, e := range events {
 		if e.Delta.Type == provider.StreamDeltaTypeTextOutput {
-			text = append(text, string(e.Delta.Data.(provider.TextData)))
+			if td, ok := e.Delta.Data.(provider.TextData); ok {
+				text = append(text, string(td))
+			}
 		}
 		if e.Delta.Type == provider.StreamDeltaTypeThinking {
 			t.Fatalf("unexpected thinking event: %q", e.Delta.Data)
@@ -385,7 +404,9 @@ func assertTextEvents(t *testing.T, events []provider.StreamEvent, expected stri
 	var parts []string
 	for _, e := range events {
 		if e.Delta.Type == provider.StreamDeltaTypeTextOutput {
-			parts = append(parts, string(e.Delta.Data.(provider.TextData)))
+			if td, ok := e.Delta.Data.(provider.TextData); ok {
+				parts = append(parts, string(td))
+			}
 		}
 	}
 	if join(parts) != expected {
@@ -398,7 +419,9 @@ func assertThinkingEvents(t *testing.T, events []provider.StreamEvent, expected 
 	var parts []string
 	for _, e := range events {
 		if e.Delta.Type == provider.StreamDeltaTypeThinking {
-			parts = append(parts, string(e.Delta.Data.(provider.ThinkingData)))
+			if td, ok := e.Delta.Data.(provider.ThinkingData); ok {
+				parts = append(parts, string(td))
+			}
 		}
 	}
 	if join(parts) != expected {

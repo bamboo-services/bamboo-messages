@@ -33,40 +33,40 @@ provider/openai/completions/
 
 ## 导航指南
 
-| 任务 | 位置 | 说明 |
-|------|------|------|
-| 创建 Provider 实例 | `provider.go` | `NewCompletionsProvider(apiKey)` 或 `NewCompletionsProviderWithOptions(opts...)` |
-| 注册请求拦截器 | `provider.go` | `WithInterceptor(fn)` — 在 HTTP Transport 层改写已序列化的请求 body |
-| 修改参数构建逻辑 | `params.go` | `buildParams` — Chat/Complete 共享入口，含 Legacy 分支 |
-| 修改流式请求流程 | `chat.go` | 调用 `buildParams` 后发起流式请求 |
-| 修改非流式请求流程 | `complete.go` | 调用 `buildParams` 后发起同步请求 |
-| 修改 SSE 事件解析 | `stream.go` | 处理 `ChatCompletionChunk` 和 `handleChoice` |
-| 修改消息格式映射 | `message.go` | `buildMessages` / `buildAssistantMessage` 函数 |
-| 添加支持的模型 | `models.go` | 使用 `openai.ChatModel*` 常量 |
-| 修改工具定义转换 | `tools.go` | `buildTools` 和 `buildStop` 函数 |
-| 配置特有参数 | `option.go` | `WithFrequencyPenalty` / `WithPresencePenalty` / `WithSeed` / `WithPrediction` |
+| 任务                | 位置                           | 说明                                                                                                |
+| ------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------- |
+| 创建 Provider 实例  | `provider.go`                  | `NewCompletionsProvider(apiKey)` 或 `NewCompletionsProviderWithOptions(opts...)`                    |
+| 注册请求拦截器      | `provider.go`                  | `WithInterceptor(fn)` — 在 HTTP Transport 层改写已序列化的请求 body                                 |
+| 修改参数构建逻辑    | `params.go`                    | `buildParams` — Chat/Complete 共享入口，含 Legacy 分支                                              |
+| 修改流式请求流程    | `chat.go`                      | 调用 `buildParams` 后发起流式请求                                                                   |
+| 修改非流式请求流程  | `complete.go`                  | 调用 `buildParams` 后发起同步请求                                                                   |
+| 修改 SSE 事件解析   | `stream.go`                    | 处理 `ChatCompletionChunk` 和 `handleChoice`                                                        |
+| 修改消息格式映射    | `message.go`                   | `buildMessages` / `buildAssistantMessage` 函数                                                      |
+| 添加支持的模型      | `models.go`                    | 使用 `openai.ChatModel*` 常量                                                                       |
+| 修改工具定义转换    | `tools.go`                     | `buildTools` 和 `buildStop` 函数                                                                    |
+| 配置特有参数        | `option.go`                    | `WithFrequencyPenalty` / `WithPresencePenalty` / `WithSeed` / `WithPrediction`                      |
 | 剥离内联 think 标签 | `think_tag.go` + `provider.go` | `WithStripThinkTags()` 启用；`thinkTagStripper` 流式状态机 + `stripThinkTagsFromContent` 非流式剥离 |
-| 测试 Legacy 兼容 | `legacy_compat_test.go` | max_tokens / parallel_tool_calls / reasoning_effort 差异测试 |
-| 启用 debug 日志 | `provider.go` | 环境变量 `BAMBOO_DEBUG=1/true/on` |
+| 测试 Legacy 兼容    | `legacy_compat_test.go`        | max_tokens / parallel_tool_calls / reasoning_effort 差异测试                                        |
+| 启用 debug 日志     | `provider.go`                  | 环境变量 `BAMBOO_DEBUG=1/true/on`                                                                   |
 
 ## 代码地图
 
-| 符号 | 类型 | 位置 | 作用 |
-|------|------|------|------|
-| `CompletionsProvider` | 结构体 | provider.go | 持有 `*provider.HTTPClient` + `legacyCompat bool` + `streamDrainTimeout time.Duration` |
-| `Option` | 函数类型 | provider.go | `func(*config)` — Provider 配置选项 |
-| `OpenaiCompletionsOption` | 函数类型 | option.go | `func(*completionsRequestConfig)` — 请求级配置选项 |
-| `WithInterceptor` | 函数 | provider.go | 注册请求拦截器（转发到 `provider.WithInterceptor`） |
-| `WithLegacyCompat` | 函数 | provider.go | Option: 启用 Legacy 兼容模式 |
-| `WithFrequencyPenalty` / `WithPresencePenalty` / `WithSeed` / `WithPrediction` | 函数 | option.go | OpenaiCompletionsOption 请求级参数 |
-| `buildParams` | 方法 | params.go | Chat/Complete 共享参数构建（含 Prediction JSON 回退） |
-| `buildAssistantMessage` | 方法 | message.go | provider.Message → OpenAI Assistant 消息（空 tool_calls 防御） |
-| `handleChoice` | 方法 | stream.go | 处理单个 choice 的 delta + FinishReason |
-| `syncBlockState` | 函数 | stream.go | 剥离器事件序列与 BlockStart 状态同步（注入 BlockStart(text)、同步 thinkingBlockStarted） |
-| `thinkTagStripper` | 结构体 | think_tag.go | 内联 think 标签流式剥离状态机（`process`/`flush`，跨 chunk 缓冲 + KMP 回退再候选 + 孤立闭标签吞除） |
-| `stripThinkTagsFromContent` | 函数 | think_tag.go | 非流式完整 content 的配对标签剥离，推理内容合并到 Thinking |
-| `WithStripThinkTags` | 函数 | provider.go | Option: 启用内联 think 标签剥离（默认关闭） |
-| `mapFinishReason` | 函数 | stream.go | OpenAI finish_reason → provider.FinishReason 映射 |
+| 符号                                                                           | 类型     | 位置         | 作用                                                                                                |
+| ------------------------------------------------------------------------------ | -------- | ------------ | --------------------------------------------------------------------------------------------------- |
+| `CompletionsProvider`                                                          | 结构体   | provider.go  | 持有 `*provider.HTTPClient` + `legacyCompat bool` + `streamDrainTimeout time.Duration`              |
+| `Option`                                                                       | 函数类型 | provider.go  | `func(*config)` — Provider 配置选项                                                                 |
+| `OpenaiCompletionsOption`                                                      | 函数类型 | option.go    | `func(*completionsRequestConfig)` — 请求级配置选项                                                  |
+| `WithInterceptor`                                                              | 函数     | provider.go  | 注册请求拦截器（转发到 `provider.WithInterceptor`）                                                 |
+| `WithLegacyCompat`                                                             | 函数     | provider.go  | Option: 启用 Legacy 兼容模式                                                                        |
+| `WithFrequencyPenalty` / `WithPresencePenalty` / `WithSeed` / `WithPrediction` | 函数     | option.go    | OpenaiCompletionsOption 请求级参数                                                                  |
+| `buildParams`                                                                  | 方法     | params.go    | Chat/Complete 共享参数构建（含 Prediction JSON 回退）                                               |
+| `buildAssistantMessage`                                                        | 方法     | message.go   | provider.Message → OpenAI Assistant 消息（空 tool_calls 防御）                                      |
+| `handleChoice`                                                                 | 方法     | stream.go    | 处理单个 choice 的 delta + FinishReason                                                             |
+| `syncBlockState`                                                               | 函数     | stream.go    | 剥离器事件序列与 BlockStart 状态同步（注入 BlockStart(text)、同步 thinkingBlockStarted）            |
+| `thinkTagStripper`                                                             | 结构体   | think_tag.go | 内联 think 标签流式剥离状态机（`process`/`flush`，跨 chunk 缓冲 + KMP 回退再候选 + 孤立闭标签吞除） |
+| `stripThinkTagsFromContent`                                                    | 函数     | think_tag.go | 非流式完整 content 的配对标签剥离，推理内容合并到 Thinking                                          |
+| `WithStripThinkTags`                                                           | 函数     | provider.go  | Option: 启用内联 think 标签剥离（默认关闭）                                                         |
+| `mapFinishReason`                                                              | 函数     | stream.go    | OpenAI finish_reason → provider.FinishReason 映射                                                   |
 
 ## 约定
 
@@ -123,16 +123,16 @@ BaseURL **必须包含 `/v1` 版本路径**（或 `/v4`、`/v3` 等其他版本�
 
 ### 正确示例
 
-| 端点 | BaseURL | 实际请求路径 |
-|------|---------|-----------------|
-| OpenAI 官方 | `https://api.openai.com/v1` | `https://api.openai.com/v1/chat/completions` |
-| 智谱 GLM Coding | `https://open.bigmodel.cn/api/coding/paas/v4` | `.../paas/v4/chat/completions` |
-| Kimi Coding | `https://api.kimi.com/coding/v1` | `.../coding/v1/chat/completions` |
-| 豆包 Coding | `https://ark.cn-beijing.volces.com/api/coding/v3` | `.../coding/v3/chat/completions` |
+| 端点            | BaseURL                                           | 实际请求路径                                 |
+| --------------- | ------------------------------------------------- | -------------------------------------------- |
+| OpenAI 官方     | `https://api.openai.com/v1`                       | `https://api.openai.com/v1/chat/completions` |
+| 智谱 GLM Coding | `https://open.bigmodel.cn/api/coding/paas/v4`     | `.../paas/v4/chat/completions`               |
+| Kimi Coding     | `https://api.kimi.com/coding/v1`                  | `.../coding/v1/chat/completions`             |
+| 豆包 Coding     | `https://ark.cn-beijing.volces.com/api/coding/v3` | `.../coding/v3/chat/completions`             |
 
 ### ⚠️ 常见错误
 
-```
+```text
 ❌ https://ai.akass.cn         → HTTPClient 请求 https://ai.akass.cn/chat/completions（缺少 /v1）
 ✅ https://ai.akass.cn/v1      → HTTPClient 请求 https://ai.akass.cn/v1/chat/completions
 ```

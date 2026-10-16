@@ -234,8 +234,8 @@ func (m *mockRichProvider) Chat(_ context.Context, _ []provider.Message, _ *prov
 	return ch
 }
 
-func (m *mockRichProvider) ChatWithSystem(_ context.Context, _ string, _ []provider.Message, _ *provider.ChatConfig) <-chan provider.StreamEvent {
-	return m.Chat(nil, nil, nil)
+func (m *mockRichProvider) ChatWithSystem(ctx context.Context, _ string, _ []provider.Message, _ *provider.ChatConfig) <-chan provider.StreamEvent {
+	return m.Chat(ctx, nil, nil)
 }
 
 func (m *mockRichProvider) Complete(_ context.Context, _ []provider.Message, _ *provider.ChatConfig) (*provider.CompletionResult, error) {
@@ -246,8 +246,8 @@ func (m *mockRichProvider) Complete(_ context.Context, _ []provider.Message, _ *
 	}, nil
 }
 
-func (m *mockRichProvider) CompleteWithSystem(_ context.Context, _ string, _ []provider.Message, _ *provider.ChatConfig) (*provider.CompletionResult, error) {
-	return m.Complete(nil, nil, nil)
+func (m *mockRichProvider) CompleteWithSystem(ctx context.Context, _ string, _ []provider.Message, _ *provider.ChatConfig) (*provider.CompletionResult, error) {
+	return m.Complete(ctx, nil, nil)
 }
 
 func (m *mockRichProvider) GetProviderType() provider.ProviderType {

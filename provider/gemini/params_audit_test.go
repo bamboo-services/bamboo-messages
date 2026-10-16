@@ -286,8 +286,14 @@ func TestBuildToolConfig_ForcedAndAllowedFunctionNames(t *testing.T) {
 				"allowed_function_names": []string{"read_file", "list_dir"},
 			},
 		}, false)
-		tc := body["toolConfig"].(map[string]any)
-		fcc := tc["functionCallingConfig"].(map[string]any)
+		tc, ok := body["toolConfig"].(map[string]any)
+		if !ok {
+			t.Fatalf("toolConfig is not map[string]any: %v", body["toolConfig"])
+		}
+		fcc, ok := tc["functionCallingConfig"].(map[string]any)
+		if !ok {
+			t.Fatalf("functionCallingConfig is not map[string]any: %v", tc["functionCallingConfig"])
+		}
 		if fcc["mode"] != "VALIDATED" {
 			t.Errorf("mode = %v, want VALIDATED", fcc["mode"])
 		}

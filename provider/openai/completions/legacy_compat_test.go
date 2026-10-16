@@ -30,7 +30,7 @@ func TestBuildParams_LegacyMaxTokens(t *testing.T) {
 	if !ok {
 		t.Fatal("Legacy: max_tokens should be set")
 	}
-	if v.(int64) != 4096 {
+	if val, ok := v.(int64); !ok || val != 4096 {
 		t.Errorf("Legacy: max_tokens = %v, want 4096", v)
 	}
 	if _, exists := params["max_completion_tokens"]; exists {
@@ -47,7 +47,7 @@ func TestBuildParams_DefaultMaxCompletionTokens(t *testing.T) {
 	if !ok {
 		t.Fatal("Default: max_completion_tokens should be set")
 	}
-	if v.(int64) != 4096 {
+	if val, ok := v.(int64); !ok || val != 4096 {
 		t.Errorf("Default: max_completion_tokens = %v, want 4096", v)
 	}
 	if _, exists := params["max_tokens"]; exists {

@@ -530,24 +530,6 @@ func normalizeArguments(raw json.RawMessage) json.RawMessage {
 	return raw
 }
 
-// normalizeOutputString 将 function_call_output 的 output 规范化为 string。
-//
-// 兼容两种客户端序列化格式：
-//   - 标准 JSON string: "Sunny, 72F" → 提取内部字符串
-//   - 非标准 raw object: {"result":"ok"} → 序列化为 JSON 字符串
-func normalizeOutputString(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	// 尝试解析为 JSON string（标准格式）
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s
-	}
-	// 非 string 类型（object/array/number），原样序列化为字符串
-	return string(raw)
-}
-
 // splitOutputTextAndImage 将 function_call_output 的 output 拆分为
 // 工具结果文本与内嵌的截图图片。
 //

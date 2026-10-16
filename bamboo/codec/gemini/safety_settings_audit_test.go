@@ -64,7 +64,10 @@ func TestAudit_SafetySettings_MultipleCategories(t *testing.T) {
 		t.Fatalf("parseRequest() error = %v", err)
 	}
 
-	safetySlice := req.Config.ProviderExtra["safety_settings"].([]map[string]string)
+	safetySlice, ok := req.Config.ProviderExtra["safety_settings"].([]map[string]string)
+	if !ok {
+		t.Fatalf("safety_settings type assertion failed: %T", req.Config.ProviderExtra["safety_settings"])
+	}
 	if len(safetySlice) != 2 {
 		t.Fatalf("safety_settings count = %d, want 2", len(safetySlice))
 	}

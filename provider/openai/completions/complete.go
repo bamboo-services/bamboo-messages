@@ -37,7 +37,7 @@ func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemProm
 	if err != nil {
 		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Completions 非流式对话请求失败: %v", err), 0)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

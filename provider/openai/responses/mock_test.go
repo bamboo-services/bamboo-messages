@@ -83,8 +83,8 @@ func TestChat_ResponseCreated(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, sseFrame("response.created", createdJSON))
-		fmt.Fprint(w, sseFrame("response.completed", completedJSON))
+		_, _ = fmt.Fprint(w, sseFrame("response.created", createdJSON))
+		_, _ = fmt.Fprint(w, sseFrame("response.completed", completedJSON))
 	}))
 	defer server.Close()
 
@@ -138,9 +138,9 @@ func TestChat_OutputTextDelta(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, sseFrame("response.output_text.delta", delta1))
-		fmt.Fprint(w, sseFrame("response.output_text.delta", delta2))
-		fmt.Fprint(w, sseFrame("response.completed", completedJSON))
+		_, _ = fmt.Fprint(w, sseFrame("response.output_text.delta", delta1))
+		_, _ = fmt.Fprint(w, sseFrame("response.output_text.delta", delta2))
+		_, _ = fmt.Fprint(w, sseFrame("response.completed", completedJSON))
 	}))
 	defer server.Close()
 
@@ -201,10 +201,10 @@ func TestChat_FunctionCall(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, sseFrame("response.output_item.added", itemAdded))
-		fmt.Fprint(w, sseFrame("response.function_call_arguments.delta", argDelta1))
-		fmt.Fprint(w, sseFrame("response.function_call_arguments.delta", argDelta2))
-		fmt.Fprint(w, sseFrame("response.completed", completedJSON))
+		_, _ = fmt.Fprint(w, sseFrame("response.output_item.added", itemAdded))
+		_, _ = fmt.Fprint(w, sseFrame("response.function_call_arguments.delta", argDelta1))
+		_, _ = fmt.Fprint(w, sseFrame("response.function_call_arguments.delta", argDelta2))
+		_, _ = fmt.Fprint(w, sseFrame("response.completed", completedJSON))
 	}))
 	defer server.Close()
 
@@ -265,7 +265,7 @@ func TestChat_ResponseCompleted(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, sseFrame("response.completed", completedJSON))
+		_, _ = fmt.Fprint(w, sseFrame("response.completed", completedJSON))
 	}))
 	defer server.Close()
 
@@ -322,7 +322,7 @@ func TestChat_ErrorResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, `{"error":{"message":"Internal server error","type":"server_error","code":"internal_error"}}`)
+		_, _ = fmt.Fprint(w, `{"error":{"message":"Internal server error","type":"server_error","code":"internal_error"}}`)
 	}))
 	defer server.Close()
 
@@ -374,9 +374,9 @@ func TestChat_DataOnlySSE(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		// 纯 data: 帧，无 event: 行（OpenAI 官方格式）
-		fmt.Fprint(w, sseDataOnly(createdJSON))
-		fmt.Fprint(w, sseDataOnly(deltaJSON))
-		fmt.Fprint(w, sseDataOnly(completedJSON))
+		_, _ = fmt.Fprint(w, sseDataOnly(createdJSON))
+		_, _ = fmt.Fprint(w, sseDataOnly(deltaJSON))
+		_, _ = fmt.Fprint(w, sseDataOnly(completedJSON))
 	}))
 	defer server.Close()
 
@@ -430,9 +430,9 @@ func TestChat_TimingAnchor(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		time.Sleep(150 * time.Millisecond) // 模拟上游 Prefill 延迟
-		fmt.Fprint(w, sseFrame("response.created", `{"type":"response.created","response":{"id":"resp_001"}}`))
-		fmt.Fprint(w, sseFrame("response.output_text.delta", `{"type":"response.output_text.delta","delta":"Hello"}`))
-		fmt.Fprint(w, sseFrame("response.completed", `{"type":"response.completed","response":{"id":"resp_001","usage":{"input_tokens":10,"output_tokens":5}}}`))
+		_, _ = fmt.Fprint(w, sseFrame("response.created", `{"type":"response.created","response":{"id":"resp_001"}}`))
+		_, _ = fmt.Fprint(w, sseFrame("response.output_text.delta", `{"type":"response.output_text.delta","delta":"Hello"}`))
+		_, _ = fmt.Fprint(w, sseFrame("response.completed", `{"type":"response.completed","response":{"id":"resp_001","usage":{"input_tokens":10,"output_tokens":5}}}`))
 	}))
 	defer server.Close()
 

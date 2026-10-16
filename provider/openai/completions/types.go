@@ -98,14 +98,6 @@ type responseToolCall struct {
 	ExtraContent *toolCallExtraContent `json:"extra_content,omitempty"`
 }
 
-// openaiError 表示上游 OpenAI 兼容端点返回的错误结构。
-//
-// Error.Code 使用 json.RawMessage 兼容字符串错误码（如 "rate_limit_exceeded"）
-// 与数字错误码（如 400/429/500，常见于部分第三方兼容网关），防止整帧 Unmarshal 失败导致丢失 Message。
-type openaiError struct {
-	Error *openaiErrorDetail `json:"error,omitempty"`
-}
-
 type openaiErrorDetail struct {
 	Message string          `json:"message,omitempty"`
 	Type    string          `json:"type,omitempty"`

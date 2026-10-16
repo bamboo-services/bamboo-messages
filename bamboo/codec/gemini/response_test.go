@@ -254,7 +254,7 @@ func TestSerializeResponse_FinishReasonMapping(t *testing.T) {
 			t.Fatalf("serializeResponse(%v) error = %v", tt.reason, err)
 		}
 		var out geminiResponse
-		json.Unmarshal(data, &out)
+		_ = json.Unmarshal(data, &out)
 		if out.Candidates[0].FinishReason != tt.want {
 			t.Errorf("reason %v → %q, want %q", tt.reason, out.Candidates[0].FinishReason, tt.want)
 		}

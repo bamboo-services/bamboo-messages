@@ -181,7 +181,11 @@ func TestBuildMessages_DropsOrphanToolResult(t *testing.T) {
 		t.Fatalf("contents len = %d, want 1 (orphan FR dropped)", len(contents))
 	}
 	assertRole(t, contents[0], "user")
-	if _, ok := contents[0]["parts"].([]map[string]any)[0]["text"]; !ok {
+	parts, ok := contents[0]["parts"].([]map[string]any)
+	if !ok || len(parts) == 0 {
+		t.Fatal("parts missing or empty")
+	}
+	if _, ok := parts[0]["text"]; !ok {
 		t.Error("expected remaining user text content")
 	}
 }
@@ -210,7 +214,10 @@ func TestBuildMessages_UserTextDoesNotSplitFunctionTurn(t *testing.T) {
 	if len(frs) != 1 || frs[0]["name"] != "read_file" {
 		t.Errorf("FR must immediately follow model FC, got %v", contents[1])
 	}
-	textParts := contents[2]["parts"].([]map[string]any)
+	textParts, ok := contents[2]["parts"].([]map[string]any)
+	if !ok || len(textParts) == 0 {
+		t.Fatal("contents[2].parts missing or empty")
+	}
 	if textParts[0]["text"] != "please continue" {
 		t.Errorf("trailing user text = %v", textParts[0]["text"])
 	}

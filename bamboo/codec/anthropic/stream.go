@@ -80,11 +80,6 @@ func (s *anthropicStreamSerializer) handleMessageStart(event bamboo.StreamEvent)
 		s.messageID = fmt.Sprintf("msg_bamboo_%d", time.Now().UnixNano())
 	}
 
-	if event.Message != nil {
-		// 从 message 中提取 id 和 model（若有）
-		// BambooMessage 没有 ID/Model 字段，这些通常由 stream 初始化时注入
-	}
-
 	var inputTokens, outputTokens int64
 	var cacheCreation, cacheRead int64
 	if event.Usage != nil {

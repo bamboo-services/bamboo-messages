@@ -16,7 +16,7 @@ func parseGeminiSSE(t *testing.T, raw []byte) geminiStreamChunk {
 		t.Fatalf("expected SSE data prefix, got: %q", str)
 	}
 	str = strings.TrimPrefix(str, "data: ")
-	str = strings.TrimRight(str, "\n\n")
+	str = strings.TrimSuffix(str, "\n\n")
 
 	var chunk geminiStreamChunk
 	if err := json.Unmarshal([]byte(str), &chunk); err != nil {
@@ -136,7 +136,7 @@ func TestStreamSerializer_FunctionCallAccumulation(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -226,7 +226,7 @@ func TestStreamSerializer_ThinkingStream(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
@@ -265,11 +265,11 @@ func TestStreamSerializer_ThinkingStream(t *testing.T) {
 
 func TestStreamSerializer_SignatureDeltaEmitsThoughtSignature(t *testing.T) {
 	s := newStreamSerializer("")
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        0,
 		ContentBlock: bamboo.NewThinkingBlockWithProvider("", "", bamboo.SignatureProviderGemini),
@@ -306,18 +306,18 @@ func TestStreamSerializer_SignatureDeltaEmitsThoughtSignature(t *testing.T) {
 func TestStreamSerializer_MultipleFunctionCalls(t *testing.T) {
 	s := newStreamSerializer("")
 
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
 
 	// 第一个 functionCall
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        0,
 		ContentBlock: bamboo.NewToolUseBlock("call-1", "tool_a", nil),
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockDelta,
 		Index: 0,
 		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaInputJSON, PartialJSON: `{"x":1}`},
@@ -335,12 +335,13 @@ func TestStreamSerializer_MultipleFunctionCalls(t *testing.T) {
 	}
 
 	// 第二个 functionCall
-	s.Serialize(bamboo.StreamEvent{
+	// 第二个 functionCall
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        1,
 		ContentBlock: bamboo.NewToolUseBlock("call-2", "tool_b", nil),
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockDelta,
 		Index: 1,
 		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaInputJSON, PartialJSON: `{"y":2}`},
@@ -393,7 +394,7 @@ func TestStreamSerializer_ErrorEvent(t *testing.T) {
 	// 验证错误码映射
 	var payload geminiStreamError
 	jsonStr := strings.TrimPrefix(str, "data: ")
-	jsonStr = strings.TrimRight(jsonStr, "\n\n")
+	jsonStr = strings.TrimSuffix(jsonStr, "\n\n")
 	if err := json.Unmarshal([]byte(jsonStr), &payload); err != nil {
 		t.Fatalf("failed to unmarshal error: %v", err)
 	}
@@ -451,13 +452,13 @@ func TestStreamSerializer_TextThenFunctionCall(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// message_start
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
 
 	// text block
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        0,
 		ContentBlock: bamboo.NewTextBlock(""),
@@ -471,15 +472,15 @@ func TestStreamSerializer_TextThenFunctionCall(t *testing.T) {
 	if chunk.Candidates[0].Content.Parts[0].Text != "Let me search." {
 		t.Errorf("text = %q", chunk.Candidates[0].Content.Parts[0].Text)
 	}
-	s.Serialize(bamboo.StreamEvent{Type: bamboo.EventContentBlockStop, Index: 0})
+	_, _ = s.Serialize(bamboo.StreamEvent{Type: bamboo.EventContentBlockStop, Index: 0})
 
 	// functionCall block
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        1,
 		ContentBlock: bamboo.NewToolUseBlock("call-1", "search", nil),
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockDelta,
 		Index: 1,
 		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaInputJSON, PartialJSON: `{"q":"test"}`},
@@ -502,17 +503,17 @@ func TestStreamSerializer_TextThenFunctionCall(t *testing.T) {
 // 序列化输出的 FunctionCall.args 会被重新序列化去重，防止 Google Protobuf 报 Repeated map key 错误。
 func TestStreamSerializer_ToolCallDeduplicatesRepeatedKeys(t *testing.T) {
 	s := newStreamSerializer("")
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:         bamboo.EventContentBlockStart,
 		Index:        0,
 		ContentBlock: bamboo.NewToolUseBlock("call-dup", "edit_file", nil),
 	})
 	// 分块传输包含重复键的 JSON
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:  bamboo.EventContentBlockDelta,
 		Index: 0,
 		Delta: &bamboo.StreamDelta{Type: bamboo.DeltaInputJSON, PartialJSON: `{"path":"a.txt","desc":"1","desc":"2"}`},

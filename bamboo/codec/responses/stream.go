@@ -63,30 +63,6 @@ type reasoningDoneEvent struct {
 	Text         string `json:"text"`
 }
 
-// reasoningSummaryDeltaEvent 是 response.reasoning_summary_text.delta 的 payload。
-//
-// summary_index 不能 omitempty：Codex / OpenAI SDK 把它当必填 int，缺字段会直接反序列化失败。
-type reasoningSummaryDeltaEvent struct {
-	OutputIndex  int    `json:"output_index"`
-	SummaryIndex int    `json:"summary_index"`
-	ItemID       string `json:"item_id"`
-	Delta        string `json:"delta"`
-}
-
-type reasoningSummaryDoneEvent struct {
-	OutputIndex  int    `json:"output_index"`
-	SummaryIndex int    `json:"summary_index"`
-	ItemID       string `json:"item_id"`
-	Text         string `json:"text"`
-}
-
-type reasoningSummaryPartEvent struct {
-	OutputIndex  int    `json:"output_index"`
-	SummaryIndex int    `json:"summary_index"`
-	ItemID       string `json:"item_id"`
-	Part         any    `json:"part"`
-}
-
 type functionCallArgsDelta struct {
 	OutputIndex int    `json:"output_index"`
 	ItemID      string `json:"item_id"`

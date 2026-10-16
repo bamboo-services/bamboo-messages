@@ -119,9 +119,6 @@ func (s *openaiStreamSerializer) Flush() ([]byte, error) {
 // handleMessageStart 处理 message_start 事件。
 func (s *openaiStreamSerializer) handleMessageStart(event bamboo.StreamEvent) ([]byte, error) {
 	s.started = true
-	if event.Message != nil {
-		// 不修改 model，model 由 message_delta 或默认值确定
-	}
 
 	chunk := openaiChunk{
 		ID:      s.id,

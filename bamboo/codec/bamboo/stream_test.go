@@ -84,7 +84,7 @@ func TestStreamSerializer_MessageStart(t *testing.T) {
 	if !ok {
 		t.Fatalf("usage field should be object, got %T", payload["usage"])
 	}
-	if usage["input_tokens"].(float64) != 10 {
+	if in, ok := usage["input_tokens"].(float64); !ok || in != 10 {
 		t.Errorf("usage.input_tokens = %v, want 10", usage["input_tokens"])
 	}
 }
@@ -106,7 +106,7 @@ func TestStreamSerializer_ContentBlockStart(t *testing.T) {
 		t.Errorf("eventType = %q, want content_block_start", eventType)
 	}
 	// Index=1 > 0，omitempty 不会省略
-	if payload["index"].(float64) != 1 {
+	if idx, ok := payload["index"].(float64); !ok || idx != 1 {
 		t.Errorf("index = %v, want 1", payload["index"])
 	}
 	cb, ok := payload["content_block"].(map[string]any)
@@ -236,7 +236,7 @@ func TestStreamSerializer_ContentBlockStop(t *testing.T) {
 	if payload["type"] != "content_block_stop" {
 		t.Errorf("payload type = %v", payload["type"])
 	}
-	if payload["index"].(float64) != 1 {
+	if idx, ok := payload["index"].(float64); !ok || idx != 1 {
 		t.Errorf("index = %v, want 1", payload["index"])
 	}
 }
@@ -270,10 +270,10 @@ func TestStreamSerializer_MessageDelta(t *testing.T) {
 	if !ok {
 		t.Fatalf("usage should be object")
 	}
-	if usage["input_tokens"].(float64) != 10 {
+	if in, ok := usage["input_tokens"].(float64); !ok || in != 10 {
 		t.Errorf("usage.input_tokens = %v, want 10", usage["input_tokens"])
 	}
-	if usage["output_tokens"].(float64) != 5 {
+	if out, ok := usage["output_tokens"].(float64); !ok || out != 5 {
 		t.Errorf("usage.output_tokens = %v, want 5", usage["output_tokens"])
 	}
 }
@@ -345,7 +345,7 @@ func TestStreamSerializer_Error(t *testing.T) {
 	if errObj["message"] != "rate exceeded" {
 		t.Errorf("error.message = %v, want rate exceeded", errObj["message"])
 	}
-	if errObj["status_code"].(float64) != 429 {
+	if sc, ok := errObj["status_code"].(float64); !ok || sc != 429 {
 		t.Errorf("error.status_code = %v, want 429", errObj["status_code"])
 	}
 }

@@ -72,7 +72,7 @@ func TestSerializeResponse_ChatThinkingHubFields(t *testing.T) {
 
 func TestStreamSerializer_SignatureDeltaEmitsChatHubFields(t *testing.T) {
 	s := newStreamSerializer("gpt-4o")
-	s.Serialize(bamboo.StreamEvent{
+	_, _ = s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
 	})

@@ -124,7 +124,7 @@ func (p *ResponsesProvider) CompleteWithSystem(ctx context.Context, systemPrompt
 	if err != nil {
 		return nil, pkgErrors.NewBambooError("上游", fmt.Sprintf("OpenAI Responses 非流式对话请求失败: %v", err), 0)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// 读取响应体
 	respBody, err := io.ReadAll(resp.Body)

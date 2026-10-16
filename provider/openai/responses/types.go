@@ -2,52 +2,6 @@ package responses
 
 import "encoding/json"
 
-// responseCreateRequest 表示 OpenAI Responses API 的创建请求体。
-type responseCreateRequest struct {
-	// Model 指定要使用的模型 ID。
-	Model string `json:"model"`
-	// Input 为请求输入，可以是字符串或消息数组（[]map[string]any）。
-	Input any `json:"input"`
-	// Stream 是否使用流式响应。
-	Stream bool `json:"stream,omitempty"`
-	// Instructions 作为系统级提示词注入请求。
-	Instructions string `json:"instructions,omitempty"`
-	// MaxOutputTokens 最大输出 token 数。
-	MaxOutputTokens *int `json:"max_output_tokens,omitempty"`
-	// Temperature 采样温度。
-	Temperature *float64 `json:"temperature,omitempty"`
-	// TopP 核采样参数。
-	TopP *float64 `json:"top_p,omitempty"`
-	// Tools 工具定义列表。
-	Tools []map[string]any `json:"tools,omitempty"`
-	// ToolChoice 工具选择策略。
-	ToolChoice any `json:"tool_choice,omitempty"`
-	// Reasoning 推理/思考配置。
-	Reasoning *reasoningConfig `json:"reasoning,omitempty"`
-	// Metadata 附加元数据。
-	Metadata map[string]any `json:"metadata,omitempty"`
-	// User 终端用户标识。
-	User string `json:"user,omitempty"`
-	// PreviousResponseID 上一轮响应 ID，用于多轮对话。
-	PreviousResponseID string `json:"previous_response_id,omitempty"`
-	// Store 是否在服务端存储响应。
-	Store *bool `json:"store,omitempty"`
-	// Truncation 上下文截断策略。
-	Truncation string `json:"truncation,omitempty"`
-	// Modalities 输出模态。
-	Modalities any `json:"modalities,omitempty"`
-	// Include 指定响应中需要包含的附加数据。
-	Include []string `json:"include,omitempty"`
-}
-
-// reasoningConfig 表示 OpenAI Responses API 的推理配置。
-type reasoningConfig struct {
-	// Effort 推理强度（none / low / medium / high）。
-	Effort string `json:"effort,omitempty"`
-	// Summary 推理摘要级别（concise / auto / detailed）。
-	Summary string `json:"summary,omitempty"`
-}
-
 // responseStreamEvent 表示 OpenAI Responses API 的流式事件。
 //
 // 使用统一结构体承载所有事件类型，通过 Type 字段区分。

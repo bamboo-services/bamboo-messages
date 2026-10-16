@@ -44,7 +44,7 @@ func TestUpstreamResponsesWebSocketProvider(t *testing.T) {
 			t.Errorf("upgrade error: %v", err)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		_, payload, err := conn.ReadMessage()
 		if err != nil {
@@ -152,7 +152,7 @@ func TestDownstreamResponsesWebSocket_MultiTurnToolLoopAcrossStatelessProvider(t
 	if err != nil {
 		t.Fatalf("ws.Dial failed: %v", err)
 	}
-	defer clientConn.Close()
+	defer func() { _ = clientConn.Close() }()
 
 	// ── 第 1 轮：发送初始用户请求 + 工具定义 ──
 	turn1Req := `{
@@ -313,7 +313,7 @@ func TestCrossProtocol_AllFormatsToUpstreamResponsesWebSocket(t *testing.T) {
 			t.Errorf("upgrade error: %v", err)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		_, payload, err := conn.ReadMessage()
 		if err != nil {
@@ -431,7 +431,7 @@ func TestDownstreamResponsesWebSocket_ToUpstreamGemini3WithThoughtSignature(t *t
 	if err != nil {
 		t.Fatalf("ws.Dial failed: %v", err)
 	}
-	defer wsConn.Close()
+	defer func() { _ = wsConn.Close() }()
 
 	// 第 1 轮：下游 WS 发送 response.create
 	if err := wsConn.WriteText([]byte(`{

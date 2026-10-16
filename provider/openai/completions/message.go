@@ -54,7 +54,8 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 					switch cb.BlockType() {
 					case "image":
 						if img, ok := cb.(provider.ImageContentBlock); ok {
-							if img.Source.Type == "base64" {
+							switch img.Source.Type {
+							case "base64":
 								dataURI := "data:" + img.Source.MediaType + ";base64," + img.Source.Data
 								parts = append(parts, map[string]any{
 									"type": "image_url",
@@ -63,7 +64,7 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 										"detail": "auto",
 									},
 								})
-							} else if img.Source.Type == "url" {
+							case "url":
 								parts = append(parts, map[string]any{
 									"type": "image_url",
 									"image_url": map[string]any{
