@@ -1230,3 +1230,19 @@ func TestParseRequest_InputFileImageMimeType(t *testing.T) {
 		t.Fatalf("文档 Source = %+v, want base64", docBlock.Source)
 	}
 }
+
+func TestParseRequest_ServiceTier(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"input": "Hello",
+		"service_tier": "priority"
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if req.Config.ServiceTier != "priority" {
+		t.Errorf("ServiceTier = %q, want priority", req.Config.ServiceTier)
+	}
+}

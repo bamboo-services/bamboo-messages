@@ -78,3 +78,67 @@ func TestAudit_SystemCacheControl_Mapping(t *testing.T) {
 		t.Errorf("CacheControl.Type = %v, want 'ephemeral'", ccField["type"])
 	}
 }
+
+// TestAudit_Anthropic_ServiceTierAndSpeed 验证 Anthropic 适配器对 ServiceTier 与 speed (Fast mode) 的映射。
+func TestAudit_Anthropic_ServiceTierAndSpeed(t *testing.T) {
+	p := NewProvider("test-key")
+
+	// 场景 1：ServiceTier = "priority" → Speed="fast", ServiceTier="auto"
+	cfg1 := &provider.ChatConfig{
+		Model:       "claude-opus-5-5",
+		ServiceTier: "priority",
+	}
+	params1 := p.buildParams("", nil, cfg1)
+	if params1.Speed != "fast" {
+		t.Errorf("expected Speed 'fast', got %q", params1.Speed)
+	}
+	if params1.ServiceTier != "auto" {
+		t.Errorf("expected ServiceTier 'auto', got %q", params1.ServiceTier)
+	}
+
+	// 场景 2：ServiceTier = "fast" → Speed="fast"
+	cfg2 := &provider.ChatConfig{
+		Model:       "claude-opus-5-5",
+		ServiceTier: "fast",
+	}
+	params2 := p.buildParams("", nil, cfg2)
+	if params2.Speed != "fast" {
+		t.Errorf("expected Speed 'fast', got %q", params2.Speed)
+	}
+
+	// 场景 3：通过 ProviderExtra 显式传 speed 和 service_tier
+	cfg3 := &provider.ChatConfig{
+		Model: "claude-opus-5-5",
+		ProviderExtra: map[string]any{
+			"speed":        "fast",
+			"service_tier": "standard_only",
+		},
+	}
+	params3 := p.buildParams("", nil, cfg3)
+	if params3.Speed != "fast" {
+		t.Errorf("expected Speed 'fast', got %q", params3.Speed)
+	}
+	if params3.ServiceTier != "standard_only" {
+		t.Errorf("expected ServiceTier 'standard_only', got %q", params3.ServiceTier)
+	}
+
+	// 场景 4：跨协议安全：OpenAI/Gemini 的 "flex" 传入时应在 Anthropic 中忽略（避免上游 400 拒绝）
+	cfg4 := &provider.ChatConfig{
+		Model:       "claude-opus-5-5",
+		ServiceTier: "flex",
+	}
+	params4 := p.buildParams("", nil, cfg4)
+	if params4.ServiceTier != "" {
+		t.Errorf("expected ServiceTier to be empty for 'flex', got %q", params4.ServiceTier)
+	}
+
+	// 场景 5：跨协议归一化：OpenAI 的 "default" 传入时归一化为 "standard_only"
+	cfg5 := &provider.ChatConfig{
+		Model:       "claude-opus-5-5",
+		ServiceTier: "default",
+	}
+	params5 := p.buildParams("", nil, cfg5)
+	if params5.ServiceTier != "standard_only" {
+		t.Errorf("expected ServiceTier 'standard_only' (normalized from default), got %q", params5.ServiceTier)
+	}
+}

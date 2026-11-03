@@ -29,6 +29,8 @@ type anthropicRequest struct {
 	Thinking      json.RawMessage    `json:"thinking,omitempty"`
 	CacheControl  json.RawMessage    `json:"cache_control,omitempty"`
 	OutputConfig  json.RawMessage    `json:"output_config,omitempty"` // Anthropic 新 API: {effort:"max"|"high"|...}
+	Speed         string             `json:"speed,omitempty"`         // Fast mode: "fast"
+	ServiceTier   string             `json:"service_tier,omitempty"`  // "auto" / "standard_only"
 }
 
 type anthropicMessage struct {
@@ -187,6 +189,19 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 			config.ProviderExtra = make(map[string]any)
 		}
 		config.ProviderExtra["top_k"] = *req.TopK
+	}
+
+	// ServiceTier 与 Speed (Fast mode)
+	if req.Speed == "fast" || req.ServiceTier == "priority" {
+		config.ServiceTier = "priority"
+	} else if req.ServiceTier != "" {
+		config.ServiceTier = req.ServiceTier
+	}
+	if req.Speed != "" {
+		if config.ProviderExtra == nil {
+			config.ProviderExtra = make(map[string]any)
+		}
+		config.ProviderExtra["speed"] = req.Speed
 	}
 
 	return &codec.RelayRequest{

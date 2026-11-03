@@ -303,6 +303,7 @@ type ChatConfig struct {
 	ThinkingConfig     *ThinkingConfig   `json:"thinking_config,omitempty"`      // 思考/推理配置
 	SystemCacheControl *CacheControl     `json:"system_cache_control,omitempty"` // system prompt 的缓存标记
 	PromptCacheKey     string            `json:"prompt_cache_key,omitempty"`     // OpenAI prompt cache 路由键
+	ServiceTier        string            `json:"service_tier,omitempty"`         // 服务层级/速度控制（如 "priority"/"fast"/"flex"/"standard"）
 	ProviderExtra      map[string]any    `json:"provider_extra,omitempty"`       // Provider 特有参数
 }
 

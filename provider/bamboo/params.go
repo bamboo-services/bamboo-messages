@@ -44,6 +44,7 @@ func buildWireRequestConfig(config *provider.ChatConfig) *wireRequestConfig {
 		ResponseFormat:    config.ResponseFormat,
 		ParallelToolCalls: config.ParallelToolCalls,
 		PromptCacheKey:    config.PromptCacheKey,
+		ServiceTier:       config.ServiceTier,
 		ProviderExtra:     config.ProviderExtra,
 	}
 	if config.ThinkingConfig != nil {

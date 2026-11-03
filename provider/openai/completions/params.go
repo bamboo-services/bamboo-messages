@@ -122,6 +122,13 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 		params["prediction"] = pred
 	}
 
+	// ServiceTier — 服务层级/极速模式（如 "priority" / "auto" / "default" / "flex"）
+	if config.ServiceTier != "" {
+		params["service_tier"] = normalizeCompletionsServiceTier(config.ServiceTier)
+	} else if tier, ok := provider.GetExtraString(config.ProviderExtra, "service_tier"); ok && tier != "" {
+		params["service_tier"] = normalizeCompletionsServiceTier(tier)
+	}
+
 	// ParallelToolCalls：bool 零值无法区分"未设置"与"显式 false"。
 	// 为兼容智谱 GLM / Kimi 等第三方端点（发送 false 可能触发 400/空响应），
 	// 默认与 Legacy 模式统一：仅当 tools 非空且显式 true 时才发送。
@@ -221,5 +228,21 @@ func (p *CompletionsProvider) buildStreamOptions() map[string]any {
 	}
 	return map[string]any{
 		"include_usage": true,
+	}
+}
+
+// normalizeCompletionsServiceTier 将跨协议的 ServiceTier 归一化为 OpenAI Chat Completions 支持的取值。
+func normalizeCompletionsServiceTier(tier string) string {
+	switch tier {
+	case "fast", "priority":
+		return "priority"
+	case "standard", "standard_only", "default":
+		return "default"
+	case "auto":
+		return "auto"
+	case "flex":
+		return "flex"
+	default:
+		return tier
 	}
 }

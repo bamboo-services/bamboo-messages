@@ -41,6 +41,8 @@ type RequestConfig struct {
 
 	PromptCacheKey string `json:"prompt_cache_key,omitempty"` // OpenAI prompt cache 路由粘性键
 
+	ServiceTier string `json:"service_tier,omitempty"` // 服务层级/速度控制参数（如 "priority"/"fast"/"flex"/"standard"）
+
 	ProviderExtra map[string]any `json:"provider_extra,omitempty"` // Provider 特有参数，用于传递各 Provider 独有的扩展配置
 }
 

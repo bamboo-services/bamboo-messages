@@ -32,6 +32,7 @@ type openaiRequest struct {
 	PresencePenalty   *float64        `json:"presence_penalty,omitempty"`
 	Seed              *int64          `json:"seed,omitempty"`
 	PromptCacheKey    string          `json:"prompt_cache_key,omitempty"`
+	ServiceTier       string          `json:"service_tier,omitempty"`
 }
 
 type openaiMessage struct {
@@ -186,6 +187,10 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 
 	if req.PromptCacheKey != "" {
 		config.PromptCacheKey = req.PromptCacheKey
+	}
+
+	if req.ServiceTier != "" {
+		config.ServiceTier = req.ServiceTier
 	}
 
 	// ProviderExtra

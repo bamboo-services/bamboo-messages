@@ -363,3 +363,19 @@ func TestParseRequest_Tools(t *testing.T) {
 		t.Errorf("Description = %q", tool.Description)
 	}
 }
+
+func TestParseRequest_ServiceTier(t *testing.T) {
+	body := []byte(`{
+		"model": "gpt-4o",
+		"messages": [{"role": "user", "content": "Hello"}],
+		"service_tier": "priority"
+	}`)
+
+	req, err := parseRequest(body)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if req.Config.ServiceTier != "priority" {
+		t.Errorf("ServiceTier = %q, want priority", req.Config.ServiceTier)
+	}
+}

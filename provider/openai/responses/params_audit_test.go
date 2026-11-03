@@ -58,3 +58,50 @@ func TestAudit_Stop_ExtraFields(t *testing.T) {
 	params := p.buildParams("gpt-4o", "", nil, config, false)
 	_ = params
 }
+
+// TestResponses_ServiceTier 验证 Responses 适配器中 ServiceTier 的映射与透传。
+func TestResponses_ServiceTier(t *testing.T) {
+	p := NewResponsesProvider("test-key")
+
+	// 场景 1：直接通过 ChatConfig.ServiceTier 传入 priority
+	cfg1 := &provider.ChatConfig{
+		Model:       "gpt-4o",
+		ServiceTier: "priority",
+	}
+	params1 := p.buildParams("gpt-4o", "", nil, cfg1, false)
+	if params1["service_tier"] != "priority" {
+		t.Errorf("expected service_tier 'priority', got %v", params1["service_tier"])
+	}
+
+	// 场景 2：通过 ProviderExtra 传入
+	cfg2 := &provider.ChatConfig{
+		Model: "gpt-4o",
+		ProviderExtra: map[string]any{
+			"service_tier": "flex",
+		},
+	}
+	params2 := p.buildParams("gpt-4o", "", nil, cfg2, false)
+	if params2["service_tier"] != "flex" {
+		t.Errorf("expected service_tier 'flex', got %v", params2["service_tier"])
+	}
+
+	// 场景 3：跨协议归一化：Anthropic 的 "fast" 传入时归一化为 "priority"
+	cfg3 := &provider.ChatConfig{
+		Model:       "gpt-4o",
+		ServiceTier: "fast",
+	}
+	params3 := p.buildParams("gpt-4o", "", nil, cfg3, false)
+	if params3["service_tier"] != "priority" {
+		t.Errorf("expected service_tier 'priority' (normalized from fast), got %v", params3["service_tier"])
+	}
+
+	// 场景 4：跨协议归一化：Anthropic 的 "standard_only" 传入时归一化为 "default"
+	cfg4 := &provider.ChatConfig{
+		Model:       "gpt-4o",
+		ServiceTier: "standard_only",
+	}
+	params4 := p.buildParams("gpt-4o", "", nil, cfg4, false)
+	if params4["service_tier"] != "default" {
+		t.Errorf("expected service_tier 'default' (normalized from standard_only), got %v", params4["service_tier"])
+	}
+}

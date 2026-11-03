@@ -303,3 +303,60 @@ func TestBuildToolConfig_ForcedAndAllowedFunctionNames(t *testing.T) {
 		}
 	})
 }
+
+// TestAudit_Gemini_ServiceTier 验证 Gemini 适配器中 ServiceTier 的顶层映射与透传。
+func TestAudit_Gemini_ServiceTier(t *testing.T) {
+	p := NewProvider("test-key")
+
+	// 场景 1：直接通过 ChatConfig.ServiceTier 传入 priority
+	cfg1 := &provider.ChatConfig{
+		Model:       "gemini-2.5-flash",
+		ServiceTier: "priority",
+	}
+	body1 := p.buildRequestBody(nil, "", cfg1, false)
+	if body1["service_tier"] != "priority" {
+		t.Errorf("expected service_tier 'priority', got %v", body1["service_tier"])
+	}
+
+	// 场景 2：通过 ProviderExtra 传入 flex
+	cfg2 := &provider.ChatConfig{
+		Model: "gemini-2.5-flash",
+		ProviderExtra: map[string]any{
+			"service_tier": "flex",
+		},
+	}
+	body2 := p.buildRequestBody(nil, "", cfg2, false)
+	if body2["service_tier"] != "flex" {
+		t.Errorf("expected service_tier 'flex', got %v", body2["service_tier"])
+	}
+
+	// 场景 3：跨协议归一化：Anthropic 的 "fast" 传入时归一化为 "priority"
+	cfg3 := &provider.ChatConfig{
+		Model:       "gemini-2.5-flash",
+		ServiceTier: "fast",
+	}
+	body3 := p.buildRequestBody(nil, "", cfg3, false)
+	if body3["service_tier"] != "priority" {
+		t.Errorf("expected service_tier 'priority' (normalized from fast), got %v", body3["service_tier"])
+	}
+
+	// 场景 4：跨协议归一化：OpenAI 的 "auto" 传入时应在 Gemini 中省略（Gemini 无 auto 枚举）
+	cfg4 := &provider.ChatConfig{
+		Model:       "gemini-2.5-flash",
+		ServiceTier: "auto",
+	}
+	body4 := p.buildRequestBody(nil, "", cfg4, false)
+	if val, ok := body4["service_tier"]; ok && val != "" {
+		t.Errorf("expected service_tier to be omitted for 'auto', got %v", val)
+	}
+
+	// 场景 5：跨协议归一化：Anthropic 的 "standard_only" 传入时归一化为 "standard"
+	cfg5 := &provider.ChatConfig{
+		Model:       "gemini-2.5-flash",
+		ServiceTier: "standard_only",
+	}
+	body5 := p.buildRequestBody(nil, "", cfg5, false)
+	if body5["service_tier"] != "standard" {
+		t.Errorf("expected service_tier 'standard' (normalized from standard_only), got %v", body5["service_tier"])
+	}
+}

@@ -191,6 +191,38 @@ func (p *Provider) buildParams(systemPrompt string, messages []provider.Message,
 		params.Metadata = meta
 	}
 
+	// Speed (Fast mode) 与 ServiceTier 映射
+	if speed, ok := provider.GetExtraString(config.ProviderExtra, "speed"); ok && speed != "" {
+		params.Speed = speed
+	}
+	if tier, ok := provider.GetExtraString(config.ProviderExtra, "service_tier"); ok && tier != "" {
+		params.ServiceTier = tier
+	}
+	if config.ServiceTier != "" {
+		switch config.ServiceTier {
+		case "fast":
+			params.Speed = "fast"
+		case "priority":
+			params.Speed = "fast"
+			if params.ServiceTier == "" {
+				params.ServiceTier = "auto"
+			}
+		case "auto":
+			params.ServiceTier = "auto"
+		case "standard_only", "standard", "default":
+			params.ServiceTier = "standard_only"
+		case "flex":
+			// Anthropic Messages API 无 flex 模式（通过 Batch API 单独支持），
+			// 忽略避免上游 400 校验错误
+			if provider.DebugEnabled {
+				xLog.WithName("provider/anthropic").SugarWarn(context.Background(),
+					"ServiceTier='flex' 不被 Anthropic Messages 协议支持，已忽略")
+			}
+		default:
+			// 未知值不写入官方 service_tier 避免上游 400
+		}
+	}
+
 	return params
 }
 

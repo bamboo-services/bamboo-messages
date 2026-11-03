@@ -110,3 +110,8 @@ func WithThinkingDisplay(display string) RequestOption {
 		cfg.ThinkingConfig.Display = display
 	}
 }
+
+// WithServiceTier 设置服务层级/速度控制参数（如 "priority"/"fast"/"flex"/"standard"）。
+func WithServiceTier(tier string) RequestOption {
+	return func(cfg *RequestConfig) { cfg.ServiceTier = tier }
+}

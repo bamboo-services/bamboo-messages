@@ -54,6 +54,17 @@ func (p *Provider) buildRequestBody(messages []provider.Message, systemPrompt st
 		body["cachedContent"] = cc
 	}
 
+	// ServiceTier: priority / standard / flex 推理服务层级（2026 最新官方参数）
+	if config.ServiceTier != "" {
+		if st := normalizeGeminiServiceTier(config.ServiceTier); st != "" {
+			body["service_tier"] = st
+		}
+	} else if tier, ok := provider.GetExtraString(config.ProviderExtra, "service_tier"); ok && tier != "" {
+		if st := normalizeGeminiServiceTier(tier); st != "" {
+			body["service_tier"] = st
+		}
+	}
+
 	return body
 }
 
@@ -274,4 +285,26 @@ func extractAllowedFunctionNames(config *provider.ChatConfig) []string {
 		}
 	}
 	return nil
+}
+
+// normalizeGeminiServiceTier 将跨协议的 ServiceTier 归一化为 Gemini 原生支持的取值。
+//
+// Gemini 官方 API 仅接受 priority / standard / flex：
+//   - "fast" / "priority" → "priority"（Priority Inference 极速非抢占通道）
+//   - "flex" → "flex"（Flex Inference 离线低成本通道）
+//   - "standard" / "standard_only" → "standard"
+//   - "auto" / "default" → ""（Gemini 无 auto 枚举，省略使服务端使用默认行为）
+func normalizeGeminiServiceTier(tier string) string {
+	switch tier {
+	case "priority", "fast":
+		return "priority"
+	case "flex":
+		return "flex"
+	case "standard", "standard_only":
+		return "standard"
+	case "auto", "default":
+		return ""
+	default:
+		return tier
+	}
 }

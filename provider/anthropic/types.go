@@ -19,6 +19,8 @@ type messageCreateRequest struct {
 	ToolChoice    any              `json:"tool_choice,omitempty"`    // 工具选择策略
 	Thinking      *thinkingConfig  `json:"thinking,omitempty"`       // 思考/推理配置
 	Metadata      *metadata        `json:"metadata,omitempty"`       // 请求元数据
+	Speed         string           `json:"speed,omitempty"`          // 极速模式（Fast mode，取值 "fast"）
+	ServiceTier   string           `json:"service_tier,omitempty"`   // 服务层级（"auto" / "standard_only"）
 }
 
 // thinkingConfig 表示 Anthropic 思考模式配置。

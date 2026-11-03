@@ -408,3 +408,14 @@ func TestParseRequest_EmptyContents(t *testing.T) {
 		t.Errorf("Messages len = %d, want 0", len(req.Messages))
 	}
 }
+
+func TestParseRequest_ServiceTier(t *testing.T) {
+	body := `{"contents":[],"service_tier":"priority"}`
+	req, err := parseRequest([]byte(body))
+	if err != nil {
+		t.Fatalf("parseRequest error = %v", err)
+	}
+	if req.Config.ServiceTier != "priority" {
+		t.Errorf("ServiceTier = %q, want priority", req.Config.ServiceTier)
+	}
+}

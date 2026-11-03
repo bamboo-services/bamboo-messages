@@ -39,6 +39,7 @@ type responsesRequest struct {
 	User               string          `json:"user,omitempty"`
 	PromptCacheKey     string          `json:"prompt_cache_key,omitempty"`
 	Metadata           json.RawMessage `json:"metadata,omitempty"`
+	ServiceTier        string          `json:"service_tier,omitempty"`
 	Text               *textConfig     `json:"text,omitempty"`
 	Include            []string        `json:"include,omitempty"`
 	ContextManagement  json.RawMessage `json:"context_management,omitempty"`
@@ -186,6 +187,10 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 		config.PromptCacheKey = req.PromptCacheKey
 	}
 	config.ParallelToolCalls = req.ParallelToolCalls
+
+	if req.ServiceTier != "" {
+		config.ServiceTier = req.ServiceTier
+	}
 
 	// ProviderExtra：instructions / previous_response_id / store / truncation / include / reasoning.*
 	if req.PreviousResponseID != "" {

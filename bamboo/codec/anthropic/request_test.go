@@ -644,3 +644,39 @@ func TestParseRequest_ToolResultWithImage(t *testing.T) {
 		t.Errorf("unexpected image source: %+v", img.Source)
 	}
 }
+
+func TestParseRequest_ServiceTierAndSpeed(t *testing.T) {
+	// 场景 1: speed=fast + service_tier=auto → 归一化为 priority
+	body1 := []byte(`{
+		"model": "claude-opus-5-5",
+		"max_tokens": 1024,
+		"speed": "fast",
+		"service_tier": "auto",
+		"messages": [{"role": "user", "content": "Hello"}]
+	}`)
+	req1, err := parseRequest(body1)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if req1.Config.ServiceTier != "priority" {
+		t.Errorf("ServiceTier = %q, want priority", req1.Config.ServiceTier)
+	}
+	if speed, ok := req1.Config.ProviderExtra["speed"]; !ok || speed != "fast" {
+		t.Errorf("ProviderExtra['speed'] = %v, want fast", speed)
+	}
+
+	// 场景 2: 仅 service_tier=auto（无 speed=fast）
+	body2 := []byte(`{
+		"model": "claude-opus-5-5",
+		"max_tokens": 1024,
+		"service_tier": "auto",
+		"messages": [{"role": "user", "content": "Hello"}]
+	}`)
+	req2, err := parseRequest(body2)
+	if err != nil {
+		t.Fatalf("parseRequest() error = %v", err)
+	}
+	if req2.Config.ServiceTier != "auto" {
+		t.Errorf("ServiceTier = %q, want auto", req2.Config.ServiceTier)
+	}
+}

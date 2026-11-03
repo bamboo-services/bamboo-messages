@@ -66,6 +66,13 @@ func (p *ResponsesProvider) buildParams(model string, systemPrompt string, messa
 		params["prompt_cache_key"] = key
 	}
 
+	// ServiceTier — 服务层级/极速模式（如 "priority" / "auto" / "default" / "flex"）
+	if config.ServiceTier != "" {
+		params["service_tier"] = normalizeResponsesServiceTier(config.ServiceTier)
+	} else if tier, ok := provider.GetExtraString(config.ProviderExtra, "service_tier"); ok && tier != "" {
+		params["service_tier"] = normalizeResponsesServiceTier(tier)
+	}
+
 	// ParallelToolCalls — 是否允许并行工具调用
 	if config.ParallelToolCalls {
 		params["parallel_tool_calls"] = true
@@ -191,5 +198,21 @@ func extraStringSlice(extra map[string]any, key string) []string {
 		return out
 	default:
 		return nil
+	}
+}
+
+// normalizeResponsesServiceTier 将跨协议的 ServiceTier 归一化为 OpenAI Responses 支持的取值。
+func normalizeResponsesServiceTier(tier string) string {
+	switch tier {
+	case "fast", "priority":
+		return "priority"
+	case "standard", "standard_only", "default":
+		return "default"
+	case "auto":
+		return "auto"
+	case "flex":
+		return "flex"
+	default:
+		return tier
 	}
 }

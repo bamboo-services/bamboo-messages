@@ -22,6 +22,7 @@ type geminiRequest struct {
 	ToolConfig        *geminiToolConfig     `json:"toolConfig,omitempty"`
 	SafetySettings    []geminiSafetySetting `json:"safetySettings,omitempty"`
 	CachedContent     string                `json:"cachedContent,omitempty"`
+	ServiceTier       string                `json:"service_tier,omitempty"`
 }
 
 // geminiContent Gemini Content 结构 (role + parts)。
@@ -187,6 +188,11 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 			config.ProviderExtra = make(map[string]any)
 		}
 		config.ProviderExtra["cached_content"] = req.CachedContent
+	}
+
+	// ── 8. service_tier 透传 ──
+	if req.ServiceTier != "" {
+		config.ServiceTier = req.ServiceTier
 	}
 
 	return &codec.RelayRequest{
