@@ -120,3 +120,71 @@ func TestComplete_UsageWithCachedContent(t *testing.T) {
 		t.Errorf("ReasoningTokens = %d, want 8", result.Usage.ReasoningTokens)
 	}
 }
+
+// TestUsage_CacheCreationContract_NoNativeField 锁定 Google Gemini 的缓存字段契约。
+//
+// 契约：Gemini 协议没有原生的 cache_creation 字段，只有
+// usageMetadata.cachedContentTokenCount（缓存命中数）。
+//
+// 因此：
+//   - CacheCreationInputTokens 恒为 0 —— 这是协议缺字段的确定行为，不是解析失败；
+//   - CacheReadInputTokens 必须正常透传 —— 与上一条同时断言，即可区分
+//     「上游无此字段」与「适配器解析出错」两种情形。
+//
+// 该契约同时覆盖流式与非流式两条路径。
+func TestUsage_CacheCreationContract_NoNativeField(t *testing.T) {
+	// ── 流式路径 ──
+	frame := `{"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":12,"totalTokenCount":112,"cachedContentTokenCount":25}}`
+
+	server := mockGeminiServer(t, http.StatusOK, []string{frame})
+	defer server.Close()
+
+	p := newTestProvider(server)
+	ctx := context.Background()
+
+	ch := p.Chat(ctx, []provider.Message{
+		{Role: provider.RoleUser, Content: "Hello"},
+	}, &provider.ChatConfig{Model: "gemini-2.5-pro"})
+
+	events := collectEvents(ch)
+	usageEvent := findDeltaType(events, provider.StreamDeltaTypeUsage)
+	if usageEvent == nil {
+		t.Fatal("missing UsageDelta event")
+	}
+	streamUsage, ok := usageEvent.Delta.Data.(provider.UsageData)
+	if !ok {
+		t.Fatalf("UsageDelta Data type = %T, want provider.UsageData", usageEvent.Delta.Data)
+	}
+	if streamUsage.CacheCreationInputTokens != 0 {
+		t.Errorf("[stream] CacheCreationInputTokens = %d, want 0（协议无原生 cache_creation 字段）", streamUsage.CacheCreationInputTokens)
+	}
+	if streamUsage.CacheReadInputTokens != 25 {
+		t.Errorf("[stream] CacheReadInputTokens = %d, want 25（缓存命中数必须正常透传）", streamUsage.CacheReadInputTokens)
+	}
+
+	// ── 非流式路径 ──
+	completeBody := `{
+		"candidates": [{"content":{"parts":[{"text":"Hello"}],"role":"model"},"finishReason":"STOP"}],
+		"usageMetadata": {"promptTokenCount":100,"candidatesTokenCount":12,"totalTokenCount":112,"cachedContentTokenCount":25}
+	}`
+	completeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(completeBody))
+	}))
+	defer completeServer.Close()
+
+	cp := newTestProvider(completeServer)
+	result, err := cp.Complete(ctx, []provider.Message{
+		{Role: provider.RoleUser, Content: "Hello"},
+	}, &provider.ChatConfig{Model: "gemini-2.5-pro"})
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if result.Usage.CacheCreationInputTokens != 0 {
+		t.Errorf("[complete] CacheCreationInputTokens = %d, want 0（协议无原生 cache_creation 字段）", result.Usage.CacheCreationInputTokens)
+	}
+	if result.Usage.CacheReadInputTokens != 25 {
+		t.Errorf("[complete] CacheReadInputTokens = %d, want 25（缓存命中数必须正常透传）", result.Usage.CacheReadInputTokens)
+	}
+}

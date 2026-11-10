@@ -171,3 +171,80 @@ func TestComplete_UsageWithCachedTokens(t *testing.T) {
 		t.Errorf("ReasoningTokens = %d, want 8", result.Usage.ReasoningTokens)
 	}
 }
+
+// TestUsage_CacheCreationContract_NoNativeField 锁定 OpenAI Responses 的缓存字段契约。
+//
+// 契约：Responses 协议没有原生的 cache_creation 字段，只有
+// input_tokens_details.cached_tokens（缓存命中数）。
+//
+// 因此：
+//   - CacheCreationInputTokens 恒为 0 —— 这是协议缺字段的确定行为，不是解析失败；
+//   - CacheReadInputTokens 必须正常透传 —— 与上一条同时断言，即可区分
+//     「上游无此字段」与「适配器解析出错」两种情形。
+//
+// 该契约同时覆盖流式与非流式两条路径。
+func TestUsage_CacheCreationContract_NoNativeField(t *testing.T) {
+	// ── 流式路径 ──
+	completedJSON := `{"type":"response.completed","response":{"id":"resp_001","status":"completed","model":"gpt-4o","output":[],"usage":{"input_tokens":100,"output_tokens":12,"total_tokens":112,"input_tokens_details":{"cached_tokens":25}}}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, sseFrame("response.completed", completedJSON))
+	}))
+	defer server.Close()
+
+	p := newMockProvider(t, server)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch := p.Chat(ctx, []provider.Message{
+		{Role: provider.RoleUser, Content: "Hello"},
+	}, &provider.ChatConfig{Model: "gpt-4o"})
+
+	events := drainEvents(ch)
+	usageEvent, ok := findDeltaByType(events, provider.StreamDeltaTypeUsage)
+	if !ok {
+		t.Fatal("missing UsageDelta event")
+	}
+	streamUsage, ok := usageEvent.Delta.Data.(provider.UsageData)
+	if !ok {
+		t.Fatalf("UsageDelta Data type = %T, want provider.UsageData", usageEvent.Delta.Data)
+	}
+	if streamUsage.CacheCreationInputTokens != 0 {
+		t.Errorf("[stream] CacheCreationInputTokens = %d, want 0（协议无原生 cache_creation 字段）", streamUsage.CacheCreationInputTokens)
+	}
+	if streamUsage.CacheReadInputTokens != 25 {
+		t.Errorf("[stream] CacheReadInputTokens = %d, want 25（缓存命中数必须正常透传）", streamUsage.CacheReadInputTokens)
+	}
+
+	// ── 非流式路径 ──
+	completeBody := `{
+		"id": "resp_001",
+		"object": "response",
+		"status": "completed",
+		"model": "gpt-4o",
+		"output": [{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hi"}]}],
+		"usage": {"input_tokens":100,"output_tokens":12,"total_tokens":112,"input_tokens_details":{"cached_tokens":25}}
+	}`
+	completeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, completeBody)
+	}))
+	defer completeServer.Close()
+
+	cp := newMockProvider(t, completeServer)
+	result, err := cp.Complete(ctx, []provider.Message{
+		{Role: provider.RoleUser, Content: "Hello"},
+	}, &provider.ChatConfig{Model: "gpt-4o"})
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if result.Usage.CacheCreationInputTokens != 0 {
+		t.Errorf("[complete] CacheCreationInputTokens = %d, want 0（协议无原生 cache_creation 字段）", result.Usage.CacheCreationInputTokens)
+	}
+	if result.Usage.CacheReadInputTokens != 25 {
+		t.Errorf("[complete] CacheReadInputTokens = %d, want 25（缓存命中数必须正常透传）", result.Usage.CacheReadInputTokens)
+	}
+}
