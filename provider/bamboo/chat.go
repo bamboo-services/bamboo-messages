@@ -32,6 +32,11 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 	go func() {
 		defer close(eventCh)
 
+		// Provider 契约允许 config 为 nil（使用默认配置），此处归一化，
+		// 避免后续读取 config.Model 时发生空指针 panic。
+		if config == nil {
+			config = &provider.ChatConfig{}
+		}
 		// 构建请求参数（buildParams 不设置 Stream，由 chat.go 设置）
 		params := buildParams(systemPrompt, messages, config)
 		params.Stream = true

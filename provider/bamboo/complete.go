@@ -25,6 +25,11 @@ func (p *Provider) Complete(ctx context.Context, messages []provider.Message, co
 // 将统一 provider.Message 转换为 bamboo 原生协议格式，
 // 通过 httpClient 发起同步 HTTP 请求，返回 CompletionResult。
 func (p *Provider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
+	// Provider 契约允许 config 为 nil（使用默认配置），此处归一化，
+	// 避免后续读取 config.Model 时发生空指针 panic。
+	if config == nil {
+		config = &provider.ChatConfig{}
+	}
 	params := buildParams(systemPrompt, messages, config)
 
 	body, err := json.Marshal(params)

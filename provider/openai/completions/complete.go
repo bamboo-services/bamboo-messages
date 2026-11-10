@@ -25,6 +25,11 @@ func (p *CompletionsProvider) Complete(ctx context.Context, messages []provider.
 // 在消息列表前插入系统提示，然后发起同步对话。
 // 使用 httpClient.DoWithDebug 发送 HTTP 请求，不依赖 openai-go SDK。
 func (p *CompletionsProvider) CompleteWithSystem(ctx context.Context, systemPrompt string, messages []provider.Message, config *provider.ChatConfig) (*provider.CompletionResult, error) {
+	// Provider 契约允许 config 为 nil（使用默认配置），此处归一化，
+	// 避免后续读取 config.Model 时发生空指针 panic。
+	if config == nil {
+		config = &provider.ChatConfig{}
+	}
 	params := p.buildParams(systemPrompt, messages, config)
 
 	bodyBytes, err := json.Marshal(params)

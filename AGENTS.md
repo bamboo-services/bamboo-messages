@@ -429,6 +429,7 @@ bamboo-messages/
 39. **Adapter 本地 DTO 不暴露外部类型** — 适配器内部使用本地 `types.go` 定义的请求/响应结构，禁止在公共 API 或返回类型中暴露任何外部 SDK 类型
 40. **错误透传简化** — `BambooError` 简化为 `Category + Message + StatusCode` 三字段（移除 `Type`/`Code`/`ProviderType`）；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError` 直接透传，避免重复包装；非 BambooError 降级为 `NewBambooError("SDK", err.Error(), 0)`
 41. **bamboo 原生格式 = 恒等变换 codec + 镜像 DTO provider** — `bamboo/codec/bamboo` 直接复用 `bamboo.BambooMessage` / `RequestConfig` / `Response` 做 identity transform；`provider/bamboo` 使用本地 wire DTO 镜像 facade JSON 形状，不 import 上层 facade 包，避免循环依赖
+41b. **Provider config nil 归一化** — `Provider` 契约规定「config 传 nil 时使用默认配置」，各适配器的 `Chat` / `ChatWithSystem` / `Complete` / `CompleteWithSystem` 入口必须把 nil config 归一化为空配置，避免读取 `config.Model` 时空指针 panic；`bamboo` 门面层统一通过 `client.buildProviderConfig` 保证下传的配置非 nil，并把未指定的 Model 回落到 `WithDefaultModel`
 
 ## 反模式
 

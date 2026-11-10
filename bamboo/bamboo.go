@@ -69,7 +69,7 @@ func (c *client) Chat(ctx context.Context, messages []BambooMessage, system stri
 	}
 
 	// 转换配置
-	providerConfig := configToProvider(config)
+	providerConfig := c.buildProviderConfig(config)
 
 	// 根据是否携带系统提示词选择对应方法
 	var providerCh <-chan provider.StreamEvent
@@ -196,7 +196,7 @@ func (c *client) Complete(ctx context.Context, messages []BambooMessage, system 
 	}
 
 	// 转换配置
-	providerConfig := configToProvider(config)
+	providerConfig := c.buildProviderConfig(config)
 
 	// 根据是否携带系统提示词选择对应方法
 	var result *provider.CompletionResult
@@ -217,6 +217,22 @@ func (c *client) Complete(ctx context.Context, messages []BambooMessage, system 
 	// 转换结果
 	providerType := string(c.provider.GetProviderType())
 	return resultToResponse(result, providerType), nil
+}
+
+// buildProviderConfig 将 RequestConfig 转换为 provider.ChatConfig。
+//
+// 与裸调用 configToProvider 的区别：
+//   - 始终返回非 nil 的配置，Provider 契约要求「config 为 nil 时使用默认配置」；
+//   - RequestConfig 未指定 Model 时回落到客户端级默认模型（WithDefaultModel）。
+func (c *client) buildProviderConfig(config *RequestConfig) *provider.ChatConfig {
+	providerConfig := configToProvider(config)
+	if providerConfig == nil {
+		providerConfig = &provider.ChatConfig{}
+	}
+	if providerConfig.Model == "" {
+		providerConfig.Model = c.defaultModel
+	}
+	return providerConfig
 }
 
 // wrapProviderError 将 Provider 返回的错误包装为 BambooError。

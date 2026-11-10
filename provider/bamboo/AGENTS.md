@@ -75,6 +75,7 @@ provider/bamboo/
 ## 约定
 
 - **参数构建集中化** — `params.go` 的 `buildParams` 是 Chat 和 Complete 的共享入口；`Stream` 字段由 `chat.go` 在 `buildParams` 之后设置，保证非流式默认不传 `stream`。
+- **nil config 归一化** — `ChatWithSystem` / `CompleteWithSystem` 入口把 nil config 归一化为空配置后再读取 `config.Model`，避免违反 `Provider` 契约（nil 表示使用默认配置）导致空指针 panic。
 - **统一 HTTP 传输** — 通过 `provider.NewHTTPClient` 创建 `*provider.HTTPClient`，认证使用 `Authorization: Bearer` 模式（authPrefix 为 `"Bearer "`，末尾含空格）；流式响应通过 `provider.NewSSEScanner` 解析。
 - **本地 wire DTO 镜像 facade JSON** — `types.go` 定义与 `bamboo` 门面层 JSON 形状 1:1 对应的独立 wire 类型，避免 `provider/bamboo` 导入上层 `bamboo` 包造成循环依赖。
 - **消息角色降级** — `provider.RoleSystem` 在 `buildMessages` 中降级为 `user`（系统提示应通过 system 参数传递）；`provider.RoleTool` 合并到前一条 user 消息的 `tool_result` 块中（Anthropic 风格）。

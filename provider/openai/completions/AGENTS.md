@@ -70,6 +70,8 @@ provider/openai/completions/
 
 ## 约定
 
+- **nil config 归一化** — `ChatWithSystem` / `CompleteWithSystem` 入口把 nil config 归一化为空配置后再读取 `config.Model`，避免违反 `Provider` 契约（nil 表示使用默认配置）导致空指针 panic
+
 - **参数构建集中化** — `params.go` 的 `buildParams` 是 Chat 和 Complete 的共享参数构建入口，通过 `p.legacyCompat` 标志做条件分支
 - **统一 HTTP 传输** — 通过 `provider.NewHTTPClient` 创建 `*provider.HTTPClient`，认证使用 `Authorization: Bearer` 模式；流式响应通过 `provider.NewSSEScanner` 解析 SSE 帧
 - **本地 DTO 模型** — 请求/响应结构通过 `types.go` 本地定义（`chatCompletionChunk`、`chatCompletionResponse` 等），不依赖外部 SDK
