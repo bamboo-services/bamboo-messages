@@ -61,7 +61,7 @@ provider/anthropic/
 | `buildParams` | 方法 | params.go | Chat/Complete 共享参数构建入口 |
 | `handleStreamEvent` | 方法 | stream.go | SSE 事件分发（含 `finishReason *provider.FinishReason` 参数） |
 | `contentBlockStart` | 方法 | stream.go | 内容块开始事件处理（text/thinking/tool_use） |
-| `contentMessageDelta` | 方法 | stream.go | 消息增量事件 — 提取 usage 和 stop_reason |
+| `contentMessageDelta` | 方法 | stream.go | 消息增量事件 — 提取 usage（事件顶层，缺失时回退 delta 内嵌）和 stop_reason |
 | `contentMessageStop` | 方法 | stream.go | 消息结束事件 — 携带 FinishReason |
 | `mapFinishReason` | 函数 | stream.go | Anthropic stop_reason → provider.FinishReason 映射 |
 
@@ -82,6 +82,8 @@ provider/anthropic/
 - **消息角色映射** — `RoleUser` 映射为 `user` 消息，`RoleAssistant` 映射为支持 text/tool_use blocks 的 assistant 消息，`RoleTool` 映射为 `tool_result` 块
 - **UserAgent 统一** — 由 `provider.HTTPClient` 自动注入统一 `User-Agent: BM-SDK/{version}`
 - **Prompt Caching 原生支持** — Anthropic 是唯一使用显式缓存断点的 Provider；`Message.CacheControl` / `Tool.CacheControl` / `ChatConfig.SystemCacheControl` 通过 `provider.NewEphemeralCacheControl()` 创建标记，序列化到请求 DTO 的 `cache_control` 字段
+- **流式 usage 双段解析** — Anthropic 把 usage 拆成两段：`message_start` 携带 `input_tokens` + `cache_creation_input_tokens` + `cache_read_input_tokens`，`message_delta` 顶层（与 `delta` 平级）携带最终 `output_tokens`。`chat.go` 必须把事件顶层 `usage` 透传给 `messageStreamEvent.Usage`，否则最终 output_tokens 丢失；`contentMessageDelta` 顶层缺失时回退 `delta` 内嵌的 usage
+- **输入 token 语义换算** — Anthropic 的 `input_tokens` 不含缓存部分，适配器统一换算为总输入（`input + cache_creation + cache_read`）输出，保证 `CacheReadInputTokens` 始终是 `InputTokens` 的子集
 - **Debug 日志** — 通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client（零包装开销）
 - **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewBambooError(category, message, statusCode)` 包装错误，使状态码作为结构化字段贯穿错误链路；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError`，直接透传避免重复包装
@@ -104,6 +106,7 @@ provider/anthropic/
 7. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成工具定义（`[]map[string]any`）
 8. 认证/连接问题 → 检查 `provider.go` 中 Options 是否正确应用到 `sdkOpts`
 9. 缓存未命中 → 检查 `CacheControl` 标记是否正确设置在 system/messages/tools 上，确认 TTL 值
+9a. 缓存统计丢失 → 检查 `chat.go` 是否透传事件顶层 `usage`（`message_delta` 的 output_tokens 与缓存统计都在顶层），以及 `bamboo/convert.go` 的 usage 合并语义是否被绕过
 10. 请求参数不确定 → 设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
 
 ## BaseURL 配置说明

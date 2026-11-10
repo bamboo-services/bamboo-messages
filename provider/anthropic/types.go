@@ -46,6 +46,7 @@ type messageStreamEvent struct {
 	Index        *int             `json:"index,omitempty"`         // content_block_start/stop 的块索引
 	ContentBlock *contentBlock    `json:"content_block,omitempty"` // content_block_start 的内容块
 	Error        *anthropicError  `json:"error,omitempty"`         // error 事件的错误信息
+	Usage        *anthropicUsage  `json:"usage,omitempty"`         // 顶层 usage（message_delta 携带最终 output_tokens 及可能的 input/cache 统计）
 }
 
 // contentBlock 表示 Anthropic 响应中的内容块。
@@ -75,13 +76,13 @@ type contentBlockDelta struct {
 
 // messageDeltaData 表示 message_delta 事件中 stop 相关的增量数据。
 //
-// Anthropic message_delta 事件的 delta 对象携带 stop_reason 和最终 usage（output_tokens）。
-// usage 字段在非流式 message_start 事件中已返回 input_tokens，
-// message_delta 中补充 output_tokens 和可能的 cache 字段。
+// Anthropic message_delta 事件的顶层携带最终 usage（output_tokens 及可能的 input/cache 统计），
+// delta 对象携带 stop_reason 与 stop_sequence。
+// 部分网关会把 usage 放在 delta 内部，Usage 字段保留该位置的兼容解析。
 type messageDeltaData struct {
 	StopReason   *string         `json:"stop_reason,omitempty"`   // 停止原因
 	StopSequence *string         `json:"stop_sequence,omitempty"` // 触发停止的序列
-	Usage        *anthropicUsage `json:"usage,omitempty"`         // 最终 Token 用量（output_tokens 等）
+	Usage        *anthropicUsage `json:"usage,omitempty"`         // 兼容位置：delta 内嵌的 Token 用量
 }
 
 // messageResponse 表示 Anthropic 非流式响应的完整消息结构。

@@ -912,26 +912,15 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 		if !ok {
 			return nil
 		}
-		sc.usage = &Usage{
-			InputTokens:              data.InputTokens,
-			OutputTokens:             data.OutputTokens,
-			CacheCreationInputTokens: data.CacheCreationInputTokens,
-			CacheReadInputTokens:     data.CacheReadInputTokens,
-			ReasoningTokens:          data.ReasoningTokens,
-		}
+		sc.usage = mergeUsage(sc.usage, data)
 		// 通过 Ping 事件携带 usage，确保流中断时 relay 层仍可提取 usage。
 		// 不使用 EventMessageDelta 以避免在 finish_reason 之前产生携带 usage 的终止语义 chunk，
 		// 导致部分客户端（如 Vercel AI SDK）误判流结束。
 		// 最终 usage 统一由 handleStop() 在 message_delta 中输出。
+		usage := *sc.usage
 		return []StreamEvent{{
-			Type: EventPing,
-			Usage: &Usage{
-				InputTokens:              data.InputTokens,
-				OutputTokens:             data.OutputTokens,
-				CacheCreationInputTokens: data.CacheCreationInputTokens,
-				CacheReadInputTokens:     data.CacheReadInputTokens,
-				ReasoningTokens:          data.ReasoningTokens,
-			},
+			Type:  EventPing,
+			Usage: &usage,
 		}}
 	case provider.StreamDeltaTypeMetadata:
 		data, ok := delta.Data.(provider.MetadataData)
@@ -981,6 +970,35 @@ func (sc *StreamConverter) handleDelta(delta provider.StreamDelta[any]) []Stream
 	default:
 		return nil
 	}
+}
+
+// mergeUsage 合并两次 usage 增量，生成累计用量。
+//
+// 不同 Provider 的 usage 上报节奏不同：Anthropic 把输入与缓存统计放在 message_start，
+// 把最终 output_tokens 放在 message_delta；OpenAI / Responses / Gemini 则在末尾一次性给出。
+// 因此这里采用「零值不覆盖」语义：任一字段为 0 表示本次增量未携带该维度，
+// 保留此前已累计的值，避免后到的 message_delta 把 message_start 的缓存统计清零。
+func mergeUsage(prev *Usage, next provider.UsageData) *Usage {
+	merged := &Usage{}
+	if prev != nil {
+		*merged = *prev
+	}
+	if next.InputTokens > 0 {
+		merged.InputTokens = next.InputTokens
+	}
+	if next.OutputTokens > 0 {
+		merged.OutputTokens = next.OutputTokens
+	}
+	if next.CacheCreationInputTokens > 0 {
+		merged.CacheCreationInputTokens = next.CacheCreationInputTokens
+	}
+	if next.CacheReadInputTokens > 0 {
+		merged.CacheReadInputTokens = next.CacheReadInputTokens
+	}
+	if next.ReasoningTokens > 0 {
+		merged.ReasoningTokens = next.ReasoningTokens
+	}
+	return merged
 }
 
 // handleBlockStop 处理 BlockStop delta，立即输出 content_block_stop 事件。

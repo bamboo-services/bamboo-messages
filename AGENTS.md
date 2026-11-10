@@ -404,6 +404,9 @@ bamboo-messages/
 19. **Debug 脱敏与截断** — 敏感 header（Authorization/X-API-Key/API-Key/X-Goog-API-Key）自动脱敏（保留前 4 后 4）；长文本字段（content/text/system/thinking/reasoning_content/arguments）超过 500 字符自动截断
 20. **Prompt Caching 三层方案** — Layer 1: Anthropic 显式 CacheControl 断点（system/messages/tools）；Layer 2: OpenAI PromptCacheKey 路由粘性键；Layer 3: Gemini 通过 ProviderExtra 的 `cached_content` 引用外部资源
 21. **Usage 缓存统计透传** — `UsageData` / `Usage` 结构体包含 `CacheCreationInputTokens` / `CacheReadInputTokens`，从 Provider → convert → codec 完整透传
+    21a. **Anthropic 双段 usage** — Anthropic 流式把 usage 拆为两段：`message_start` 携带 `input_tokens` + 缓存统计，`message_delta` **顶层**（与 `delta` 平级）携带最终 `output_tokens`；适配器两处都解析，顶层缺失时回退 `delta` 内嵌位置
+    21b. **Usage 增量合并语义** — `StreamConverter.mergeUsage` 采用「零值不覆盖」：任一维度为 0 表示本次增量未携带该维度，保留此前累计值，避免后到的 `message_delta` 把 `message_start` 的缓存统计清零
+    21c. **Anthropic message_start 回填** — `bamboo/codec/anthropic` 流式序列化器延迟输出 `message_start` 帧，等待 usage 就绪后回填输入与缓存统计（Anthropic 生态惯例从 `message_start` 读缓存），随后随下一帧一起输出
 22. **Thinking 内容全链路保留** — `BambooMessage.ThinkingBlock` → `provider.Message.ThinkingContent/ThinkingSignature/ReasoningID` → 适配器 → `provider.CompletionResult.Thinking/ThinkingSignature/ResponseID` → `bamboo.Response.ThinkingBlock` 双向透传
 23. **FinishReason 流式透传** — `provider.StreamEvent.FinishReason` 由适配器填充，`StreamConverter.handleStop` 使用实际完成原因，不再硬编码 `FinishReasonEndTurn`
 24. **ToolName/ToolCallID 分离** — `ToolResultBlock` 和 `provider.Message` 同时保存 `ToolName`（函数名）和 `ToolCallID`（调用 ID），Gemini `FunctionResponse` 需要两者同时存在

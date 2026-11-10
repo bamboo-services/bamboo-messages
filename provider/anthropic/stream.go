@@ -178,12 +178,10 @@ func (p *Provider) contentBlockStop(event messageStreamEvent) []provider.StreamE
 // Anthropic message_delta 事件携带最终的 Token 用量统计（output_tokens 及 cache 字段）
 // 和停止原因。发送 NewUsageDeltaWithCache 并提取 stop_reason 供后续 contentMessageStop 使用。
 func (p *Provider) contentMessageDelta(event messageStreamEvent, finishReason *provider.FinishReason) []provider.StreamEvent {
-	if len(event.Delta) == 0 {
-		return nil
-	}
 	var msgDelta messageDeltaData
-	if err := json.Unmarshal(event.Delta, &msgDelta); err != nil {
-		return nil
+	if len(event.Delta) > 0 {
+		// delta 解析失败不影响顶层 usage 与 stop_reason 的提取，忽略解析错误。
+		_ = json.Unmarshal(event.Delta, &msgDelta)
 	}
 
 	// 提取 stop_reason 供 contentMessageStop 使用
@@ -193,24 +191,31 @@ func (p *Provider) contentMessageDelta(event messageStreamEvent, finishReason *p
 
 	// 提取 message_delta 中的最终 usage（output_tokens 及 cache 字段）。
 	//
+	// Anthropic 把 usage 放在事件顶层（官方协议位置），部分网关会放在 delta 内部，
+	// 此处优先取顶层，缺失时回退到 delta 内嵌位置。
+	//
 	// Anthropic 的 input_tokens 仅统计非缓存输入 token，不含 cache_creation 和 cache_read。
 	// 为与 OpenAI/Gemini 适配器保持一致（InputTokens = 总输入 token，含缓存），
 	// 此处将三部分相加作为 InputTokens，使 CacheReadInputTokens 始终为 InputTokens 的子集。
-	if msgDelta.Usage != nil {
-		totalInput := int64(msgDelta.Usage.InputTokens) +
-			int64(msgDelta.Usage.CacheCreationInputTokens) +
-			int64(msgDelta.Usage.CacheReadInputTokens)
-		return []provider.StreamEvent{{
-			Type: provider.StreamTypeDelta,
-			Delta: provider.NewUsageDeltaWithCache(
-				totalInput,
-				int64(msgDelta.Usage.OutputTokens),
-				int64(msgDelta.Usage.CacheCreationInputTokens),
-				int64(msgDelta.Usage.CacheReadInputTokens),
-			),
-		}}
+	usage := event.Usage
+	if usage == nil {
+		usage = msgDelta.Usage
 	}
-	return nil
+	if usage == nil {
+		return nil
+	}
+	totalInput := int64(usage.InputTokens) +
+		int64(usage.CacheCreationInputTokens) +
+		int64(usage.CacheReadInputTokens)
+	return []provider.StreamEvent{{
+		Type: provider.StreamTypeDelta,
+		Delta: provider.NewUsageDeltaWithCache(
+			totalInput,
+			int64(usage.OutputTokens),
+			int64(usage.CacheCreationInputTokens),
+			int64(usage.CacheReadInputTokens),
+		),
+	}}
 }
 
 // contentMessageStop 处理消息结束事件。

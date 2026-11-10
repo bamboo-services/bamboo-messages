@@ -144,6 +144,7 @@ bamboo/
 - **Error 自动 flush** — `handleError` 在流式错误时自动补发 stop 事件（Vercel AI SDK flush 模式），确保下游接收到完整的 block 生命周期
 - **跨类型 Block 自动切换** — `stopForNewBlock` 在 text→thinking / thinking→text 过渡时自动关闭前一个 block
 - **Usage 通过 EventPing relay** — UsageDelta 现在通过 `EventPing` 事件类型输出（不再用 `EventMessageDelta`），避免过早终止语义
+- **Usage 增量合并** — `mergeUsage` 对 usage 增量采用「零值不覆盖」语义：Anthropic 等 Provider 分段上报（message_start 给输入+缓存、message_delta 给最终 output），后到的增量不会把先前的缓存统计清零；ping 事件携带的是合并后的累计用量
 - **双键工具 Block 追踪** — `toolBlockByProviderIndex` 和 `toolBlockByID` 支持带索引和不带索引两种工具调用模式
 - **ThinkingBlock 内容保留** — `messagesToProvider` 将 `ThinkingBlock` 的内容保留到 `provider.Message.ThinkingContent` / `ThinkingSignature` 字段；`ReasoningID` 保留到 `provider.Message.ReasoningID`
 - **ThinkingBlock 生成** — `resultToResponse` 中，若 `CompletionResult.Thinking` 非空，会在 Content 最前面生成 `ThinkingBlock`

@@ -172,6 +172,117 @@ func TestContentMessageStart_NoCacheFields(t *testing.T) {
 	}
 }
 
+// TestContentMessageDelta_TopLevelUsage 验证 message_delta 顶层 usage 被正确解析。
+//
+// Anthropic 官方协议把 usage 放在事件顶层（与 delta 平级），
+// 其中携带最终 output_tokens，必要时还携带最终的 input/cache 统计。
+func TestContentMessageDelta_TopLevelUsage(t *testing.T) {
+	p := NewProvider("test-key")
+
+	eventJSON := `{
+		"type": "message_delta",
+		"delta": {
+			"stop_reason": "end_turn",
+			"stop_sequence": null
+		},
+		"usage": {
+			"output_tokens": 12
+		}
+	}`
+	event := unmarshalEvent(t, eventJSON)
+
+	var finishReason provider.FinishReason
+	events := p.handleStreamEvent(event, &finishReason)
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event for message_delta, got %d", len(events))
+	}
+	if events[0].Delta.Type != provider.StreamDeltaTypeUsage {
+		t.Errorf("delta type = %q, want %q", events[0].Delta.Type, provider.StreamDeltaTypeUsage)
+	}
+
+	usageData, ok := events[0].Delta.Data.(provider.UsageData)
+	if !ok {
+		t.Fatalf("delta data type = %T, want provider.UsageData", events[0].Delta.Data)
+	}
+	if usageData.OutputTokens != 12 {
+		t.Errorf("output_tokens = %d, want 12", usageData.OutputTokens)
+	}
+	if finishReason != provider.FinishReasonStop {
+		t.Errorf("finishReason = %q, want %q", finishReason, provider.FinishReasonStop)
+	}
+}
+
+// TestContentMessageDelta_TopLevelUsageWithCache 验证 message_delta 顶层 usage 中的
+// input/cache 统计被正确解析并换算为总输入 token。
+func TestContentMessageDelta_TopLevelUsageWithCache(t *testing.T) {
+	p := NewProvider("test-key")
+
+	eventJSON := `{
+		"type": "message_delta",
+		"delta": {"stop_reason": "end_turn"},
+		"usage": {
+			"input_tokens": 100,
+			"output_tokens": 12,
+			"cache_creation_input_tokens": 50,
+			"cache_read_input_tokens": 25
+		}
+	}`
+	event := unmarshalEvent(t, eventJSON)
+
+	var finishReason provider.FinishReason
+	events := p.handleStreamEvent(event, &finishReason)
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event for message_delta, got %d", len(events))
+	}
+
+	usageData, ok := events[0].Delta.Data.(provider.UsageData)
+	if !ok {
+		t.Fatalf("delta data type = %T, want provider.UsageData", events[0].Delta.Data)
+	}
+	if usageData.InputTokens != 175 {
+		t.Errorf("input_tokens = %d, want 175", usageData.InputTokens)
+	}
+	if usageData.OutputTokens != 12 {
+		t.Errorf("output_tokens = %d, want 12", usageData.OutputTokens)
+	}
+	if usageData.CacheCreationInputTokens != 50 {
+		t.Errorf("cache_creation_input_tokens = %d, want 50", usageData.CacheCreationInputTokens)
+	}
+	if usageData.CacheReadInputTokens != 25 {
+		t.Errorf("cache_read_input_tokens = %d, want 25", usageData.CacheReadInputTokens)
+	}
+}
+
+// TestContentMessageDelta_UsageInsideDelta 验证部分网关把 usage 放在 delta 内部时的兼容解析。
+func TestContentMessageDelta_UsageInsideDelta(t *testing.T) {
+	p := NewProvider("test-key")
+
+	eventJSON := `{
+		"type": "message_delta",
+		"delta": {
+			"stop_reason": "end_turn",
+			"usage": {"output_tokens": 7}
+		}
+	}`
+	event := unmarshalEvent(t, eventJSON)
+
+	var finishReason provider.FinishReason
+	events := p.handleStreamEvent(event, &finishReason)
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event for message_delta, got %d", len(events))
+	}
+	usageData, ok := events[0].Delta.Data.(provider.UsageData)
+	if !ok {
+		t.Fatalf("delta data type = %T, want provider.UsageData", events[0].Delta.Data)
+	}
+	if usageData.OutputTokens != 7 {
+		t.Errorf("output_tokens = %d, want 7", usageData.OutputTokens)
+	}
+}
+
 func TestContentBlockDelta_SignatureDelta(t *testing.T) {
 	p := NewProvider("test-key")
 

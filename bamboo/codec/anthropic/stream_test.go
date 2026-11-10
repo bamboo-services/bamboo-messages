@@ -33,10 +33,55 @@ func parseSSEEvent(t *testing.T, raw []byte) (eventType string, payload map[stri
 	return eventType, payload
 }
 
+// sseFrame 表示一个解析后的 SSE 帧。
+type sseFrame struct {
+	eventType string
+	payload   map[string]any
+}
+
+// parseSSEFrames 解析包含多个 SSE 帧的缓冲区。
+//
+// message_start 帧会被延迟到下一个事件到达时一起输出，
+// 因此一次 Serialize 可能返回多个帧，需要逐帧校验。
+func parseSSEFrames(t *testing.T, raw []byte) []sseFrame {
+	t.Helper()
+	if len(raw) == 0 {
+		return nil
+	}
+	var frames []sseFrame
+	for _, block := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n\n") {
+		if strings.TrimSpace(block) == "" {
+			continue
+		}
+		var frame sseFrame
+		for _, line := range strings.Split(block, "\n") {
+			if strings.HasPrefix(line, "event: ") {
+				frame.eventType = strings.TrimPrefix(line, "event: ")
+			} else if strings.HasPrefix(line, "data: ") {
+				dataStr := strings.TrimPrefix(line, "data: ")
+				if err := json.Unmarshal([]byte(dataStr), &frame.payload); err != nil {
+					t.Fatalf("failed to unmarshal SSE data: %v\nraw: %s", err, dataStr)
+				}
+			}
+		}
+		if frame.eventType == "" {
+			t.Fatalf("missing event: line in SSE: %q", block)
+		}
+		if frame.payload == nil {
+			t.Fatalf("missing data: line in SSE: %q", block)
+		}
+		frames = append(frames, frame)
+	}
+	return frames
+}
+
 func TestStreamSerializer_TextStream(t *testing.T) {
 	s := newStreamSerializer("")
 
 	// 1. message_start
+	//
+	// message_start 帧被延迟输出：Anthropic 要求该帧携带输入与缓存统计，
+	// 而这些统计通常在随后的 usage 增量中才到达，因此这里不立即产出帧。
 	data, err := s.Serialize(bamboo.StreamEvent{
 		Type:    bamboo.EventMessageStart,
 		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
@@ -45,13 +90,27 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Serialize(message_start) error = %v", err)
 	}
-	if data == nil {
-		t.Fatal("message_start should produce output")
+	if len(data) != 0 {
+		t.Fatalf("message_start should defer output, got %q", data)
 	}
-	eventType, payload := parseSSEEvent(t, data)
-	if eventType != "message_start" {
-		t.Errorf("eventType = %q, want %q", eventType, "message_start")
+
+	// 2. content_block_start (text)：与延迟的 message_start 帧一起输出
+	frame, err := s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        0,
+		ContentBlock: bamboo.NewTextBlock(""),
+	})
+	if err != nil {
+		t.Fatalf("Serialize(content_block_start) error = %v", err)
 	}
+	frames := parseSSEFrames(t, frame)
+	if len(frames) != 2 {
+		t.Fatalf("expected 2 frames (message_start + content_block_start), got %d", len(frames))
+	}
+	if frames[0].eventType != "message_start" {
+		t.Errorf("first frame eventType = %q, want %q", frames[0].eventType, "message_start")
+	}
+	payload := frames[0].payload
 	if payload["type"] != "message_start" {
 		t.Errorf("payload type = %v", payload["type"])
 	}
@@ -65,17 +124,15 @@ func TestStreamSerializer_TextStream(t *testing.T) {
 	if msg["type"] != "message" {
 		t.Errorf("message.type = %v", msg["type"])
 	}
-
-	// 2. content_block_start (text)
-	data, err = s.Serialize(bamboo.StreamEvent{
-		Type:         bamboo.EventContentBlockStart,
-		Index:        0,
-		ContentBlock: bamboo.NewTextBlock(""),
-	})
-	if err != nil {
-		t.Fatalf("Serialize(content_block_start) error = %v", err)
+	usage, ok := msg["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.usage should be object")
 	}
-	eventType, payload = parseSSEEvent(t, data)
+	if in, ok := usage["input_tokens"].(float64); !ok || in != 10 {
+		t.Errorf("usage.input_tokens = %v, want 10", usage["input_tokens"])
+	}
+	eventType := frames[1].eventType
+	payload = frames[1].payload
 	if eventType != "content_block_start" {
 		t.Errorf("eventType = %q", eventType)
 	}
@@ -320,6 +377,65 @@ func TestStreamSerializer_PingEvent(t *testing.T) {
 	}
 }
 
+// TestStreamSerializer_MessageStartCarriesCacheStats 验证 message_start 帧携带缓存统计。
+//
+// 回归场景：message_start 此前立即输出且 usage 为空，下游按 Anthropic 惯例从
+// message_start 读取输入与缓存统计时只能拿到 0，表现为「缓存无法记录」。
+// 现在 message_start 会等待 usage 就绪（ping 事件）后再输出，并回填统计。
+func TestStreamSerializer_MessageStartCarriesCacheStats(t *testing.T) {
+	s := newStreamSerializer("claude-sonnet-4")
+
+	// message_start 只登记状态，不立即产出帧
+	data, err := s.Serialize(bamboo.StreamEvent{
+		Type:    bamboo.EventMessageStart,
+		Message: &bamboo.BambooMessage{Role: bamboo.RoleAssistant},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(message_start) error = %v", err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("message_start should defer output, got %q", data)
+	}
+
+	// ping 事件携带 usage：message_start 帧随之输出
+	data, err = s.Serialize(bamboo.StreamEvent{
+		Type:  bamboo.EventPing,
+		Usage: &bamboo.Usage{InputTokens: 175, CacheCreationInputTokens: 50, CacheReadInputTokens: 25},
+	})
+	if err != nil {
+		t.Fatalf("Serialize(ping) error = %v", err)
+	}
+	frames := parseSSEFrames(t, data)
+	if len(frames) != 2 {
+		t.Fatalf("expected 2 frames (message_start + ping), got %d", len(frames))
+	}
+	if frames[0].eventType != "message_start" {
+		t.Fatalf("first frame = %q, want %q", frames[0].eventType, "message_start")
+	}
+	if frames[1].eventType != "ping" {
+		t.Fatalf("second frame = %q, want %q", frames[1].eventType, "ping")
+	}
+
+	msg, ok := frames[0].payload["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("message field should be object")
+	}
+	usage, ok := msg["usage"].(map[string]any)
+	if !ok {
+		t.Fatalf("message.usage should be object")
+	}
+	// Anthropic 语义：input_tokens 不含缓存部分
+	if in, ok := usage["input_tokens"].(float64); !ok || in != 100 {
+		t.Errorf("input_tokens = %v, want 100", usage["input_tokens"])
+	}
+	if cc, ok := usage["cache_creation_input_tokens"].(float64); !ok || cc != 50 {
+		t.Errorf("cache_creation_input_tokens = %v, want 50", usage["cache_creation_input_tokens"])
+	}
+	if cr, ok := usage["cache_read_input_tokens"].(float64); !ok || cr != 25 {
+		t.Errorf("cache_read_input_tokens = %v, want 25", usage["cache_read_input_tokens"])
+	}
+}
+
 func TestStreamSerializer_MessageDeltaUsage(t *testing.T) {
 	s := newStreamSerializer("")
 	data, err := s.Serialize(bamboo.StreamEvent{
@@ -394,11 +510,24 @@ func TestMessageStartModelID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Serialize(message_start) error = %v", err)
 	}
-	if data == nil {
-		t.Fatal("message_start should produce output")
+	if len(data) != 0 {
+		t.Fatalf("message_start should defer output, got %q", data)
 	}
 
-	_, payload := parseSSEEvent(t, data)
+	// message_start 帧随下一个事件一起输出
+	data, err = s.Serialize(bamboo.StreamEvent{
+		Type:         bamboo.EventContentBlockStart,
+		Index:        0,
+		ContentBlock: bamboo.NewTextBlock(""),
+	})
+	if err != nil {
+		t.Fatalf("Serialize(content_block_start) error = %v", err)
+	}
+	frames := parseSSEFrames(t, data)
+	if len(frames) == 0 || frames[0].eventType != "message_start" {
+		t.Fatalf("expected message_start frame first, got %+v", frames)
+	}
+	payload := frames[0].payload
 	msg, ok := payload["message"].(map[string]any)
 	if !ok {
 		t.Fatalf("message field should be object")

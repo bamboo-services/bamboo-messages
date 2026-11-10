@@ -17,6 +17,13 @@ type anthropicStreamSerializer struct {
 	messageID string
 	model     string
 	started   bool
+	// startUsage 累计已知的 usage，用于填充 message_start 帧。
+	//
+	// Anthropic 协议把输入与缓存统计放在 message_start，而上游 Provider 通常在
+	// 随后的 usage 增量（ping 事件）才给出，因此这里先缓存再回填。
+	startUsage *bamboo.Usage
+	// pendingStart 表示 message_start 帧尚未输出，等待 usage 就绪后回填。
+	pendingStart bool
 }
 
 // newStreamSerializer 创建一个新的 Anthropic 流式序列化器实例。
@@ -30,33 +37,86 @@ func newStreamSerializer(model string) *anthropicStreamSerializer {
 //
 // 每条 SSE 格式: `event: {type}\ndata: {json}\n\n`
 func (s *anthropicStreamSerializer) Serialize(event bamboo.StreamEvent) ([]byte, error) {
+	var frame []byte
+	var err error
+
 	switch event.Type {
 	case bamboo.EventMessageStart:
 		return s.handleMessageStart(event)
 
 	case bamboo.EventContentBlockStart:
-		return s.handleContentBlockStart(event)
+		frame, err = s.handleContentBlockStart(event)
 
 	case bamboo.EventContentBlockDelta:
-		return s.handleContentBlockDelta(event)
+		frame, err = s.handleContentBlockDelta(event)
 
 	case bamboo.EventContentBlockStop:
-		return s.handleContentBlockStop(event)
+		frame, err = s.handleContentBlockStop(event)
 
 	case bamboo.EventMessageDelta:
-		return s.handleMessageDelta(event)
+		s.mergeUsage(event.Usage)
+		frame, err = s.handleMessageDelta(event)
 
 	case bamboo.EventMessageStop:
-		return s.handleMessageStop(event)
+		frame, err = s.handleMessageStop(event)
 
 	case bamboo.EventPing:
-		return s.handlePing(event)
+		// ping 事件可能携带 usage（Anthropic 上游在 message_start 阶段给出输入与缓存统计），
+		// 先回填再输出，保证 message_start 帧带上真实的缓存统计。
+		s.mergeUsage(event.Usage)
+		frame, err = s.handlePing(event)
 
 	case bamboo.EventError:
-		return s.handleError(event)
+		frame, err = s.handleError(event)
 
 	default:
 		return nil, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	return s.withPendingStart(frame)
+}
+
+// withPendingStart 在待输出的 message_start 帧前拼接当前事件帧。
+//
+// message_start 必须始终是流中的第一帧，因此这里做延迟输出：
+// 等到第一个携带 usage 的事件（ping）到达后再回填缓存统计并输出。
+func (s *anthropicStreamSerializer) withPendingStart(frame []byte) ([]byte, error) {
+	if !s.pendingStart {
+		return frame, nil
+	}
+	s.pendingStart = false
+	start, err := s.buildMessageStartFrame()
+	if err != nil {
+		return nil, err
+	}
+	return append(start, frame...), nil
+}
+
+// mergeUsage 累计已知的 usage（零值不覆盖已有值）。
+func (s *anthropicStreamSerializer) mergeUsage(usage *bamboo.Usage) {
+	if usage == nil {
+		return
+	}
+	if s.startUsage == nil {
+		s.startUsage = &bamboo.Usage{}
+	}
+	if usage.InputTokens > 0 {
+		s.startUsage.InputTokens = usage.InputTokens
+	}
+	if usage.OutputTokens > 0 {
+		s.startUsage.OutputTokens = usage.OutputTokens
+	}
+	if usage.CacheCreationInputTokens > 0 {
+		s.startUsage.CacheCreationInputTokens = usage.CacheCreationInputTokens
+	}
+	if usage.CacheReadInputTokens > 0 {
+		s.startUsage.CacheReadInputTokens = usage.CacheReadInputTokens
+	}
+	if usage.ReasoningTokens > 0 {
+		s.startUsage.ReasoningTokens = usage.ReasoningTokens
 	}
 }
 
@@ -64,12 +124,21 @@ func (s *anthropicStreamSerializer) Serialize(event bamboo.StreamEvent) ([]byte,
 //
 // Anthropic 流式协议没有 [DONE] 标记，message_stop 事件即为终止信号。
 func (s *anthropicStreamSerializer) Flush() ([]byte, error) {
+	// 流可能在 message_start 之后立即中断，此时补发待输出的 message_start 帧，
+	// 保证下游看到的帧序始终符合 Anthropic 协议。
+	if s.pendingStart {
+		return s.withPendingStart(nil)
+	}
 	return nil, nil
 }
 
 // handleMessageStart 处理 message_start 事件。
 //
-// 输出格式:
+// 该事件只登记待输出的状态，不立即产出帧：Anthropic 协议要求 message_start 携带
+// 输入与缓存统计，而这些统计通常在随后的 usage 增量（ping 事件）中才到达，
+// 因此帧的输出被延迟到 withPendingStart。
+//
+// 最终输出格式:
 //
 //	event: message_start
 //	data: {"type":"message_start","message":{"id":"...","type":"message","role":"assistant","content":[],"model":"...","stop_reason":null,"usage":{"input_tokens":0,"output_tokens":0}}}
@@ -80,17 +149,35 @@ func (s *anthropicStreamSerializer) handleMessageStart(event bamboo.StreamEvent)
 		s.messageID = fmt.Sprintf("msg_bamboo_%d", time.Now().UnixNano())
 	}
 
+	// 缓存事件携带的 usage，但暂不输出帧：
+	// message_start 必须携带真实的输入与缓存统计，而这些统计通常在随后的
+	// usage 增量（ping 事件）中才到达，因此延迟到 withPendingStart 统一输出。
+	s.mergeUsage(event.Usage)
+	s.pendingStart = true
+	return nil, nil
+}
+
+// buildMessageStartFrame 构造 message_start 帧。
+//
+// Anthropic 协议的 input_tokens 仅统计非缓存输入 token，
+// bamboo.Usage.InputTokens 是总输入（含 cache_creation + cache_read），需要扣除缓存部分。
+func (s *anthropicStreamSerializer) buildMessageStartFrame() ([]byte, error) {
 	var inputTokens, outputTokens int64
 	var cacheCreation, cacheRead int64
-	if event.Usage != nil {
-		inputTokens = event.Usage.InputTokens
-		outputTokens = event.Usage.OutputTokens
-		cacheCreation = event.Usage.CacheCreationInputTokens
-		cacheRead = event.Usage.CacheReadInputTokens
+	if s.startUsage != nil {
+		inputTokens = s.startUsage.InputTokens
+		outputTokens = s.startUsage.OutputTokens
+		cacheCreation = s.startUsage.CacheCreationInputTokens
+		cacheRead = s.startUsage.CacheReadInputTokens
+	}
+
+	nonCachedInput := inputTokens - cacheCreation - cacheRead
+	if nonCachedInput < 0 {
+		nonCachedInput = 0
 	}
 
 	usageMap := map[string]any{
-		"input_tokens":  inputTokens,
+		"input_tokens":  nonCachedInput,
 		"output_tokens": outputTokens,
 	}
 	if cacheCreation > 0 {

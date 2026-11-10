@@ -171,6 +171,7 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 					ContentBlock *contentBlock    `json:"content_block,omitempty"`
 					Message      *messageResponse `json:"message,omitempty"`
 					Error        *anthropicError  `json:"error,omitempty"`
+					Usage        *anthropicUsage  `json:"usage,omitempty"`
 				}
 				if jsonErr := json.Unmarshal(data, &raw); jsonErr == nil {
 					if event.Type == "" && raw.Type != "" {
@@ -180,6 +181,9 @@ func (p *Provider) ChatWithSystem(ctx context.Context, systemPrompt string, mess
 					event.ContentBlock = raw.ContentBlock
 					event.Message = raw.Message
 					event.Error = raw.Error
+					// message_delta 的 usage 位于事件顶层（与 delta 平级），必须透传，
+					// 否则最终 output_tokens 与缓存统计会丢失。
+					event.Usage = raw.Usage
 					// 对于 content_block_delta 和 message_delta，Delta 字段需要是 delta 子对象
 					// 但 handleStreamEvent 中 contentBlockDelta 会重新从 event.Delta 解析 contentBlockDelta
 					// 所以这里需要提取 delta 子对象
