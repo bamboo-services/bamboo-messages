@@ -12,6 +12,7 @@ OpenAI Responses 协议适配器，将 OpenAI Responses API 转换为统一的 `
 provider/openai/responses/
 ├── provider.go       # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithInterceptor) + 类型别名 + 拦截器 Transport 注入
 ├── params.go         # buildParams — 共享参数构建（Chat/Complete 统一入口）
+├── cache.go          # 缓存控制映射 — prompt_cache_options / prompt_cache_retention / 块级 prompt_cache_breakpoint
 ├── chat.go           # 流式对话实现
 ├── complete.go       # 非流式对话实现 — 含 reasoning items 提取 + incomplete 状态处理
 ├── stream.go         # SSE → StreamEvent 转换 + FinishReason 携带 + mapResponseFinishReason
@@ -26,6 +27,7 @@ provider/openai/responses/
 ├── stream_test.go    # 流式事件单元测试
 ├── provider_test.go  # 集成测试
 ├── usage_test.go      # 缓存字段契约测试（无原生 cache_creation → 恒为 0，cache_read 正常透传）
+├── cache_test.go      # 缓存控制映射测试（prompt_cache_options / retention / 块级断点 / system 走 developer 消息）
 └── params_audit_test.go  # Metadata/Stop 审计测试
 ```
 
@@ -78,6 +80,12 @@ provider/openai/responses/
 - **Debug 日志** — 通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；请求前通过 `httpClient.DoWithDebug` 输出 Provider 类型、端点、headers（敏感字段脱敏）和 body（长文本截断）
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client
 - **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewBambooError(category, message, statusCode)` 包装错误，使状态码作为结构化字段贯穿错误链路；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError`，直接透传避免重复包装
+- **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewBambooError(category, message, statusCode)` 包装错误，使状态码作为结构化字段贯穿错误链路；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError`，直接透传避免重复包装
+- **缓存控制映射（cache.go）** — `cache.go` 集中负责 Responses 侧缓存字段的映射：`prompt_cache_options`（mode/ttl/prewarm/comparison_response_id）、`prompt_cache_retention`、块级 `prompt_cache_breakpoint`。三者互相独立，未配置即不发射对应字段
+- **请求级 TTL 词表** — Responses 的 `prompt_cache_options.ttl` 接受 "30m"/"12h"；块级 `prompt_cache_breakpoint.ttl` 同样接受 "30m"/"12h"。不适用的取值（如 "1h"、"5m"）一律丢弃，绝不向上游发送非法值
+- **块级断点门控** — `prompt_cache_breakpoint` 是 gpt-5.6+ 新字段，对更早的模型发送会 400。仅当 `PromptCacheOptions.BlockBreakpointsEnabled()` 为真（`EnableBlockBreakpoints=true` 或 `Mode=explicit`）时才发射断点
+- **断点载体形态** — 断点只能挂在 `input_text`/`input_image`/`input_file` 输入块上（**不能**挂在 `output_text`）；顶层 `instructions` 是纯字符串无法承载断点，因此可缓存的 system 提示改由 `developer` 消息的 `input_text` 块承载
+- **prewarm 与 comparison_response_id** — 通过 `ProviderExtra` 透传（`prewarm` / `comparison_response_id`），因为它们是 Responses 独有的请求级字段，不进入跨协议统一模型
 
 ## 反模式
 

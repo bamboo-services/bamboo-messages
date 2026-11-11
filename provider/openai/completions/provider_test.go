@@ -206,7 +206,7 @@ func TestCompletionsProvider_buildMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := p.buildMessages(tt.systemPrompt, tt.messages)
+			result := p.buildMessages(tt.systemPrompt, tt.messages, nil)
 			if len(result) != tt.wantLen {
 				t.Errorf("buildMessages() returned %d messages, want %d", len(result), tt.wantLen)
 			}
@@ -233,7 +233,7 @@ func TestCompletionsProvider_buildMessages_ToolFollowsAssistant(t *testing.T) {
 		{Role: provider.RoleTool, Content: "晴", ToolCallID: "tc1"},
 	}
 
-	result := p.buildMessages("", msgs)
+	result := p.buildMessages("", msgs, nil)
 	if len(result) != 3 {
 		t.Fatalf("期望 3 条消息, 实际 %d", len(result))
 	}
@@ -270,7 +270,7 @@ func TestCompletionsProvider_buildMessages_ParallelToolOrderPreserved(t *testing
 		{Role: provider.RoleTool, Content: "r2", ToolCallID: "tc2"},
 	}
 
-	result := p.buildMessages("", msgs)
+	result := p.buildMessages("", msgs, nil)
 	if len(result) != 3 {
 		t.Fatalf("期望 3 条消息, 实际 %d", len(result))
 	}
@@ -304,7 +304,7 @@ func TestCompletionsProvider_buildMessages_MultiTurnReordering(t *testing.T) {
 		{Role: provider.RoleTool, Content: "r2", ToolCallID: "tc2"},
 	}
 
-	result := p.buildMessages("", msgs)
+	result := p.buildMessages("", msgs, nil)
 	// 期望顺序：assistant(tc1) → tool(tc1) → user("继续") → assistant(tc2) → tool(tc2) → user("夹心文本")
 	if len(result) != 6 {
 		t.Fatalf("期望 6 条消息, 实际 %d", len(result))
@@ -338,7 +338,7 @@ func TestCompletionsProvider_buildMessages_KeepsExistingOrder(t *testing.T) {
 		{Role: provider.RoleAssistant, Content: "It's 20°C in Paris."},
 	}
 
-	result := p.buildMessages("", msgs)
+	result := p.buildMessages("", msgs, nil)
 	if len(result) != 4 {
 		t.Fatalf("期望 4 条消息, 实际 %d", len(result))
 	}

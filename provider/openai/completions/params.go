@@ -28,7 +28,7 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 
 	params := map[string]any{
 		"model":    config.Model,
-		"messages": p.buildMessages(systemPrompt, messages),
+		"messages": p.buildMessages(systemPrompt, messages, config),
 	}
 
 	// === MaxTokens — Legacy 使用旧字段名 max_tokens ===
@@ -114,6 +114,20 @@ func (p *CompletionsProvider) buildParams(systemPrompt string, messages []provid
 			xLog.WithName("provider/openai-completions").SugarWarn(context.Background(),
 				fmt.Sprintf("SystemCacheControl (type=%s) 由 OpenAI 自动缓存处理", config.SystemCacheControl.Type))
 		}
+	}
+
+	// PromptCacheOptions — 请求级缓存控制（prompt_cache_options / prompt_cache_retention）。
+	//
+	// OpenAI 的请求级缓存控制分两个互不干扰的字段：
+	//   - prompt_cache_options: {mode, ttl} — gpt-5.6+ 支持，控制断点选取方式与请求级最小存活时间；
+	//   - prompt_cache_retention: "in_memory" | "24h" — gpt-5.6 之前的模型使用，已被官方标记 deprecated。
+	//
+	// 只有显式设置对应字段时才发送，避免老模型因收到不支持的参数而报 400。
+	if pco := buildPromptCacheOptions(config, requestCacheTTL); pco != nil {
+		params["prompt_cache_options"] = pco
+	}
+	if retention := buildPromptCacheRetention(config); retention != "" {
+		params["prompt_cache_retention"] = retention
 	}
 
 	// 预测内容（用于加速已知内容的生成）

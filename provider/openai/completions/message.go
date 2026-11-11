@@ -23,14 +23,20 @@ import (
 // "An assistant message with 'tool_calls' must be followed by tool messages"
 // 拒绝请求。因此 tool 消息通过声明位置映射被插入到紧跟 assistant 的位置，
 // 保持并行工具响应的原始顺序。
-func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []provider.Message) []map[string]any {
+func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []provider.Message, config *provider.ChatConfig) []map[string]any {
 	result := make([]map[string]any, 0, len(messages)+1)
 
 	if systemPrompt != "" {
-		result = append(result, map[string]any{
+		// system 级缓存断点：OpenAI 的 system 消息内容需为数组形式，
+		// 断点挂在唯一的 text 块上（官方限制 system 只支持 text 块）。
+		// 未启用 explicit 模式时 buildCacheBreakpoint 返回 nil，此时保持
+		// 原始字符串形式，避免序列化出 "prompt_cache_breakpoint": null。
+		systemMsg := map[string]any{
 			"role":    "system",
 			"content": systemPrompt,
-		})
+		}
+		applyStringContentBreakpoint(systemMsg, systemCacheControl(config), config)
+		result = append(result, systemMsg)
 	}
 
 	// tool_call_id → 声明它的 assistant 在 result 中的位置
@@ -87,18 +93,25 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 						}
 					}
 				}
+				applyCacheBreakpoint(parts, msg.CacheControl, config)
 				result = append(result, map[string]any{
 					"role":    "user",
 					"content": parts,
 				})
 			} else {
-				result = append(result, map[string]any{
+				// 纯文本消息：缓存断点只能挂在内容块上，承载断点时必须改用
+				// content 数组形式。
+				userMsg := map[string]any{
 					"role":    "user",
 					"content": msg.Content,
-				})
+				}
+				applyStringContentBreakpoint(userMsg, msg.CacheControl, config)
+				result = append(result, userMsg)
 			}
 		case provider.RoleAssistant:
 			am := p.buildAssistantMessage(msg)
+			// assistant 文本块支持块级缓存断点（官方仅允许 type:"text"）。
+			applyStringContentBreakpoint(am, msg.CacheControl, config)
 			result = append(result, am)
 			// 记录该 assistant 声明的所有 tool_call id → 在 result 中的位置
 			if len(msg.ToolCalls) > 0 {
@@ -115,6 +128,8 @@ func (p *CompletionsProvider) buildMessages(systemPrompt string, messages []prov
 				"content":      msg.Content,
 				"tool_call_id": msg.ToolCallID,
 			}
+			// tool 消息的文本块支持块级缓存断点（官方仅允许 type:"text"）。
+			applyStringContentBreakpoint(toolMsg, msg.CacheControl, config)
 			// 将 tool 消息插入到声明它的 assistant 之后，保持邻接约束
 			anchor, ok := declPos[msg.ToolCallID]
 			if !ok {

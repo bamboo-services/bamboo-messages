@@ -13,22 +13,17 @@ import (
 // 将 provider.Message 数组转换为 Responses API 的 input 数组（[]map[string]any），
 // 支持 user、assistant、tool 三种角色的消息。
 // system 角色由 params.go 的 instructions 字段处理，此处不再注入。
-func (p *ResponsesProvider) buildInput(messages []provider.Message) []map[string]any {
+func (p *ResponsesProvider) buildInput(messages []provider.Message, config *provider.ChatConfig) []map[string]any {
 	items := make([]map[string]any, 0, len(messages))
 
 	for _, msg := range messages {
 		switch msg.Role {
 		case provider.RoleUser:
-			items = append(items, p.buildUserItem(msg))
+			items = append(items, p.buildUserItem(msg, config))
 		case provider.RoleAssistant:
 			items = append(items, p.buildAssistantItem(msg)...)
 		case provider.RoleTool:
-			// 工具响应消息 → function_call_output 项
-			items = append(items, map[string]any{
-				"type":    "function_call_output",
-				"call_id": msg.ToolCallID,
-				"output":  msg.Content,
-			})
+			items = append(items, p.buildToolOutputItem(msg, config))
 		}
 	}
 
@@ -40,17 +35,20 @@ func (p *ResponsesProvider) buildInput(messages []provider.Message) []map[string
 // 支持纯文本和富文本（ContentBlocks）两种形式：
 //   - 纯文本：{"role":"user","content":[{"type":"input_text","text": msg.Content}]}
 //   - 富文本：遍历 ContentBlocks，映射到对应类型（input_text / input_image）
-func (p *ResponsesProvider) buildUserItem(msg provider.Message) map[string]any {
+func (p *ResponsesProvider) buildUserItem(msg provider.Message, config *provider.ChatConfig) map[string]any {
 	// 无内容块时，使用简单文本形式
 	if len(msg.ContentBlocks) == 0 {
-		return map[string]any{
-			"role": "user",
-			"content": []map[string]any{
-				{
-					"type": "input_text",
-					"text": msg.Content,
-				},
+		parts := []map[string]any{
+			{
+				"type": "input_text",
+				"text": msg.Content,
 			},
+		}
+		// 块级缓存断点挂在最后一个 input_text 块上。
+		applyCacheBreakpoint(parts, msg.CacheControl, config)
+		return map[string]any{
+			"role":    "user",
+			"content": parts,
 		}
 	}
 
@@ -98,11 +96,35 @@ func (p *ResponsesProvider) buildUserItem(msg provider.Message) map[string]any {
 			}
 		}
 	}
+	// 块级缓存断点挂在最后一个 input_text 块上。
+	applyCacheBreakpoint(parts, msg.CacheControl, config)
 
 	return map[string]any{
 		"role":    "user",
 		"content": parts,
 	}
+}
+
+// buildToolOutputItem 构建工具响应项（function_call_output）。
+//
+// 默认输出为纯字符串；携带缓存断点时改用内容块数组形式，
+// 因为 Responses 的 prompt_cache_breakpoint 只能挂在内容块上。
+func (p *ResponsesProvider) buildToolOutputItem(msg provider.Message, config *provider.ChatConfig) map[string]any {
+	item := map[string]any{
+		"type":    "function_call_output",
+		"call_id": msg.ToolCallID,
+		"output":  msg.Content,
+	}
+	if bp := buildCacheBreakpoint(msg.CacheControl, config); bp != nil {
+		item["output"] = []map[string]any{
+			{
+				"type":                    "input_text",
+				"text":                    msg.Content,
+				"prompt_cache_breakpoint": bp,
+			},
+		}
+	}
+	return item
 }
 
 // buildAssistantItem 构建助手消息项（支持文本、推理和工具调用）。

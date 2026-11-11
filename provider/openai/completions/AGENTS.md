@@ -12,6 +12,7 @@ OpenAI Chat Completions 协议适配器，将 OpenAI Chat Completions API 转换
 provider/openai/completions/
 ├── provider.go              # Provider 构造函数 + Options 模式 (WithAPIKey/WithBaseURL/WithHeader/WithLegacyCompat/WithInterceptor) + legacyCompat 标志 + 拦截器 Transport 注入
 ├── params.go                # buildParams — 共享参数构建（含 Legacy 分支 + Prediction JSON 回退）
+├── cache.go                 # 缓存控制映射 — prompt_cache_options / prompt_cache_retention / 块级 prompt_cache_breakpoint
 ├── chat.go                  # 流式对话实现
 ├── complete.go              # 非流式对话实现 — 含 reasoning_content 提取
 ├── stream.go                # SSE → StreamEvent 转换 + FinishReason 携带
@@ -29,6 +30,7 @@ provider/openai/completions/
 ├── message_test.go          # 空 tool_calls 序列化测试
 ├── integration_cross_protocol_test.go # 跨协议集成测试
 ├── usage_test.go              # 缓存字段契约测试（无原生 cache_creation → 恒为 0，cache_read 正常透传）
+├── cache_test.go              # 缓存控制映射测试（prompt_cache_options / retention / 块级断点）
 └── params_audit_test.go     # Prediction 类型断言 + ResponseFormat 审计测试
 ```
 
@@ -91,6 +93,10 @@ provider/openai/completions/
 - **拦截器 Transport 注入** — 构造函数中调用 `provider.NewHTTPClient` 时传入 `cfg.interceptors`；非空时由 `NewInterceptorHTTPClient` 包装 Transport，无拦截器时使用标准库默认 client
 - **HTTP 错误结构化** — `complete.go` 在上游返回 HTTP >= 400 时，使用 `pkgErrors.NewBambooError(category, message, statusCode)` 包装错误，使状态码作为结构化字段贯穿错误链路；`bamboo.go` 的 `wrapProviderError` 使用 `errors.As` 提取 `*BambooError`，直接透传避免重复包装
 - **内联 think 标签剥离（Opt-in）** — `WithStripThinkTags()` 启用后，流式 content 增量经 `thinkTagStripper` 状态机扫描：配对标签之间的内容转为 thinking 事件（BlockStart 契约由 `syncBlockState` 维护），文本模式下的孤立闭标签（`reasoning_content` 泄漏残余）静默吞除，跨 chunk 切断的标签通过缓冲区 + KMP 风格后缀回退识别；非流式经 `stripThinkTagsFromContent` 剥离并合并到 `CompletionResult.Thinking`。默认关闭，避免改写模型有意输出的标签文本。标签字面量在源码中一律以 `thinkOpenTag`/`thinkCloseTag` 常量拼接，禁止书写完整字面量（会被 AI 工具链误解析截断）
+- **缓存控制映射（cache.go）** — `cache.go` 集中负责 OpenAI 侧缓存字段的映射：`prompt_cache_options`（mode/ttl）、`prompt_cache_retention`、块级 `prompt_cache_breakpoint`。三者互相独立，未配置即不发射对应字段
+- **请求级 TTL 词表** — Chat Completions 的 `prompt_cache_options.ttl` **只接受 "30m"**；块级 `prompt_cache_breakpoint.ttl` 接受 "30m"/"12h"。不适用的取值（如 "1h"、"5m"）一律丢弃，绝不向上游发送非法值
+- **块级断点门控** — `prompt_cache_breakpoint` 是 gpt-5.6+ 新字段，对更早的模型发送会 400。仅当 `PromptCacheOptions.BlockBreakpointsEnabled()` 为真（`EnableBlockBreakpoints=true` 或 `Mode=explicit`）时才发射断点；否则退化为 OpenAI 自动放置的隐式断点
+- **断点载体形态** — 断点只能挂在内容块上：命中断点的消息自动改用数组形式 `[{type:"text",...}]`；system 消息走数组形式承载断点；`prompt_cache_breakpoint` 为 nil 时不得写入 map（否则会序列化成 `null`）
 
 ## 反模式
 

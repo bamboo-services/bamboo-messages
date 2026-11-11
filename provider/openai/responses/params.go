@@ -23,15 +23,26 @@ import (
 func (p *ResponsesProvider) buildParams(model string, systemPrompt string, messages []provider.Message, config *provider.ChatConfig, stream bool) map[string]any {
 	params := map[string]any{
 		"model":  model,
-		"input":  p.buildInput(messages),
+		"input":  p.buildInput(messages, config),
 		"stream": stream,
 	}
 
 	// Instructions — 系统提示词（优先使用显式 systemPrompt，回退到 ProviderExtra）
-	if systemPrompt != "" {
-		params["instructions"] = systemPrompt
-	} else if instructions, ok := provider.GetExtraString(config.ProviderExtra, "instructions"); ok && instructions != "" {
-		params["instructions"] = instructions
+	//
+	// Responses 的顶层 instructions 是纯字符串，无法携带缓存断点。当显式启用
+	// 块级断点且配置了 system 缓存标记时，改为把系统提示放进 developer 消息的
+	// input_text 块（官方唯一支持的带断点系统提示形式）。
+	systemText := systemPrompt
+	if systemText == "" {
+		if instructions, ok := provider.GetExtraString(config.ProviderExtra, "instructions"); ok && instructions != "" {
+			systemText = instructions
+		}
+	}
+	if item := buildSystemCacheItem(systemText, systemCacheControl(config), config); item != nil {
+		input, _ := params["input"].([]map[string]any)
+		params["input"] = append([]map[string]any{item}, input...)
+	} else if systemText != "" {
+		params["instructions"] = systemText
 	}
 
 	// MaxOutputTokens — 最大输出 token 数
@@ -76,6 +87,20 @@ func (p *ResponsesProvider) buildParams(model string, systemPrompt string, messa
 	// ParallelToolCalls — 是否允许并行工具调用
 	if config.ParallelToolCalls {
 		params["parallel_tool_calls"] = true
+	}
+
+	// PromptCacheOptions — 请求级缓存控制（prompt_cache_options / prompt_cache_retention）。
+	//
+	// OpenAI 的请求级缓存控制分两个互不干扰的字段：
+	//   - prompt_cache_options: {mode, ttl, prewarm, comparison_response_id} — gpt-5.6+ 支持；
+	//   - prompt_cache_retention: "in_memory" | "24h" — gpt-5.6 之前的模型使用，已被官方标记 deprecated。
+	//
+	// 只有显式设置对应字段时才发送，避免老模型因收到不支持的参数而报 400。
+	if pco := buildPromptCacheOptions(config); pco != nil {
+		params["prompt_cache_options"] = pco
+	}
+	if retention := buildPromptCacheRetention(config); retention != "" {
+		params["prompt_cache_retention"] = retention
 	}
 
 	// ProviderExtra: store — 是否持久化存储响应

@@ -129,7 +129,7 @@ func TestResponsesProvider_buildInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := p.buildInput(tt.messages)
+			result := p.buildInput(tt.messages, nil)
 			if len(result) != tt.wantItems {
 				t.Errorf("buildInput() returned %d items, want %d", len(result), tt.wantItems)
 			}
