@@ -85,15 +85,18 @@ provider/
 | `FinishReason` | 类型 | type.go | 完成原因标识 (string) |
 | `FinishReasonStop` / `FinishReasonLength` / `FinishReasonToolCalls` | 常量 | type.go | 3 种完成原因常量 |
 | `Message` | 结构体 | type.go | 统一消息模型 (Role + Content + ContentBlocks + ThinkingContent + ThinkingSignature + ReasoningID + ToolCalls + ToolCallID + ToolName + IsError + CacheControl) |
-| `ChatConfig` | 结构体 | type.go | 请求配置 (Model, Temperature, TopP, MaxTokens, Stop, Tools, Metadata, UserID, ToolChoice, ResponseFormat, ParallelToolCalls, ThinkingConfig, SystemCacheControl, PromptCacheKey, ProviderExtra) |
+| `ChatConfig` | 结构体 | type.go | 请求配置 (Model, Temperature, TopP, MaxTokens, Stop, Tools, Metadata, UserID, ToolChoice, ResponseFormat, ParallelToolCalls, ThinkingConfig, SystemCacheControl, PromptCacheKey, PromptCacheOptions, CachedContent, ProviderExtra) |
 | `CompletionResult` | 结构体 | type.go | 非流式完整响应 (Content + Thinking + ThinkingSignature + ResponseID + ToolCalls + FinishReason + Usage) |
 | `ToolCall` | 结构体 | type.go | 工具调用 (ID + Type + Function) |
 | `FunctionCall` | 结构体 | type.go | 函数调用详情 (Name + Arguments) |
 | `Tool` | 结构体 | type.go | 工具定义 (Type + Function + CacheControl) |
 | `FunctionDef` | 结构体 | type.go | 函数定义 (Name + Description + Parameters) |
 | `ThinkingConfig` | 结构体 | type.go | 思考/推理配置 (Effort: none/low/medium/high) |
-| `CacheControl` | 结构体 | type.go | 缓存控制标记 (Type + TTL)，用于 Anthropic prompt caching |
-| `CacheControlEphemeralTTL` | 类型 | type.go | TTL 类型 (`CacheTTL5m` / `CacheTTL1h`) |
+| `CacheControl` | 结构体 | type.go | 缓存控制标记 (Type + TTL)，用于 Anthropic prompt caching / OpenAI 块级断点 |
+| `CacheTTL` | 类型 | type.go | 协议中立的缓存 TTL 字符串类型（`CacheTTL5m`/`CacheTTL1h`/`CacheTTL30m`/`CacheTTL12h`） |
+| `CacheControlEphemeralTTL` | 类型 | type.go | `CacheTTL` 的别名（向后兼容），取值 `CacheTTL5m` / `CacheTTL1h` |
+| `PromptCacheOptions` | 结构体 | type.go | OpenAI 请求级缓存选项 (Mode + TTL + Retention + EnableBlockBreakpoints) |
+| `PromptCacheMode` / `PromptCacheRetention` | 类型 | type.go | implicit/explicit 模式、in_memory/24h 保留期 |
 | `NewEphemeralCacheControl` | 函数 | type.go | 创建 ephemeral CacheControl 标记，默认 5m |
 | `ProviderExtra` | map[string]any | type.go (ChatConfig 字段) | Provider 特有参数透传 |
 | `GetExtraFloat64/Int64/String/Bool/Any` | 函数 | type.go | ProviderExtra 安全取值 helpers |
@@ -197,7 +200,9 @@ provider/
 - **Debug 环境变量唯一入口** — 仅通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；`provider.DebugEnabled` 为全局开关变量，所有 debug 函数检查此变量；编程式开关函数和适配器 Debug Option 已移除
 - **Debug 敏感字段脱敏** — `Authorization` / `X-API-Key` / `API-Key` / `X-Goog-API-Key` 等敏感 header 自动脱敏（仅保留前 4 和后 4 字符）
 - **Debug 长文本截断** — `content` / `text` / `system` / `thinking` / `reasoning_content` / `arguments` 等长文本字段超过 `MaxDebugBodyLen` (500) 时自动截断
-- **Prompt Caching 统一抽象** — `CacheControl` 统一结构体表达缓存断点：Anthropic 显式标记、OpenAI 自动缓存（`PromptCacheKey` 仅作路由粘性键）、Gemini 通过 `cached_content` ProviderExtra 引用外部资源
+- **Prompt Caching 统一抽象** — `CacheControl` 统一结构体表达缓存断点：Anthropic 显式标记、OpenAI 块级断点（由 `PromptCacheOptions` 门控）、Gemini 通过 `CachedContent` 一等字段引用外部资源；`PromptCacheKey` 仅作 OpenAI 路由粘性键
+- **缓存 TTL 词表隔离** — `CacheTTL` 是协议中立类型，但取值词表按协议区分（Anthropic `5m`/`1h`；OpenAI `30m`/`12h`）。适配器只透传本协议支持的取值，无法识别的取值一律丢弃，**绝不向上游发送非法值**
+- **OpenAI 块级断点门控** — `prompt_cache_breakpoint` 是 gpt-5.6+ 新字段，对老模型发送会 400。`PromptCacheOptions.BlockBreakpointsEnabled()`（`EnableBlockBreakpoints=true` 或 `Mode=explicit`）为真时才发射，默认关闭
 - **拦截器链契约** — `RequestInterceptor` 接收已 marshal 完成的上游请求 body（`[]byte`），返回处理后的 body；nil 拦截器被防御性跳过；nil/空切片零开销原样返回
 - **拦截器 Transport 零包装** — `NewInterceptorHTTPClient` 无拦截器时返回 nil，Provider 保留标准库默认 client（避免无谓包装）
 - **拦截器 Content-Length 重算** — Transport 修改 body 后自动重算 `Content-Length`

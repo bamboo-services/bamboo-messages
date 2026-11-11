@@ -75,25 +75,88 @@ const (
 	FinishReasonServerToolUse FinishReason = "server_tool_use" // 服务器端工具调用
 )
 
-// CacheControlEphemeralTTL 缓存过期时间。
+// CacheTTL 缓存生存时间。
 //
-// 用于 Anthropic prompt caching 的 TTL 设置。
+// 协议中立的 TTL 字符串，取值词表因协议而异：
+//
+//   - Anthropic: "5m"（默认）/ "1h"；
+//   - OpenAI: "30m"（默认）/ "12h"。
+//
+// 各适配器只透传本协议支持的取值：无法识别的取值会被丢弃并退化为
+// 该协议的默认缓存行为，避免向上游发送非法值导致 400。
+type CacheTTL string
+
 const (
-	CacheTTL5m CacheControlEphemeralTTL = "5m" // 5 分钟（默认）
-	CacheTTL1h CacheControlEphemeralTTL = "1h" // 1 小时
+	CacheTTL5m  CacheTTL = "5m"  // Anthropic 默认（5 分钟）
+	CacheTTL1h  CacheTTL = "1h"  // Anthropic（1 小时）
+	CacheTTL30m CacheTTL = "30m" // OpenAI 默认（30 分钟）
+	CacheTTL12h CacheTTL = "12h" // OpenAI（12 小时）
 )
 
-type CacheControlEphemeralTTL string
+// CacheControlEphemeralTTL 是 CacheTTL 的兼容别名。
+//
+// 保留旧名以兼容既有调用方，新代码统一使用 CacheTTL。
+type CacheControlEphemeralTTL = CacheTTL
+
+// PromptCacheMode 缓存断点模式（OpenAI gpt-5.6+）。
+type PromptCacheMode string
+
+const (
+	PromptCacheModeImplicit PromptCacheMode = "implicit" // 隐式：由 OpenAI 自动选择断点位置
+	PromptCacheModeExplicit PromptCacheMode = "explicit" // 显式：仅使用开发者标记的断点
+)
+
+// PromptCacheRetention 缓存保留策略（OpenAI gpt-5.6 之前的模型）。
+type PromptCacheRetention string
+
+const (
+	PromptCacheRetentionInMemory PromptCacheRetention = "in_memory" // 内存缓存，约 5~10 分钟
+	PromptCacheRetention24h      PromptCacheRetention = "24h"       // 扩展缓存，最长 24 小时
+)
+
+// PromptCacheOptions 请求级 prompt cache 控制选项。
+//
+// 用于表达「缓存断点如何选取」与「缓存保存多久」，对应 OpenAI 的
+// prompt_cache_options（mode/ttl）与 prompt_cache_retention（in_memory/24h）。
+//
+// Anthropic 的 TTL 挂在块级 cache_control 上，Gemini 的显式缓存通过
+// CachedContent 资源引用表达，二者不使用本结构体。
+type PromptCacheOptions struct {
+	Mode      PromptCacheMode      `json:"mode,omitempty"`      // 断点模式：implicit / explicit
+	TTL       CacheTTL             `json:"ttl,omitempty"`       // 请求级最小缓存生存时间
+	Retention PromptCacheRetention `json:"retention,omitempty"` // 缓存保留策略：in_memory / 24h
+
+	// EnableBlockBreakpoints 允许把 provider.Message.CacheControl 映射为
+	// OpenAI 的块级 prompt_cache_breakpoint。
+	//
+	// 该字段是 gpt-5.6+ 的新特性，对更早的模型发送未知字段会被上游拒绝
+	// （400），因此默认关闭，需要使用者显式确认目标模型支持后再开启。
+	//
+	// Mode 为 explicit 时自动开启：显式模式本身就表示「由开发者指定断点位置」。
+	EnableBlockBreakpoints bool `json:"enable_block_breakpoints,omitempty"`
+}
+
+// BlockBreakpointsEnabled 判断是否允许发射块级缓存断点。
+//
+// 显式声明 Mode 为 explicit 时自动开启（显式模式即表示由开发者指定断点位置）；
+// 隐式模式下可通过 EnableBlockBreakpoints 单独开启——OpenAI 在隐式模式下同样
+// 接受开发者标记的块级断点（最多 3 个），只是额外保留 1 个自动断点。
+func (o *PromptCacheOptions) BlockBreakpointsEnabled() bool {
+	if o == nil {
+		return false
+	}
+	return o.EnableBlockBreakpoints || o.Mode == PromptCacheModeExplicit
+}
 
 // CacheControl 缓存控制标记。
 //
 // 用于在请求中标记哪些内容块需要被缓存。
 // Anthropic 使用显式断点标记（放在 system/messages/tools 上）；
-// OpenAI 自动缓存，PromptCacheKey 仅作为路由粘性键；
+// OpenAI 在内容块上使用 prompt_cache_breakpoint，块级断点语义与 Anthropic 一致；
 // Gemini 通过外部 CachedContent 资源引用。
 type CacheControl struct {
-	Type string                   `json:"type"`          // 缓存类型，目前仅支持 "ephemeral"
-	TTL  CacheControlEphemeralTTL `json:"ttl,omitempty"` // 缓存过期时间，仅 Anthropic 支持
+	Type string   `json:"type"`          // 缓存类型（Anthropic: "ephemeral"）
+	TTL  CacheTTL `json:"ttl,omitempty"` // 缓存生存时间，取值词表因协议而异
 }
 
 // NewEphemeralCacheControl 创建一个 ephemeral 类型的缓存控制标记。
@@ -289,22 +352,24 @@ type ThinkingConfig struct {
 // 用户标识、工具选择策略、响应格式、并行工具调用、
 // 思考配置和 Provider 特有参数等完整请求配置。
 type ChatConfig struct {
-	Model              string            `json:"model,omitempty"`                // 模型名称
-	Temperature        *float64          `json:"temperature,omitempty"`          // 温度参数 (0-2)
-	TopP               *float64          `json:"top_p,omitempty"`                // Top-p 采样
-	MaxTokens          int64             `json:"max_tokens,omitempty"`           // 最大生成 token 数
-	Stop               []string          `json:"stop,omitempty"`                 // 停止词
-	Tools              []Tool            `json:"tools,omitempty"`                // 可用工具列表
-	Metadata           map[string]string `json:"metadata,omitempty"`             // 附加元数据
-	UserID             string            `json:"user_id,omitempty"`              // 用户标识
-	ToolChoice         string            `json:"tool_choice,omitempty"`          // 工具选择策略
-	ResponseFormat     string            `json:"response_format,omitempty"`      // 响应格式
-	ParallelToolCalls  bool              `json:"parallel_tool_calls,omitempty"`  // 并行工具调用
-	ThinkingConfig     *ThinkingConfig   `json:"thinking_config,omitempty"`      // 思考/推理配置
-	SystemCacheControl *CacheControl     `json:"system_cache_control,omitempty"` // system prompt 的缓存标记
-	PromptCacheKey     string            `json:"prompt_cache_key,omitempty"`     // OpenAI prompt cache 路由键
-	ServiceTier        string            `json:"service_tier,omitempty"`         // 服务层级/速度控制（如 "priority"/"fast"/"flex"/"standard"）
-	ProviderExtra      map[string]any    `json:"provider_extra,omitempty"`       // Provider 特有参数
+	Model              string              `json:"model,omitempty"`                // 模型名称
+	Temperature        *float64            `json:"temperature,omitempty"`          // 温度参数 (0-2)
+	TopP               *float64            `json:"top_p,omitempty"`                // Top-p 采样
+	MaxTokens          int64               `json:"max_tokens,omitempty"`           // 最大生成 token 数
+	Stop               []string            `json:"stop,omitempty"`                 // 停止词
+	Tools              []Tool              `json:"tools,omitempty"`                // 可用工具列表
+	Metadata           map[string]string   `json:"metadata,omitempty"`             // 附加元数据
+	UserID             string              `json:"user_id,omitempty"`              // 用户标识
+	ToolChoice         string              `json:"tool_choice,omitempty"`          // 工具选择策略
+	ResponseFormat     string              `json:"response_format,omitempty"`      // 响应格式
+	ParallelToolCalls  bool                `json:"parallel_tool_calls,omitempty"`  // 并行工具调用
+	ThinkingConfig     *ThinkingConfig     `json:"thinking_config,omitempty"`      // 思考/推理配置
+	SystemCacheControl *CacheControl       `json:"system_cache_control,omitempty"` // system prompt 的缓存标记
+	PromptCacheKey     string              `json:"prompt_cache_key,omitempty"`     // OpenAI prompt cache 路由键
+	PromptCacheOptions *PromptCacheOptions `json:"prompt_cache_options,omitempty"` // OpenAI 请求级缓存控制（断点模式/TTL/保留策略）
+	CachedContent      string              `json:"cached_content,omitempty"`       // Gemini 显式缓存资源引用（cachedContents/{id}）
+	ServiceTier        string              `json:"service_tier,omitempty"`         // 服务层级/速度控制（如 "priority"/"fast"/"flex"/"standard"）
+	ProviderExtra      map[string]any      `json:"provider_extra,omitempty"`       // Provider 特有参数
 }
 
 // GetExtraFloat64 从 ProviderExtra 中安全获取 float64 值。
