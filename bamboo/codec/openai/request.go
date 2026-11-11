@@ -9,30 +9,33 @@ import (
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
+	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // ── OpenAI 请求 JSON 结构体 ──
 
 type openaiRequest struct {
-	Model             string          `json:"model"`
-	Messages          []openaiMessage `json:"messages"`
-	Stream            bool            `json:"stream,omitempty"`
-	Temperature       *float64        `json:"temperature,omitempty"`
-	TopP              *float64        `json:"top_p,omitempty"`
-	MaxTokens         *int64          `json:"max_tokens,omitempty"`
-	MaxCompTokens     *int64          `json:"max_completion_tokens,omitempty"`
-	Stop              json.RawMessage `json:"stop,omitempty"`
-	Tools             []openaiTool    `json:"tools,omitempty"`
-	ToolChoice        json.RawMessage `json:"tool_choice,omitempty"`
-	ResponseFormat    *openaiRespFmt  `json:"response_format,omitempty"`
-	ParallelToolCalls bool            `json:"parallel_tool_calls,omitempty"`
-	ReasoningEffort   string          `json:"reasoning_effort,omitempty"`
-	User              string          `json:"user,omitempty"`
-	FrequencyPenalty  *float64        `json:"frequency_penalty,omitempty"`
-	PresencePenalty   *float64        `json:"presence_penalty,omitempty"`
-	Seed              *int64          `json:"seed,omitempty"`
-	PromptCacheKey    string          `json:"prompt_cache_key,omitempty"`
-	ServiceTier       string          `json:"service_tier,omitempty"`
+	Model                string                    `json:"model"`
+	Messages             []openaiMessage           `json:"messages"`
+	Stream               bool                      `json:"stream,omitempty"`
+	Temperature          *float64                  `json:"temperature,omitempty"`
+	TopP                 *float64                  `json:"top_p,omitempty"`
+	MaxTokens            *int64                    `json:"max_tokens,omitempty"`
+	MaxCompTokens        *int64                    `json:"max_completion_tokens,omitempty"`
+	Stop                 json.RawMessage           `json:"stop,omitempty"`
+	Tools                []openaiTool              `json:"tools,omitempty"`
+	ToolChoice           json.RawMessage           `json:"tool_choice,omitempty"`
+	ResponseFormat       *openaiRespFmt            `json:"response_format,omitempty"`
+	ParallelToolCalls    bool                      `json:"parallel_tool_calls,omitempty"`
+	ReasoningEffort      string                    `json:"reasoning_effort,omitempty"`
+	User                 string                    `json:"user,omitempty"`
+	FrequencyPenalty     *float64                  `json:"frequency_penalty,omitempty"`
+	PresencePenalty      *float64                  `json:"presence_penalty,omitempty"`
+	Seed                 *int64                    `json:"seed,omitempty"`
+	PromptCacheKey       string                    `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions   *openaiPromptCacheOptions `json:"prompt_cache_options,omitempty"`
+	PromptCacheRetention string                    `json:"prompt_cache_retention,omitempty"`
+	ServiceTier          string                    `json:"service_tier,omitempty"`
 }
 
 type openaiMessage struct {
@@ -82,13 +85,101 @@ type openaiRespFmt struct {
 
 // content array 元素
 type openaiContentPart struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text,omitempty"`
-	ImageURL *openaiImageURL `json:"image_url,omitempty"`
+	Type                  string                 `json:"type"`
+	Text                  string                 `json:"text,omitempty"`
+	ImageURL              *openaiImageURL        `json:"image_url,omitempty"`
+	PromptCacheBreakpoint *openaiCacheBreakpoint `json:"prompt_cache_breakpoint,omitempty"`
 }
 
 type openaiImageURL struct {
 	URL string `json:"url"`
+}
+
+// openaiPromptCacheOptions OpenAI 请求级缓存选项（gpt-5.6+）。
+type openaiPromptCacheOptions struct {
+	Mode string `json:"mode,omitempty"` // implicit / explicit
+	TTL  string `json:"ttl,omitempty"`  // 30m / 12h
+}
+
+// openaiCacheBreakpoint OpenAI 块级缓存断点。
+type openaiCacheBreakpoint struct {
+	Mode string `json:"mode,omitempty"` // 固定 explicit
+	TTL  string `json:"ttl,omitempty"`  // 30m / 12h
+}
+
+// parseCacheBreakpoint 将 OpenAI 块级缓存断点转换为统一的 provider.CacheControl。
+//
+// OpenAI 的 prompt_cache_breakpoint 与 Anthropic 的块级 cache_control 语义一致：
+// 都标记「可复用 prompt 前缀的精确末尾」。type 统一为 "ephemeral"
+// （OpenAI 侧对应 prompt_cache_breakpoint.mode = "explicit"）。
+//
+// TTL 只保留 OpenAI 支持的取值（30m / 12h）；其他取值丢弃并退化为请求级 TTL。
+func parseCacheBreakpoint(bp *openaiCacheBreakpoint) *provider.CacheControl {
+	if bp == nil {
+		return nil
+	}
+	cc := &provider.CacheControl{Type: "ephemeral"}
+	switch bp.TTL {
+	case string(provider.CacheTTL30m):
+		cc.TTL = provider.CacheTTL30m
+	case string(provider.CacheTTL12h):
+		cc.TTL = provider.CacheTTL12h
+	}
+	return cc
+}
+
+// extractSystemCacheControl 从 system 消息内容数组中提取末位 text 块上的缓存断点。
+//
+// OpenAI 的 system 消息内容为字符串时无法携带断点，只有数组形式才可能带断点。
+func extractSystemCacheControl(raw json.RawMessage) *provider.CacheControl {
+	if len(raw) == 0 {
+		return nil
+	}
+	var parts []openaiContentPart
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return nil
+	}
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i].Type == "text" && parts[i].PromptCacheBreakpoint != nil {
+			return parseCacheBreakpoint(parts[i].PromptCacheBreakpoint)
+		}
+	}
+	return nil
+}
+
+// parsePromptCacheOptions 将 OpenAI 请求级缓存选项转换为统一的 provider.PromptCacheOptions。
+//
+// prompt_cache_options 与 prompt_cache_retention 任意一个存在即视为调用方已
+// 显式启用 OpenAI 的 gpt-5.6+ 缓存 API，因此同时开启块级断点透传，
+// 保证入站请求里的 prompt_cache_breakpoint 能在出站协议中保留。
+//
+// 返回 nil 表示请求未携带任何请求级缓存选项。
+func parsePromptCacheOptions(opts *openaiPromptCacheOptions, retention string) *provider.PromptCacheOptions {
+	if opts == nil && retention == "" {
+		return nil
+	}
+	result := &provider.PromptCacheOptions{EnableBlockBreakpoints: true}
+	if opts != nil {
+		switch opts.Mode {
+		case string(provider.PromptCacheModeImplicit):
+			result.Mode = provider.PromptCacheModeImplicit
+		case string(provider.PromptCacheModeExplicit):
+			result.Mode = provider.PromptCacheModeExplicit
+		}
+		switch opts.TTL {
+		case string(provider.CacheTTL30m):
+			result.TTL = provider.CacheTTL30m
+		case string(provider.CacheTTL12h):
+			result.TTL = provider.CacheTTL12h
+		}
+	}
+	switch retention {
+	case string(provider.PromptCacheRetentionInMemory):
+		result.Retention = provider.PromptCacheRetentionInMemory
+	case string(provider.PromptCacheRetention24h):
+		result.Retention = provider.PromptCacheRetention24h
+	}
+	return result
 }
 
 // parseRequest 将 OpenAI Chat Completions 请求体解析为 RelayRequest。
@@ -100,6 +191,7 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 
 	// 解析消息
 	var systemParts []string
+	var systemCacheControl *provider.CacheControl
 	var messages []bamboo.BambooMessage
 
 	for _, msg := range req.Messages {
@@ -108,6 +200,10 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 			text := extractPlainText(msg.Content)
 			if text != "" {
 				systemParts = append(systemParts, text)
+			}
+			// system 消息内容数组末位 text 块上的缓存断点 → system 级缓存标记
+			if cc := extractSystemCacheControl(msg.Content); cc != nil {
+				systemCacheControl = cc
 			}
 		case "user":
 			bm, err := parseUserMessage(msg)
@@ -188,6 +284,14 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	if req.PromptCacheKey != "" {
 		config.PromptCacheKey = req.PromptCacheKey
 	}
+	// prompt_cache_options / prompt_cache_retention → PromptCacheOptions
+	if pco := parsePromptCacheOptions(req.PromptCacheOptions, req.PromptCacheRetention); pco != nil {
+		config.PromptCacheOptions = pco
+	}
+	// system 消息上的块级缓存断点 → system 级缓存标记
+	if systemCacheControl != nil {
+		config.SystemCacheControl = systemCacheControl
+	}
 
 	if req.ServiceTier != "" {
 		config.ServiceTier = req.ServiceTier
@@ -260,7 +364,7 @@ func parseUserMessage(msg openaiMessage) (bamboo.BambooMessage, error) {
 	for _, p := range parts {
 		switch p.Type {
 		case "text":
-			blocks = append(blocks, bamboo.NewTextBlock(p.Text))
+			blocks = append(blocks, bamboo.NewTextBlockWithCache(p.Text, parseCacheBreakpoint(p.PromptCacheBreakpoint)))
 		case "image_url":
 			if p.ImageURL != nil {
 				blocks = append(blocks, parseImageURL(p.ImageURL.URL))

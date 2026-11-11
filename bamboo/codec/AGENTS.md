@@ -28,12 +28,14 @@ bamboo/codec/
 │   ├── codec.go / request.go / response.go / stream.go / error.go
 │   ├── request_test.go / response_test.go
 │   ├── request_audit_test.go  # N-to-N 转换安全性审计测试
-│   └── stream_test.go      # 流式序列化单元测试（SSE 帧生成）
+│   ├── stream_test.go      # 流式序列化单元测试（SSE 帧生成）
+│   └── cache_test.go       # 入站缓存控制解析测试（prompt_cache_options / 块级断点）
 ├── responses/              # OpenAI Responses 协议编解码（结构同 anthropic/）
 │   ├── codec.go / request.go / response.go / stream.go / error.go
 │   ├── request_test.go / response_test.go
 │   ├── request_audit_test.go  # N-to-N 转换安全性审计测试（含 input_image/input_file、metadata 测试）
-│   └── usage_regression_test.go # Usage 透传回归测试
+│   ├── usage_regression_test.go # Usage 透传回归测试
+│   └── cache_test.go       # 入站缓存控制解析测试（prompt_cache_options / 块级断点）
 └── gemini/                 # Google Gemini 协议编解码（结构同 anthropic/）
     ├── codec.go / request.go / response.go / stream.go / error.go
     ├── tool_history.go      # correlateToolHistory — 请求局部工具调用/结果轮次内关联
@@ -89,6 +91,7 @@ bamboo/codec/
 - **Responses input_image / input_file 解析** — `parseInputMessage` 支持 `input_image`（→ `ImageBlock`）和 `input_file`（→ `DocumentBlock`，支持 file_id 和 file_data 两种模式）
 - **Responses metadata 智能存储** — 当 `metadata` 的所有值都是 string 类型时存入 `config.Metadata`（`map[string]string`）；混合类型回退到 `ProviderExtra["metadata"]`
 - **Gemini safety_settings 类型转换** — `convertSafetySettings` 将 `[]geminiSafetySetting` 转换为 `[]*genai.SafetySetting`，确保 codec 层输出与 provider 期望的类型一致，避免 relay 路径上类型断言失败
+- **入站缓存控制解析** — `openai/request.go` 与 `responses/request.go` 解析请求级 `prompt_cache_options` / `prompt_cache_retention`（→ `config.PromptCacheOptions`，携带时自动 `EnableBlockBreakpoints=true` 以透传入站块级断点）；内容块上的 `prompt_cache_breakpoint` 映射为统一的 `CacheControl`（system/developer 消息上的断点 → `config.SystemCacheControl`，user 块上的断点 → 块的 `CacheControl`）；`gemini/request.go` 把 `cachedContent` 写入 `config.CachedContent`
 - **Gemini thinkingConfig 解析** — `thinkingLevel` / `thinkingBudget` / `includeThoughts` 映射为 `ThinkingConfig.Effort`（Bamboo 规范化槽）；`includeThoughts` 另存 `ProviderExtra["include_thoughts"]`。budget≤2048→low、≤8192→medium、>8192→high；仅 includeThoughts→medium
 - **Gemini thoughtSignature 与 functionCall 分离** — 同一 part 上的 `functionCall` + `thoughtSignature` 拆成 `ThinkingBlock`（签名）+ `ToolUseBlock`，对齐 Anthropic thinking / tool_use 分块，禁止用 signature 把工具调用吃掉
 - **Gemini model 在 URL 路径中** — Gemini 的 model 名称在 URL 路径中（如 `/v1beta/models/gemini-2.5-pro:generateContent`），不在请求 body 中，因此 `config.Model` 为空；relay 层需从 URL 路径提取

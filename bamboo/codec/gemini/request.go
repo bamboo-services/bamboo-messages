@@ -182,8 +182,9 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 		config.ProviderExtra["safety_settings"] = convertSafetySettings(req.SafetySettings)
 	}
 
-	// ── 7. cachedContent 透传到 ProviderExtra ──
+	// ── 7. cachedContent 透传 ──
 	if req.CachedContent != "" {
+		config.CachedContent = req.CachedContent
 		if config.ProviderExtra == nil {
 			config.ProviderExtra = make(map[string]any)
 		}

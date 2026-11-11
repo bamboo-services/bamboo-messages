@@ -82,6 +82,7 @@ provider/bamboo/
 - **消息角色降级** — `provider.RoleSystem` 在 `buildMessages` 中降级为 `user`（系统提示应通过 system 参数传递）；`provider.RoleTool` 合并到前一条 user 消息的 `tool_result` 块中（Anthropic 风格）。
 - **工具定义扁平结构** — `wireTool` 为 `{name, description, input_schema, cache_control}`，不同于 OpenAI 的 `{type, function}` 嵌套。`input_schema` 为 `json.RawMessage` 且不带 `omitempty`，空值序列化为 `{}`。
 - **CacheControl 序列化为 RawMessage** — `wireContentBlock.CacheControl` 和 `wireTool.CacheControl` 使用 `json.RawMessage` 存储序列化后的 `provider.CacheControl`，保持与 facade 的 JSON 兼容。
+- **缓存控制字段镜像** — wire 请求 DTO 额外承载 `PromptCacheOptions`（`json.RawMessage`，序列化为 OpenAI 风格的请求级缓存选项）与 `CachedContent`（Gemini 显式缓存资源引用）；两者由 `buildParams` 从 `provider.ChatConfig` 映射，未配置即不输出对应字段。
 - **7 值 FinishReason 映射** — `end_turn` → `stop`、`max_tokens` → `length`、`tool_use` → `tool_calls`、`stop_sequence` → `stop`、`pause_turn` → `pause_turn`、`refusal` → `refusal`、`server_tool_use` → `server_tool_use`，其余默认 `stop`。
 - **content_block_stop 必须发出 BlockStop** — `handleContentBlockStop` 永远返回非空的 `BlockStopDelta`（有索引 / 无索引），不可返回 nil。
 - **错误使用 `pkgErrors.BambooError`** — 所有 `StreamEvent.Err` 字段均为 `*pkgErrors.BambooError`；不引入 `internal/xerr`。

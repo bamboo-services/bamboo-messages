@@ -15,7 +15,7 @@ bamboo/
 ├── response.go      # Response (含 ResponseID) / Usage 非流式响应类型 + UnmarshalJSON
 ├── stream.go        # StreamEvent / StreamDelta 流事件模型 + EventPing 常量
 ├── tool.go          # Tool / ToolInputSchema 工具定义
-├── config.go        # RequestConfig + ThinkingConfig + 指针辅助函数
+├── config.go        # RequestConfig + ThinkingConfig + 指针辅助函数（含 PromptCacheOptions / CachedContent）
 ├── option.go        # ClientOption + RequestOption + WithToolChoice/WithResponseFormat/WithUserID/WithProvider/WithDefaultModel + WithXxx() 配置函数
 ├── convert.go       # 类型转换 (provider ↔ bamboo) + StreamConverter (含 IndexedToolCallDeltaData 支持、优先级 FinishReason、自动 flush)
 ├── content.go       # ContentBlock 构造函数 + WithCache 变体 + RegisterBlockType + ContentBlocks 反序列化
@@ -42,7 +42,7 @@ bamboo/
 | 理解跨类型 Block 切换 | `convert.go` | `stopForNewBlock` — text→thinking / thinking→text 过渡时自动关闭前一个 block |
 | 添加 ContentBlock 类型 | `content.go` + `stream.go` | 扩展 `ContentBlockType` 和 `StreamDeltaType`；通过 `RegisterBlockType` 注册反序列化 |
 | 自定义错误处理 | `errors.go` | `BambooError` 类型 + 错误类型常量 |
-| 配置 Prompt Caching | `option.go` + `content.go` | `WithSystemCacheControl()` / `WithPromptCacheKey()` / ContentBlock 的 `CacheControl` 字段 / WithCache 构造函数 |
+| 配置 Prompt Caching | `option.go` + `content.go` | `WithSystemCacheControl()` / `WithPromptCacheKey()` / `WithPromptCacheOptions()` / `WithCachedContent()` / ContentBlock 的 `CacheControl` 字段 / WithCache 构造函数 |
 | 协议互转 | `relay/` | `relay.Relay()` / `relay.RelayStream()` |
 | 外部协议编解码 | `codec/` | Anthropic / OpenAI / Responses / Gemini 格式的请求解析与响应序列化 |
 
@@ -99,6 +99,7 @@ bamboo/
 | `NewClientWithOptions` | 函数 | bamboo.go | 通过 Functional Options 创建客户端 |
 | `WithToolChoice/WithResponseFormat/WithUserID/WithParallelToolCalls` | 函数 | option.go | 类型化请求配置函数 |
 | `WithSystemCacheControl/WithPromptCacheKey` | 函数 | option.go | Prompt Caching 请求配置函数 |
+| `WithPromptCacheOptions/WithCachedContent` | 函数 | option.go | OpenAI 请求级缓存选项 + Gemini 显式缓存资源引用配置函数 |
 | `WithExtra` | 函数 | option.go | 兜底扩展参数传递 |
 
 ### 响应与流事件
@@ -146,6 +147,8 @@ bamboo/
 - **Usage 通过 EventPing relay** — UsageDelta 现在通过 `EventPing` 事件类型输出（不再用 `EventMessageDelta`），避免过早终止语义
 - **默认模型回落** — `client.buildProviderConfig` 保证下传给 Provider 的配置非 nil（`Provider` 契约要求 nil config 使用默认配置），并在 `RequestConfig.Model` 为空时回落到 `WithDefaultModel` 指定的客户端级默认模型
 - **Usage 增量合并** — `mergeUsage` 对 usage 增量采用「零值不覆盖」语义：Anthropic 等 Provider 分段上报（message_start 给输入+缓存、message_delta 给最终 output），后到的增量不会把先前的缓存统计清零；ping 事件携带的是合并后的累计用量
+- **缓存控制类型化字段** — `RequestConfig.PromptCacheOptions`（OpenAI 请求级缓存选项 + 块级断点开关）与 `RequestConfig.CachedContent`（Gemini 显式缓存资源引用）是一等字段，经 `WithPromptCacheOptions()` / `WithCachedContent()` 配置，由 `configToProvider` 完整透传给 `provider.ChatConfig`
+- **块级断点开关语义** — `provider.PromptCacheOptions.BlockBreakpointsEnabled()` 为真（`EnableBlockBreakpoints=true` 或 `Mode=explicit`）时才向 OpenAI 发射块级 `prompt_cache_breakpoint`；默认关闭，因为该字段是 gpt-5.6+ 专属，对老模型会返回 400
 - **双键工具 Block 追踪** — `toolBlockByProviderIndex` 和 `toolBlockByID` 支持带索引和不带索引两种工具调用模式
 - **ThinkingBlock 内容保留** — `messagesToProvider` 将 `ThinkingBlock` 的内容保留到 `provider.Message.ThinkingContent` / `ThinkingSignature` 字段；`ReasoningID` 保留到 `provider.Message.ReasoningID`
 - **ThinkingBlock 生成** — `resultToResponse` 中，若 `CompletionResult.Thinking` 非空，会在 Content 最前面生成 `ThinkingBlock`

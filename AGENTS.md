@@ -402,11 +402,14 @@ bamboo-messages/
 17. **Codec 无状态** — `Codec` 接口无状态可并发使用，有状态操作通过 `NewSerializer()` 创建独立 `StreamSerializer`
 18. **Debug 环境变量唯一入口** — 仅通过环境变量 `BAMBOO_DEBUG=1/true/on` 启用；`provider.DebugEnabled` 为全局开关变量；`SetDebug()` 函数和 `WithDebug()` Option 已移除；relay 层 debug 函数直接检查 `provider.DebugEnabled`
 19. **Debug 脱敏与截断** — 敏感 header（Authorization/X-API-Key/API-Key/X-Goog-API-Key）自动脱敏（保留前 4 后 4）；长文本字段（content/text/system/thinking/reasoning_content/arguments）超过 500 字符自动截断
-20. **Prompt Caching 三层方案** — Layer 1: Anthropic 显式 CacheControl 断点（system/messages/tools）；Layer 2: OpenAI PromptCacheKey 路由粘性键；Layer 3: Gemini 通过 ProviderExtra 的 `cached_content` 引用外部资源
+20. **Prompt Caching 三层方案** — Layer 1: Anthropic 显式 CacheControl 断点（system/messages/tools）+ OpenAI 块级 `prompt_cache_breakpoint`（与 Anthropic 断点语义一致，同由 `CacheControl` 映射）；Layer 2: OpenAI `PromptCacheKey` 路由粘性键 + `PromptCacheOptions`（mode/ttl/retention）；Layer 3: Gemini 通过 `CachedContent` 一等字段（或 ProviderExtra 的 `cached_content`）引用外部资源
 21. **Usage 缓存统计透传** — `UsageData` / `Usage` 结构体包含 `CacheCreationInputTokens` / `CacheReadInputTokens`，从 Provider → convert → codec 完整透传
     21a. **Anthropic 双段 usage** — Anthropic 流式把 usage 拆为两段：`message_start` 携带 `input_tokens` + 缓存统计，`message_delta` **顶层**（与 `delta` 平级）携带最终 `output_tokens`；适配器两处都解析，顶层缺失时回退 `delta` 内嵌位置
     21b. **Usage 增量合并语义** — `StreamConverter.mergeUsage` 采用「零值不覆盖」：任一维度为 0 表示本次增量未携带该维度，保留此前累计值，避免后到的 `message_delta` 把 `message_start` 的缓存统计清零
-    21c. **Anthropic message_start 回填** — `bamboo/codec/anthropic` 流式序列化器延迟输出 `message_start` 帧，等待 usage 就绪后回填输入与缓存统计（Anthropic 生态惯例从 `message_start` 读缓存），随后随下一帧一起输出
+   21c. **Anthropic message_start 回填** — `bamboo/codec/anthropic` 流式序列化器延迟输出 `message_start` 帧，等待 usage 就绪后回填输入与缓存统计（Anthropic 生态惯例从 `message_start` 读缓存），随后随下一帧一起输出
+   21d. **跨协议缓存 TTL 词表隔离** — `provider.CacheTTL` 是协议中立字符串类型，取值词表按协议区分（Anthropic `5m`/`1h`；OpenAI `30m`/`12h`）。各适配器只透传本协议支持的取值：无法识别的取值一律丢弃并退化为该层级的默认行为，**绝不向上游发送非法值**（避免 400）
+   21e. **OpenAI 块级断点门控** — `prompt_cache_breakpoint` 是 gpt-5.6+ 新字段，对更早的模型发送未知字段会被上游拒绝（400）。因此块级断点**默认不发射**，须由调用方通过 `PromptCacheOptions.EnableBlockBreakpoints` 显式确认目标模型支持（或声明 `Mode=explicit`，其语义本身即「由开发者指定断点位置」）。未开启时 OpenAI 自动放置隐式断点，缓存行为不受影响
+   21f. **OpenAI 断点载体形态** — OpenAI 的断点只能挂在内容块上，字符串形式的 `content` 无法承载。命中断点的消息自动改用数组形式（`[{type:"text",...}]`）；`system` 在 Chat Completions 走 system 消息数组、在 Responses 走 `developer` 消息的 `input_text` 块（顶层 `instructions` 是纯字符串，无法携带断点）
 22. **Thinking 内容全链路保留** — `BambooMessage.ThinkingBlock` → `provider.Message.ThinkingContent/ThinkingSignature/ReasoningID` → 适配器 → `provider.CompletionResult.Thinking/ThinkingSignature/ResponseID` → `bamboo.Response.ThinkingBlock` 双向透传
 23. **FinishReason 流式透传** — `provider.StreamEvent.FinishReason` 由适配器填充，`StreamConverter.handleStop` 使用实际完成原因，不再硬编码 `FinishReasonEndTurn`
 24. **ToolName/ToolCallID 分离** — `ToolResultBlock` 和 `provider.Message` 同时保存 `ToolName`（函数名）和 `ToolCallID`（调用 ID），Gemini `FunctionResponse` 需要两者同时存在

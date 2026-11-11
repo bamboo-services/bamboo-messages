@@ -81,6 +81,8 @@ type wireRequestConfig struct {
 	ThinkingConfig     *wireThinkingConfig `json:"thinking_config,omitempty"`      // 思考/推理配置
 	SystemCacheControl json.RawMessage     `json:"system_cache_control,omitempty"` // system 缓存标记
 	PromptCacheKey     string              `json:"prompt_cache_key,omitempty"`     // prompt cache 粘性键
+	PromptCacheOptions json.RawMessage     `json:"prompt_cache_options,omitempty"` // OpenAI 请求级缓存控制（断点模式/TTL/保留策略）
+	CachedContent      string              `json:"cached_content,omitempty"`       // Gemini 显式缓存资源引用（cachedContents/{id}）
 	ServiceTier        string              `json:"service_tier,omitempty"`         // 服务层级/速度控制参数
 	ProviderExtra      map[string]any      `json:"provider_extra,omitempty"`       // Provider 特有参数
 }

@@ -99,6 +99,24 @@ func WithPromptCacheKey(key string) RequestOption {
 	return func(cfg *RequestConfig) { cfg.PromptCacheKey = key }
 }
 
+// WithPromptCacheOptions 设置 OpenAI 请求级缓存控制选项。
+//
+// 用于表达 prompt_cache_options（断点模式 mode / 请求级 TTL）与
+// prompt_cache_retention（in_memory / 24h）。
+//
+// Mode 为 explicit 时，provider.Message 上的 CacheControl 标记会映射为
+// OpenAI 的块级 prompt_cache_breakpoint。
+func WithPromptCacheOptions(opts *provider.PromptCacheOptions) RequestOption {
+	return func(cfg *RequestConfig) { cfg.PromptCacheOptions = opts }
+}
+
+// WithCachedContent 设置 Gemini 显式缓存资源引用（cachedContents/{id}）。
+//
+// 用于在 Gemini 上复用已上传的缓存内容；不设置时走 Gemini 隐式缓存。
+func WithCachedContent(cachedContent string) RequestOption {
+	return func(cfg *RequestConfig) { cfg.CachedContent = cachedContent }
+}
+
 // WithThinkingDisplay 设置思考内容的显示模式。
 //
 // 支持 "summarized"（摘要显示）和 "omitted"（完全隐藏）两种模式。

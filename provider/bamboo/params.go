@@ -44,6 +44,7 @@ func buildWireRequestConfig(config *provider.ChatConfig) *wireRequestConfig {
 		ResponseFormat:    config.ResponseFormat,
 		ParallelToolCalls: config.ParallelToolCalls,
 		PromptCacheKey:    config.PromptCacheKey,
+		CachedContent:     config.CachedContent,
 		ServiceTier:       config.ServiceTier,
 		ProviderExtra:     config.ProviderExtra,
 	}
@@ -56,10 +57,28 @@ func buildWireRequestConfig(config *provider.ChatConfig) *wireRequestConfig {
 	if config.SystemCacheControl != nil {
 		cfg.SystemCacheControl = marshalCacheControl(config.SystemCacheControl)
 	}
+	if config.PromptCacheOptions != nil {
+		cfg.PromptCacheOptions = marshalPromptCacheOptions(config.PromptCacheOptions)
+	}
+
 	if tools := buildTools(config.Tools); tools != nil {
 		cfg.Tools = tools
 	}
 	return cfg
+}
+
+// marshalPromptCacheOptions 将 provider.PromptCacheOptions 序列化为 json.RawMessage。
+//
+// 空指针或序列化失败时返回 nil，由 wireRequestConfig 的 omitempty 省略该字段。
+func marshalPromptCacheOptions(opts *provider.PromptCacheOptions) json.RawMessage {
+	if opts == nil {
+		return nil
+	}
+	data, err := json.Marshal(opts)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 // buildTools 将 provider.Tool 列表转换为 bamboo wire 工具定义列表。

@@ -10,6 +10,7 @@ import (
 	"github.com/bamboo-services/bamboo-messages/bamboo"
 	"github.com/bamboo-services/bamboo-messages/bamboo/codec"
 	pkgErrors "github.com/bamboo-services/bamboo-messages/pkg/errors"
+	"github.com/bamboo-services/bamboo-messages/provider"
 )
 
 // ── OpenAI Responses 请求 JSON 结构体 ──
@@ -19,30 +20,129 @@ import (
 // 与 Chat Completions 完全不同，Responses 使用 input 数组而非 messages，
 // 工具定义直接展开（无 function 外层包装）。
 type responsesRequest struct {
-	Type               string          `json:"type,omitempty"` // 兼容 WebSocket response.create 信封
-	StreamID           string          `json:"stream_id,omitempty"`
-	Generate           *bool           `json:"generate,omitempty"`
-	Model              string          `json:"model"`
-	Instructions       string          `json:"instructions,omitempty"`
-	Input              json.RawMessage `json:"input,omitempty"`
-	MaxOutputTokens    *int64          `json:"max_output_tokens,omitempty"`
-	Temperature        *float64        `json:"temperature,omitempty"`
-	TopP               *float64        `json:"top_p,omitempty"`
-	Stream             bool            `json:"stream,omitempty"`
-	ParallelToolCalls  bool            `json:"parallel_tool_calls,omitempty"`
-	Tools              []responsesTool `json:"tools,omitempty"`
-	ToolChoice         json.RawMessage `json:"tool_choice,omitempty"`
-	Reasoning          *reasoningCfg   `json:"reasoning,omitempty"`
-	PreviousResponseID string          `json:"previous_response_id,omitempty"`
-	Store              *bool           `json:"store,omitempty"`
-	Truncation         string          `json:"truncation,omitempty"`
-	User               string          `json:"user,omitempty"`
-	PromptCacheKey     string          `json:"prompt_cache_key,omitempty"`
-	Metadata           json.RawMessage `json:"metadata,omitempty"`
-	ServiceTier        string          `json:"service_tier,omitempty"`
-	Text               *textConfig     `json:"text,omitempty"`
-	Include            []string        `json:"include,omitempty"`
-	ContextManagement  json.RawMessage `json:"context_management,omitempty"`
+	Type                 string                       `json:"type,omitempty"` // 兼容 WebSocket response.create 信封
+	StreamID             string                       `json:"stream_id,omitempty"`
+	Generate             *bool                        `json:"generate,omitempty"`
+	Model                string                       `json:"model"`
+	Instructions         string                       `json:"instructions,omitempty"`
+	Input                json.RawMessage              `json:"input,omitempty"`
+	MaxOutputTokens      *int64                       `json:"max_output_tokens,omitempty"`
+	Temperature          *float64                     `json:"temperature,omitempty"`
+	TopP                 *float64                     `json:"top_p,omitempty"`
+	Stream               bool                         `json:"stream,omitempty"`
+	ParallelToolCalls    bool                         `json:"parallel_tool_calls,omitempty"`
+	Tools                []responsesTool              `json:"tools,omitempty"`
+	ToolChoice           json.RawMessage              `json:"tool_choice,omitempty"`
+	Reasoning            *reasoningCfg                `json:"reasoning,omitempty"`
+	PreviousResponseID   string                       `json:"previous_response_id,omitempty"`
+	Store                *bool                        `json:"store,omitempty"`
+	Truncation           string                       `json:"truncation,omitempty"`
+	User                 string                       `json:"user,omitempty"`
+	PromptCacheKey       string                       `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions   *responsesPromptCacheOptions `json:"prompt_cache_options,omitempty"`
+	PromptCacheRetention string                       `json:"prompt_cache_retention,omitempty"`
+	Metadata             json.RawMessage              `json:"metadata,omitempty"`
+	ServiceTier          string                       `json:"service_tier,omitempty"`
+	Text                 *textConfig                  `json:"text,omitempty"`
+	Include              []string                     `json:"include,omitempty"`
+	ContextManagement    json.RawMessage              `json:"context_management,omitempty"`
+}
+
+// responsesPromptCacheOptions OpenAI Responses 请求级缓存选项（gpt-5.6+）。
+type responsesPromptCacheOptions struct {
+	Mode                 string `json:"mode,omitempty"`                   // implicit / explicit
+	TTL                  string `json:"ttl,omitempty"`                    // 30m / 12h
+	Prewarm              *bool  `json:"prewarm,omitempty"`                // 只预热缓存不生成输出
+	ComparisonResponseID string `json:"comparison_response_id,omitempty"` // 缓存复用诊断的对比响应 ID
+}
+
+// responsesCacheBreakpoint OpenAI Responses 块级缓存断点。
+type responsesCacheBreakpoint struct {
+	Mode string `json:"mode,omitempty"` // 固定 explicit
+	TTL  string `json:"ttl,omitempty"`  // 30m / 12h
+}
+
+// parseResponsesCacheBreakpoint 将 OpenAI Responses 块级缓存断点转换为统一的 provider.CacheControl。
+//
+// OpenAI 的 prompt_cache_breakpoint 与 Anthropic 的块级 cache_control 语义一致：
+// 都标记「可复用 prompt 前缀的精确末尾」。type 统一为 "ephemeral"
+// （OpenAI 侧对应 prompt_cache_breakpoint.mode = "explicit"）。
+//
+// TTL 只保留 OpenAI 支持的取值（30m / 12h）；其他取值丢弃并退化为请求级 TTL。
+func parseResponsesCacheBreakpoint(bp *responsesCacheBreakpoint) *provider.CacheControl {
+	if bp == nil {
+		return nil
+	}
+	cc := &provider.CacheControl{Type: "ephemeral"}
+	switch bp.TTL {
+	case string(provider.CacheTTL30m):
+		cc.TTL = provider.CacheTTL30m
+	case string(provider.CacheTTL12h):
+		cc.TTL = provider.CacheTTL12h
+	}
+	return cc
+}
+
+// parseResponsesPromptCacheOptions 将 Responses 请求级缓存选项转换为统一的 provider.PromptCacheOptions。
+//
+// prompt_cache_options 与 prompt_cache_retention 任意一个存在即视为调用方已
+// 显式启用 OpenAI 的 gpt-5.6+ 缓存 API，因此同时开启块级断点透传，
+// 保证入站请求里的 prompt_cache_breakpoint 能在出站协议中保留。
+//
+// 返回 nil 表示请求未携带任何请求级缓存选项。
+func parseResponsesPromptCacheOptions(opts *responsesPromptCacheOptions, retention string) *provider.PromptCacheOptions {
+	if opts == nil && retention == "" {
+		return nil
+	}
+	result := &provider.PromptCacheOptions{EnableBlockBreakpoints: true}
+	if opts != nil {
+		switch opts.Mode {
+		case string(provider.PromptCacheModeImplicit):
+			result.Mode = provider.PromptCacheModeImplicit
+		case string(provider.PromptCacheModeExplicit):
+			result.Mode = provider.PromptCacheModeExplicit
+		}
+		switch opts.TTL {
+		case string(provider.CacheTTL30m):
+			result.TTL = provider.CacheTTL30m
+		case string(provider.CacheTTL12h):
+			result.TTL = provider.CacheTTL12h
+		}
+	}
+	switch retention {
+	case string(provider.PromptCacheRetentionInMemory):
+		result.Retention = provider.PromptCacheRetentionInMemory
+	case string(provider.PromptCacheRetention24h):
+		result.Retention = provider.PromptCacheRetention24h
+	}
+	return result
+}
+
+// extractInputSystemCacheControl 从 input 数组中提取 developer/system 消息上的缓存断点。
+//
+// Responses 的顶层 instructions 是纯字符串，无法携带断点；官方要求把可复用的
+// developer 指令放进 developer 消息的 input_text 块里，因此断点只可能出现在
+// role 为 system/developer 的消息内容块上。
+func extractInputSystemCacheControl(raw json.RawMessage) *provider.CacheControl {
+	var items []inputItem
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil
+	}
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].Role != "system" && items[i].Role != "developer" {
+			continue
+		}
+		var parts []inputContent
+		if err := json.Unmarshal(items[i].Content, &parts); err != nil {
+			continue
+		}
+		for j := len(parts) - 1; j >= 0; j-- {
+			if parts[j].PromptCacheBreakpoint != nil {
+				return parseResponsesCacheBreakpoint(parts[j].PromptCacheBreakpoint)
+			}
+		}
+	}
+	return nil
 }
 
 // reasoningCfg Reasoning 配置。
@@ -98,12 +198,13 @@ type inputItem struct {
 
 // inputContent input message 的 content 元素。
 type inputContent struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text,omitempty"`
-	ImageURL json.RawMessage `json:"image_url,omitempty"` // input_image 专用（string 或 {"url": "..."}）
-	FileID   string          `json:"file_id,omitempty"`   // input_file 专用（file ID 引用）
-	FileData string          `json:"file_data,omitempty"` // input_file 专用（base64 数据）
-	MimeType string          `json:"mime_type,omitempty"` // input_file 专用（如 "image/png"）
+	Type                  string                    `json:"type"`
+	Text                  string                    `json:"text,omitempty"`
+	ImageURL              json.RawMessage           `json:"image_url,omitempty"`               // input_image 专用（string 或 {"url": "..."}）
+	FileID                string                    `json:"file_id,omitempty"`                 // input_file 专用（file ID 引用）
+	FileData              string                    `json:"file_data,omitempty"`               // input_file 专用（base64 数据）
+	MimeType              string                    `json:"mime_type,omitempty"`               // input_file 专用（如 "image/png"）
+	PromptCacheBreakpoint *responsesCacheBreakpoint `json:"prompt_cache_breakpoint,omitempty"` // 块级缓存断点
 }
 
 // parseRequest 将 OpenAI Responses 请求体解析为 RelayRequest。
@@ -123,6 +224,7 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	var messages []bamboo.BambooMessage
 
 	// 解析 input 字段（string 或 array）
+	var systemCacheControl *provider.CacheControl
 	if len(req.Input) > 0 {
 		bm, sys, err := parseInput(req.Input)
 		if err != nil {
@@ -132,6 +234,8 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 		if sys != "" {
 			systemParts = append(systemParts, sys)
 		}
+		// developer/system 消息上的块级缓存断点 → system 级缓存标记
+		systemCacheControl = extractInputSystemCacheControl(req.Input)
 	}
 
 	// 构建配置
@@ -185,6 +289,14 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 
 	if req.PromptCacheKey != "" {
 		config.PromptCacheKey = req.PromptCacheKey
+	}
+	// prompt_cache_options / prompt_cache_retention → PromptCacheOptions
+	if pco := parseResponsesPromptCacheOptions(req.PromptCacheOptions, req.PromptCacheRetention); pco != nil {
+		config.PromptCacheOptions = pco
+	}
+	// developer/system 消息上的块级缓存断点 → system 级缓存标记
+	if systemCacheControl != nil {
+		config.SystemCacheControl = systemCacheControl
 	}
 	config.ParallelToolCalls = req.ParallelToolCalls
 
@@ -501,7 +613,7 @@ func parseInputMessage(item inputItem) (bamboo.BambooMessage, string) {
 				}
 			default:
 				if p.Text != "" {
-					blocks = append(blocks, bamboo.NewTextBlock(p.Text))
+					blocks = append(blocks, bamboo.NewTextBlockWithCache(p.Text, parseResponsesCacheBreakpoint(p.PromptCacheBreakpoint)))
 				}
 			}
 		}

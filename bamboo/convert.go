@@ -379,6 +379,8 @@ func configToProvider(cfg *RequestConfig) *provider.ChatConfig {
 		ThinkingConfig:     thinkingConfig,
 		SystemCacheControl: cfg.SystemCacheControl,
 		PromptCacheKey:     cfg.PromptCacheKey,
+		PromptCacheOptions: cfg.PromptCacheOptions,
+		CachedContent:      cfg.CachedContent,
 		ServiceTier:        cfg.ServiceTier,
 		ProviderExtra:      providerExtra,
 	}
