@@ -50,7 +50,13 @@ func (p *Provider) buildRequestBody(messages []provider.Message, systemPrompt st
 	if settings, ok := provider.GetExtraAny(config.ProviderExtra, "safety_settings"); ok {
 		body["safetySettings"] = settings
 	}
-	if cc, ok := provider.GetExtraString(config.ProviderExtra, "cached_content"); ok && cc != "" {
+	// CachedContent — Gemini 显式缓存资源引用（cachedContents/{id}）。
+	//
+	// 优先使用 ChatConfig 的一等字段；ProviderExtra["cached_content"] 作为兜底，
+	// 保持既有调用方兼容。两者都没有时不发送该字段，走 Gemini 隐式缓存。
+	if config.CachedContent != "" {
+		body["cachedContent"] = config.CachedContent
+	} else if cc, ok := provider.GetExtraString(config.ProviderExtra, "cached_content"); ok && cc != "" {
 		body["cachedContent"] = cc
 	}
 
