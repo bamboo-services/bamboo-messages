@@ -25,6 +25,7 @@ provider/openai/responses/
 ├── message_audit_test.go # 消息转换审计测试
 ├── stream_test.go    # 流式事件单元测试
 ├── provider_test.go  # 集成测试
+├── usage_test.go      # 缓存字段契约测试（无原生 cache_creation → 恒为 0，cache_read 正常透传）
 └── params_audit_test.go  # Metadata/Stop 审计测试
 ```
 
@@ -97,6 +98,10 @@ provider/openai/responses/
 7. 完成原因错误 → 检查 `complete.go` 中根据 `Status` 和 ToolCalls 推断的逻辑
 8. 工具调用失败 → 检查 `tools.go` 的 `buildTools` 是否正确生成工具定义（`map[string]any` 数组）
 9. 请求参数不确定 → 设置 `BAMBOO_DEBUG=1`，查看实际发送的 headers 和 body
+
+## 已知限制
+
+- **cache_creation_input_tokens 恒为 0** — OpenAI Responses 协议**没有**原生的缓存创建字段，缓存语义只有 `usage.input_tokens_details.cached_tokens`（缓存命中数）。适配器把它映射到 `CacheReadInputTokens`，而 `CacheCreationInputTokens` 因上游无对应字段而恒为 0（流式与非流式路径均如此）。这是协议能力缺失，**不是解析失败**：判别依据是同一条用量里 `CacheReadInputTokens` 能正常透传而 `CacheCreationInputTokens` 为 0——若解析真的坏了，缓存命中数也会一起丢。对应契约测试见 `usage_test.go` 的 `TestUsage_CacheCreationContract_NoNativeField`
 
 ## 引用
 

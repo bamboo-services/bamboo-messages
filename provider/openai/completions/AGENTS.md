@@ -28,6 +28,7 @@ provider/openai/completions/
 ├── legacy_compat_test.go    # Legacy 兼容模式单元测试
 ├── message_test.go          # 空 tool_calls 序列化测试
 ├── integration_cross_protocol_test.go # 跨协议集成测试
+├── usage_test.go              # 缓存字段契约测试（无原生 cache_creation → 恒为 0，cache_read 正常透传）
 └── params_audit_test.go     # Prediction 类型断言 + ResponseFormat 审计测试
 ```
 
@@ -140,6 +141,10 @@ BaseURL **必须包含 `/v1` 版本路径**（或 `/v4`、`/v3` 等其他版本�
 ```
 
 > **注意**: newapi bridge 层会自动检测并补全 `/v1`，但直接配置 Provider 时需手动确保 BaseURL 包含版本路径。
+
+## 已知限制
+
+- **cache_creation_input_tokens 恒为 0** — OpenAI Chat Completions 协议**没有**原生的缓存创建字段，缓存语义只有 `usage.prompt_tokens_details.cached_tokens`（缓存命中数）。适配器把它映射到 `CacheReadInputTokens`，而 `CacheCreationInputTokens` 因上游无对应字段而恒为 0（流式与非流式路径均如此）。这是协议能力缺失，**不是解析失败**：判别依据是同一条用量里 `CacheReadInputTokens` 能正常透传而 `CacheCreationInputTokens` 为 0——若解析真的坏了，缓存命中数也会一起丢。对应契约测试见 `usage_test.go` 的 `TestUsage_CacheCreationContract_NoNativeField`
 
 ## 引用
 

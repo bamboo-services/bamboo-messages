@@ -27,6 +27,7 @@ provider/anthropic/
 ├── stream_test.go   # 流式事件单元测试
 ├── params_test.go   # buildParams 单元测试
 ├── params_audit_test.go  # ResponseFormat/ParallelToolCalls/SystemCacheControl 审计测试
+├── usage_test.go     # 缓存字段契约测试（cache_creation/cache_read 原样透传，流式 + 非流式）
 └── provider_test.go # 集成测试
 ```
 
@@ -128,6 +129,10 @@ BaseURL 应到 API 根路径级别（不含 `/v1`），适配器内部拼接 `/v
 ### ⚠️ 尾斜杠注意
 
 部分第三方端点（如 Kimi）要求 BaseURL 以 `/` 结尾，否则 `HTTPClient` 拼接路径后可能缺少连接符。如遇 404 错误，请尝试添加尾斜杠。
+
+## 已知限制
+
+- **cache_creation_input_tokens 原样透传** — Anthropic 协议原生提供 `cache_creation_input_tokens` 与 `cache_read_input_tokens` 两个字段，适配器在流式与非流式路径均原样透传到 `UsageData.CacheCreationInputTokens` / `CacheReadInputTokens`，不做置零处理。因此观测到 `cache_creation_input_tokens = 0` 说明上游确实没有缓存写入，而非适配器解析失败；对应契约测试见 `usage_test.go` 的 `TestUsage_CacheCreationContract_NativeField`（流式 + 非流式两条路径）。注意 Anthropic 的 `message_delta` 顶层 usage 是**累计值**（含 cache 字段），适配器在 provider 层只做原样解析，累计合并由 facade 层 `bamboo/convert.go` 的 `mergeUsage` 负责——provider 层与 facade 层职责不同，不要在 provider 层重复做合并
 
 ## 引用
 

@@ -21,6 +21,7 @@ provider/bamboo/
 ├── mock_test.go     # httptest mock server + 测试辅助工具
 ├── complete_test.go # 非流式对话单元测试
 ├── stream_test.go   # 流式事件单元测试
+├── usage_test.go    # 缓存字段契约测试（原生 cache_creation/cache_read 原样透传，流式 + 非流式）
 └── provider_test.go # 集成测试
 ```
 
@@ -133,6 +134,10 @@ BaseURL 应到 API 根路径级别（不含 `/v1`），适配器内部拼接 `/v
 
 - 认证头固定为 `Authorization: Bearer {apiKey}`，`Bearer` 后有一个空格（由 `http_client.go` 的 `prefix + key` 拼接逻辑决定）。
 - 若 BaseURL 为空，构造函数不会报错，但后续请求会失败；请始终在配置时设置 `WithBaseURL`。
+
+## 已知限制
+
+- **cache_creation_input_tokens 原样透传** — bamboo 原生协议**有** `cache_creation_input_tokens` 与 `cache_read_input_tokens` 两个原生字段，适配器在流式与非流式路径均原样透传到 `UsageData.CacheCreationInputTokens` / `CacheReadInputTokens`，不做置零处理。因此观测到 `cache_creation_input_tokens = 0` 说明上游确实没有缓存写入，而非适配器解析失败。本条与 OpenAI / Responses / Gemini 三协议的「恒为 0」构成对照：同一套 SDK 里，缓存创建数为 0 的成因因协议而异，排查时须先确认协议是否有原生字段。对应契约测试见 `usage_test.go` 的 `TestUsage_CacheCreationContract_NativeField`
 
 ## 引用
 

@@ -25,6 +25,7 @@ provider/gemini/
 ├── mock_test.go     # httptest mock server 测试辅助工具
 ├── message_test.go  # function call 历史整形单元测试
 ├── audit_test.go    # 工具调用 BlockStart + Thinking BlockStart 审计测试
+├── usage_test.go    # 缓存字段契约测试（无原生 cache_creation → 恒为 0，cache_read 正常透传）
 └── params_audit_test.go  # MaxTokens 溢出 + SafetySettings 顶层 + UserID 忽略 + ParallelToolCalls + ResponseFormat 审计测试
 ```
 
@@ -140,6 +141,10 @@ provider/gemini/
 15. function call history 校验失败 → 检查 `buildMessages` 是否将并行 FR 合并为一条 user content，且相邻 model FC 已用 dummy/真实 FR 闭合
 16. Unknown name at generation_config → 确认 labels/safetySettings/cachedContent 未写入 generationConfig
 17. `Unsupported input part type: go/debugstr` → 检查 hop2 是否发出了空 thought part，或把 data URI 写进了 `fileData.fileUri`
+
+## 已知限制
+
+- **cache_creation_input_tokens 恒为 0** — Google Gemini 协议**没有**原生的缓存创建字段，缓存语义只有 `usageMetadata.cachedContentTokenCount`（缓存命中数）。适配器把它映射到 `CacheReadInputTokens`，而 `CacheCreationInputTokens` 因上游无对应字段而恒为 0（流式与非流式路径均如此）。这是协议能力缺失，**不是解析失败**：判别依据是同一条用量里 `CacheReadInputTokens` 能正常透传而 `CacheCreationInputTokens` 为 0——若解析真的坏了，缓存命中数也会一起丢。对应契约测试见 `usage_test.go` 的 `TestUsage_CacheCreationContract_NoNativeField`
 
 ## 引用
 
