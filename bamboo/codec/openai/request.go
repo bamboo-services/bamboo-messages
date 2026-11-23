@@ -35,12 +35,26 @@ type openaiRequest struct {
 	PromptCacheKey       string                    `json:"prompt_cache_key,omitempty"`
 	PromptCacheOptions   *openaiPromptCacheOptions `json:"prompt_cache_options,omitempty"`
 	PromptCacheRetention string                    `json:"prompt_cache_retention,omitempty"`
+	CachedContent        string                    `json:"cached_content,omitempty"`
+	CachedContentCamel   string                    `json:"cachedContent,omitempty"`
+	CacheControl         json.RawMessage           `json:"cache_control,omitempty"`
+	ExtraBody            *openaiExtraBody          `json:"extra_body,omitempty"`
 	ServiceTier          string                    `json:"service_tier,omitempty"`
+}
+
+type openaiExtraBody struct {
+	CachedContent      string `json:"cached_content,omitempty"`
+	CachedContentCamel string `json:"cachedContent,omitempty"`
+	Google             *struct {
+		CachedContent      string `json:"cached_content,omitempty"`
+		CachedContentCamel string `json:"cachedContent,omitempty"`
+	} `json:"google,omitempty"`
 }
 
 type openaiMessage struct {
 	Role              string           `json:"role"`
 	Content           json.RawMessage  `json:"content,omitempty"`
+	CacheControl      json.RawMessage  `json:"cache_control,omitempty"`
 	ReasoningContent  json.RawMessage  `json:"reasoning_content,omitempty"`
 	Reasoning         json.RawMessage  `json:"reasoning,omitempty"`
 	ThinkingSignature string           `json:"thinking_signature,omitempty"`
@@ -69,14 +83,16 @@ type openaiToolFunction struct {
 }
 
 type openaiTool struct {
-	Type     string           `json:"type"`
-	Function openaiToolSchema `json:"function"`
+	Type         string           `json:"type"`
+	Function     openaiToolSchema `json:"function"`
+	CacheControl json.RawMessage  `json:"cache_control,omitempty"`
 }
 
 type openaiToolSchema struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	Parameters   json.RawMessage `json:"parameters,omitempty"`
+	CacheControl json.RawMessage `json:"cache_control,omitempty"`
 }
 
 type openaiRespFmt struct {
@@ -89,6 +105,7 @@ type openaiContentPart struct {
 	Text                  string                 `json:"text,omitempty"`
 	ImageURL              *openaiImageURL        `json:"image_url,omitempty"`
 	PromptCacheBreakpoint *openaiCacheBreakpoint `json:"prompt_cache_breakpoint,omitempty"`
+	CacheControl          json.RawMessage        `json:"cache_control,omitempty"`
 }
 
 type openaiImageURL struct {
@@ -128,23 +145,89 @@ func parseCacheBreakpoint(bp *openaiCacheBreakpoint) *provider.CacheControl {
 	return cc
 }
 
-// extractSystemCacheControl 从 system 消息内容数组中提取末位 text 块上的缓存断点。
-//
-// OpenAI 的 system 消息内容为字符串时无法携带断点，只有数组形式才可能带断点。
-func extractSystemCacheControl(raw json.RawMessage) *provider.CacheControl {
+// parseCacheControlRaw 将 Anthropic / 兼容客户端的 cache_control JSON 解析为统一的 provider.CacheControl。
+func parseCacheControlRaw(raw json.RawMessage) *provider.CacheControl {
 	if len(raw) == 0 {
 		return nil
 	}
-	var parts []openaiContentPart
-	if err := json.Unmarshal(raw, &parts); err != nil {
+	var obj struct {
+		Type string `json:"type"`
+		TTL  string `json:"ttl,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
 		return nil
 	}
-	for i := len(parts) - 1; i >= 0; i-- {
-		if parts[i].Type == "text" && parts[i].PromptCacheBreakpoint != nil {
-			return parseCacheBreakpoint(parts[i].PromptCacheBreakpoint)
+	if obj.Type == "" {
+		return nil
+	}
+	cc := &provider.CacheControl{Type: obj.Type}
+	if obj.TTL != "" {
+		cc.TTL = provider.CacheTTL(obj.TTL)
+	}
+	return cc
+}
+
+// resolvePartCacheControl 统一解析内容块上的缓存标记（优先 OpenAI prompt_cache_breakpoint，其次兼容 cache_control）。
+func resolvePartCacheControl(bp *openaiCacheBreakpoint, rawCC json.RawMessage) *provider.CacheControl {
+	if bp != nil {
+		return parseCacheBreakpoint(bp)
+	}
+	return parseCacheControlRaw(rawCC)
+}
+
+// extractPartCacheControl 从消息内容数组末位提取缓存标记，未命中时回退到消息级 cache_control。
+func extractPartCacheControl(raw, msgCC json.RawMessage, textOnly bool) *provider.CacheControl {
+	if len(raw) > 0 {
+		var parts []openaiContentPart
+		if err := json.Unmarshal(raw, &parts); err == nil {
+			for i := len(parts) - 1; i >= 0; i-- {
+				if textOnly && parts[i].Type != "text" {
+					continue
+				}
+				if cc := resolvePartCacheControl(parts[i].PromptCacheBreakpoint, parts[i].CacheControl); cc != nil {
+					return cc
+				}
+			}
 		}
 	}
-	return nil
+	return parseCacheControlRaw(msgCC)
+}
+
+func setExtra(config *bamboo.RequestConfig, key string, value any) {
+	if config.ProviderExtra == nil {
+		config.ProviderExtra = make(map[string]any)
+	}
+	config.ProviderExtra[key] = value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// resolveCachedContent 提取 OpenAI 请求中携带的 Google 显式缓存资源引用（cached_content / cachedContent）。
+func resolveCachedContent(req openaiRequest) string {
+	var extraCC, extraCamel, googleCC, googleCamel string
+	if req.ExtraBody != nil {
+		extraCC = req.ExtraBody.CachedContent
+		extraCamel = req.ExtraBody.CachedContentCamel
+		if req.ExtraBody.Google != nil {
+			googleCC = req.ExtraBody.Google.CachedContent
+			googleCamel = req.ExtraBody.Google.CachedContentCamel
+		}
+	}
+	return firstNonEmpty(
+		req.CachedContent,
+		req.CachedContentCamel,
+		extraCC,
+		extraCamel,
+		googleCC,
+		googleCamel,
+	)
 }
 
 // parsePromptCacheOptions 将 OpenAI 请求级缓存选项转换为统一的 provider.PromptCacheOptions。
@@ -201,8 +284,8 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 			if text != "" {
 				systemParts = append(systemParts, text)
 			}
-			// system 消息内容数组末位 text 块上的缓存断点 → system 级缓存标记
-			if cc := extractSystemCacheControl(msg.Content); cc != nil {
+			// system 消息内容数组末位 text 块或消息级 cache_control → system 级缓存标记
+			if cc := extractPartCacheControl(msg.Content, msg.CacheControl, true); cc != nil {
 				systemCacheControl = cc
 			}
 		case "user":
@@ -256,10 +339,7 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	if choice, toolName, err := parseToolChoice(req.ToolChoice); err == nil && choice != "" {
 		config.ToolChoice = choice
 		if toolName != "" {
-			if config.ProviderExtra == nil {
-				config.ProviderExtra = make(map[string]any)
-			}
-			config.ProviderExtra["forced_tool_name"] = toolName
+			setExtra(config, "forced_tool_name", toolName)
 		}
 	}
 
@@ -288,7 +368,15 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 	if pco := parsePromptCacheOptions(req.PromptCacheOptions, req.PromptCacheRetention); pco != nil {
 		config.PromptCacheOptions = pco
 	}
-	// system 消息上的块级缓存断点 → system 级缓存标记
+	// cached_content / cachedContent → Gemini 显式缓存资源引用（同时同步至 ProviderExtra 兜底槽）
+	if cachedContent := resolveCachedContent(req); cachedContent != "" {
+		config.CachedContent = cachedContent
+		setExtra(config, "cached_content", cachedContent)
+	}
+	// system 消息上的块级缓存断点 → system 级缓存标记；缺失时回退到顶层 cache_control
+	if systemCacheControl == nil {
+		systemCacheControl = parseCacheControlRaw(req.CacheControl)
+	}
 	if systemCacheControl != nil {
 		config.SystemCacheControl = systemCacheControl
 	}
@@ -297,19 +385,15 @@ func parseRequest(body []byte) (*codec.RelayRequest, error) {
 		config.ServiceTier = req.ServiceTier
 	}
 
-	// ProviderExtra
-	if req.FrequencyPenalty != nil || req.PresencePenalty != nil || req.Seed != nil {
-		extra := make(map[string]any)
-		if req.FrequencyPenalty != nil {
-			extra["frequency_penalty"] = *req.FrequencyPenalty
-		}
-		if req.PresencePenalty != nil {
-			extra["presence_penalty"] = *req.PresencePenalty
-		}
-		if req.Seed != nil {
-			extra["seed"] = *req.Seed
-		}
-		config.ProviderExtra = extra
+	// ProviderExtra（增量写入，禁止覆盖前面已写入的 forced_tool_name / cached_content 等扩展键）
+	if req.FrequencyPenalty != nil {
+		setExtra(config, "frequency_penalty", *req.FrequencyPenalty)
+	}
+	if req.PresencePenalty != nil {
+		setExtra(config, "presence_penalty", *req.PresencePenalty)
+	}
+	if req.Seed != nil {
+		setExtra(config, "seed", *req.Seed)
 	}
 
 	return &codec.RelayRequest{
@@ -349,9 +433,13 @@ func parseUserMessage(msg openaiMessage) (bamboo.BambooMessage, error) {
 	if len(msg.Content) == 0 {
 		return bamboo.BambooMessage{Role: bamboo.RoleUser}, nil
 	}
+	msgCC := parseCacheControlRaw(msg.CacheControl)
 	// 尝试 string
 	var s string
 	if err := json.Unmarshal(msg.Content, &s); err == nil {
+		if msgCC != nil {
+			return bamboo.NewUserMessageBlocks(bamboo.NewTextBlockWithCache(s, msgCC)), nil
+		}
 		return bamboo.NewUserMessage(s), nil
 	}
 	// 尝试 array
@@ -361,21 +449,50 @@ func parseUserMessage(msg openaiMessage) (bamboo.BambooMessage, error) {
 	}
 
 	blocks := make([]bamboo.ContentBlock, 0, len(parts))
+	hasPartCC := false
 	for _, p := range parts {
+		cc := resolvePartCacheControl(p.PromptCacheBreakpoint, p.CacheControl)
+		if cc != nil {
+			hasPartCC = true
+		}
 		switch p.Type {
 		case "text":
-			blocks = append(blocks, bamboo.NewTextBlockWithCache(p.Text, parseCacheBreakpoint(p.PromptCacheBreakpoint)))
+			blocks = append(blocks, bamboo.NewTextBlockWithCache(p.Text, cc))
 		case "image_url":
 			if p.ImageURL != nil {
-				blocks = append(blocks, parseImageURL(p.ImageURL.URL))
+				blocks = append(blocks, parseImageURL(p.ImageURL.URL, cc))
 			}
 		}
+	}
+	if !hasPartCC && msgCC != nil && len(blocks) > 0 {
+		attachCacheControl(blocks[len(blocks)-1], msgCC)
 	}
 	return bamboo.NewUserMessageBlocks(blocks...), nil
 }
 
+// attachCacheControl 在消息级兜底场景下为内容块附加 CacheControl。
+func attachCacheControl(block bamboo.ContentBlock, cc *provider.CacheControl) {
+	if block == nil || cc == nil {
+		return
+	}
+	switch b := block.(type) {
+	case *bamboo.TextBlock:
+		b.CacheControl = cc
+	case *bamboo.ThinkingBlock:
+		b.CacheControl = cc
+	case *bamboo.ToolUseBlock:
+		b.CacheControl = cc
+	case *bamboo.ToolResultBlock:
+		b.CacheControl = cc
+	case *bamboo.ImageBlock:
+		b.CacheControl = cc
+	case *bamboo.DocumentBlock:
+		b.CacheControl = cc
+	}
+}
+
 // parseImageURL 将 OpenAI image_url 转为 bamboo.ImageBlock。
-func parseImageURL(url string) bamboo.ContentBlock {
+func parseImageURL(url string, cc *provider.CacheControl) bamboo.ContentBlock {
 	// data URI: data:image/png;base64,xxxx
 	if strings.HasPrefix(url, "data:") {
 		commaIdx := strings.Index(url, ",")
@@ -383,18 +500,18 @@ func parseImageURL(url string) bamboo.ContentBlock {
 			header := url[:commaIdx]
 			data := url[commaIdx+1:]
 			mediaType := parseDataURIMediaType(header)
-			return bamboo.NewImageBlock(bamboo.ContentSource{
+			return bamboo.NewImageBlockWithCache(bamboo.ContentSource{
 				Type:      "base64",
 				MediaType: mediaType,
 				Data:      data,
-			})
+			}, cc)
 		}
 	}
 	// 普通 URL
-	return bamboo.NewImageBlock(bamboo.ContentSource{
+	return bamboo.NewImageBlockWithCache(bamboo.ContentSource{
 		Type: "url",
 		URL:  url,
-	})
+	}, cc)
 }
 
 // parseDataURIMediaType 从 data URI header 提取 MIME 类型。
@@ -429,8 +546,11 @@ func parseAssistantMessage(msg openaiMessage) bamboo.BambooMessage {
 		blocks = append(blocks, bamboo.NewThinkingBlockWithProvider(reasoning, sig, sigProv))
 	}
 
+	contentCC := extractPartCacheControl(msg.Content, msg.CacheControl, false)
+	textAttached := false
 	if text := extractPlainText(msg.Content); text != "" {
-		blocks = append(blocks, bamboo.NewTextBlock(text))
+		blocks = append(blocks, bamboo.NewTextBlockWithCache(text, contentCC))
+		textAttached = true
 	}
 
 	for _, tc := range msg.ToolCalls {
@@ -446,6 +566,9 @@ func parseAssistantMessage(msg openaiMessage) bamboo.BambooMessage {
 			Name:  tc.Function.Name,
 			Input: input,
 		})
+	}
+	if !textAttached && contentCC != nil && len(blocks) > 0 {
+		attachCacheControl(blocks[len(blocks)-1], contentCC)
 	}
 	if len(blocks) == 0 {
 		out := bamboo.BambooMessage{Role: bamboo.RoleAssistant}
@@ -487,7 +610,8 @@ func extractReasoningContent(sources ...json.RawMessage) string {
 // parseToolMessage 解析 tool 角色消息 → user + ToolResultBlock。
 func parseToolMessage(msg openaiMessage) bamboo.BambooMessage {
 	content := extractPlainText(msg.Content)
-	block := bamboo.NewToolResultBlock(msg.ToolCallID, content, false)
+	cc := extractPartCacheControl(msg.Content, msg.CacheControl, false)
+	block := bamboo.NewToolResultBlockWithCache(msg.ToolCallID, content, false, cc)
 	return bamboo.NewUserMessageBlocks(block)
 }
 
@@ -544,9 +668,14 @@ func parseTools(tools []openaiTool) []bamboo.Tool {
 		if t.Type != "function" {
 			continue
 		}
+		cc := parseCacheControlRaw(t.CacheControl)
+		if cc == nil {
+			cc = parseCacheControlRaw(t.Function.CacheControl)
+		}
 		tool := bamboo.Tool{
-			Name:        t.Function.Name,
-			Description: t.Function.Description,
+			Name:         t.Function.Name,
+			Description:  t.Function.Description,
+			CacheControl: cc,
 		}
 		// parameters 原样保留为 json.RawMessage，确保完整透传所有 JSON Schema 字段
 		tool.InputSchema = t.Function.Parameters
