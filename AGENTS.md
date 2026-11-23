@@ -410,6 +410,7 @@ bamboo-messages/
    21d. **跨协议缓存 TTL 词表隔离** — `provider.CacheTTL` 是协议中立字符串类型，取值词表按协议区分（Anthropic `5m`/`1h`；OpenAI `30m`/`12h`）。各适配器只透传本协议支持的取值：无法识别的取值一律丢弃并退化为该层级的默认行为，**绝不向上游发送非法值**（避免 400）
    21e. **OpenAI 块级断点门控** — `prompt_cache_breakpoint` 是 gpt-5.6+ 新字段，对更早的模型发送未知字段会被上游拒绝（400）。因此块级断点**默认不发射**，须由调用方通过 `PromptCacheOptions.EnableBlockBreakpoints` 显式确认目标模型支持（或声明 `Mode=explicit`，其语义本身即「由开发者指定断点位置」）。未开启时 OpenAI 自动放置隐式断点，缓存行为不受影响
    21f. **OpenAI 断点载体形态** — OpenAI 的断点只能挂在内容块上，字符串形式的 `content` 无法承载。命中断点的消息自动改用数组形式（`[{type:"text",...}]`）；`system` 在 Chat Completions 走 system 消息数组、在 Responses 走 `developer` 消息的 `input_text` 块（顶层 `instructions` 是纯字符串，无法携带断点）
+   21g. **入站兼容与 Gemini 互斥保护** — `bamboo/codec/openai` 入站兼容解析 `cached_content` / `cachedContent` / `extra_body.cached_content` 及 Anthropic 风格 `cache_control`（并用 `setExtra` 增量写入 `ProviderExtra` 防覆盖）；`provider/gemini` 在携带 `cachedContent` 时自动剥离冲突的 `systemInstruction`、`tools`、`toolConfig`
 22. **Thinking 内容全链路保留** — `BambooMessage.ThinkingBlock` → `provider.Message.ThinkingContent/ThinkingSignature/ReasoningID` → 适配器 → `provider.CompletionResult.Thinking/ThinkingSignature/ResponseID` → `bamboo.Response.ThinkingBlock` 双向透传
 23. **FinishReason 流式透传** — `provider.StreamEvent.FinishReason` 由适配器填充，`StreamConverter.handleStop` 使用实际完成原因，不再硬编码 `FinishReasonEndTurn`
 24. **ToolName/ToolCallID 分离** — `ToolResultBlock` 和 `provider.Message` 同时保存 `ToolName`（函数名）和 `ToolCallID`（调用 ID），Gemini `FunctionResponse` 需要两者同时存在

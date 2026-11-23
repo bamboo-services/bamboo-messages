@@ -97,7 +97,7 @@ provider/gemini/
 - **UserAgent 统一** — 由 `provider.HTTPClient` 自动注入统一 `User-Agent: BM-SDK/{version}`
 - **ProviderType** — `GetProviderType()` 返回 `"gemini"`
 - **ThinkingLevel 映射** — `Effort: low/medium/high` → 请求 DTO `thinkingConfig.IncludeThoughts: true` + `ThinkingLevel"low"/"medium"/"high"`；`none` → 不设置 thinkingConfig
-- **显式缓存资源引用（cachedContent）** — `config.CachedContent` 为一等字段，映射到 `GenerateContentRequest` 顶层 `cachedContent` 字段；未设置时回退到 `ProviderExtra["cached_content"]`。**不写入 `generationConfig`**（顶层字段），且一等字段优先于 ProviderExtra
+- **显式缓存资源引用（cachedContent）与互斥剥离** — `config.CachedContent` 为一等字段，映射到 `GenerateContentRequest` 顶层 `cachedContent` 字段；未设置时回退到 `ProviderExtra["cached_content"]`。**不写入 `generationConfig`**（顶层字段），且一等字段优先于 ProviderExtra；当 `cachedContent` 非空时，`buildRequestBody` 自动剥离请求中的 `systemInstruction`、`tools` 与 `toolConfig`（避免与 Gemini 显式缓存资源冲突触发 400）
 - **隐式缓存无需配置** — Gemini 对可缓存内容的自动缓存由上游完成，SDK 不提供也不需要任何配置项；`cachedContent` 仅用于**显式**引用已创建的缓存资源
 - **ToolChoice 映射** — `auto→AUTO`、`none→NONE`、`required/forced/any→ANY`
 - **ResponseFormat 映射** — `"json_object"` → 请求 DTO `generationConfig.ResponseMIMEType: "application/json"`
