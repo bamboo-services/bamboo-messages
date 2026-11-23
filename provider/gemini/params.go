@@ -23,41 +23,47 @@ func (p *Provider) buildRequestBody(messages []provider.Message, systemPrompt st
 
 	body := map[string]any{"contents": p.buildMessages(messages)}
 
-	// 系统提示 — Gemini 使用顶层 systemInstruction 字段
-	if systemPrompt != "" {
-		body["systemInstruction"] = map[string]any{
-			"parts": []map[string]any{{"text": systemPrompt}},
-		}
-	}
-
 	// 生成配置（仅 GenerationConfig 白名单字段）
 	if gc := p.buildContentConfig(config); len(gc) > 0 {
 		body["generationConfig"] = gc
 	}
 
-	// 工具声明
-	if tools := buildTools(config.Tools); tools != nil {
-		body["tools"] = tools
-	}
+	// CachedContent — Gemini 显式缓存资源引用（cachedContents/{id}）。
+	//
+	// 优先使用 ChatConfig 的一等字段；ProviderExtra["cached_content"] 作为兜底，
+	// 保持既有调用方兼容。两者都没有时不发送该字段，走 Gemini 隐式缓存。
+	//
+	// 互斥约束：Gemini API 规定请求携带 cachedContent 时，systemInstruction、
+	// tools 和 toolConfig 已固化在缓存资源内，禁止与请求体同时提交（否则上游报 400）。
+	if cachedContent := resolveCachedContent(config); cachedContent != "" {
+		body["cachedContent"] = cachedContent
+		if provider.DebugEnabled && (systemPrompt != "" || len(config.Tools) > 0 || buildToolConfig(config) != nil) {
+			xLog.WithName("provider/gemini").SugarWarn(context.Background(),
+				"cachedContent 已配置，已剥离冲突的 systemInstruction/tools/toolConfig 字段")
+		}
+	} else {
+		// 系统提示 — Gemini 使用顶层 systemInstruction 字段
+		if systemPrompt != "" {
+			body["systemInstruction"] = map[string]any{
+				"parts": []map[string]any{{"text": systemPrompt}},
+			}
+		}
 
-	// 工具调用策略
-	if tc := buildToolConfig(config); tc != nil {
-		body["toolConfig"] = tc
+		// 工具声明
+		if tools := buildTools(config.Tools); tools != nil {
+			body["tools"] = tools
+		}
+
+		// 工具调用策略
+		if tc := buildToolConfig(config); tc != nil {
+			body["toolConfig"] = tc
+		}
 	}
 
 	// safetySettings / cachedContent 是 GenerateContentRequest 顶层字段，
 	// 不能放进 generationConfig，否则 protobuf 校验会报 Unknown name。
 	if settings, ok := provider.GetExtraAny(config.ProviderExtra, "safety_settings"); ok {
 		body["safetySettings"] = settings
-	}
-	// CachedContent — Gemini 显式缓存资源引用（cachedContents/{id}）。
-	//
-	// 优先使用 ChatConfig 的一等字段；ProviderExtra["cached_content"] 作为兜底，
-	// 保持既有调用方兼容。两者都没有时不发送该字段，走 Gemini 隐式缓存。
-	if config.CachedContent != "" {
-		body["cachedContent"] = config.CachedContent
-	} else if cc, ok := provider.GetExtraString(config.ProviderExtra, "cached_content"); ok && cc != "" {
-		body["cachedContent"] = cc
 	}
 
 	// ServiceTier: priority / standard / flex 推理服务层级（2026 最新官方参数）
@@ -72,6 +78,20 @@ func (p *Provider) buildRequestBody(messages []provider.Message, systemPrompt st
 	}
 
 	return body
+}
+
+// resolveCachedContent 提取 Gemini 显式缓存资源引用（一等字段优先于 ProviderExtra["cached_content"]）。
+func resolveCachedContent(config *provider.ChatConfig) string {
+	if config == nil {
+		return ""
+	}
+	if config.CachedContent != "" {
+		return config.CachedContent
+	}
+	if cc, ok := provider.GetExtraString(config.ProviderExtra, "cached_content"); ok && cc != "" {
+		return cc
+	}
+	return ""
 }
 
 // buildEndpoint 构造 Gemini API 请求端点。

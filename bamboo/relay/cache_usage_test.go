@@ -3,6 +3,8 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -14,6 +16,7 @@ import (
 	_ "github.com/bamboo-services/bamboo-messages/bamboo/codec/openai"
 	_ "github.com/bamboo-services/bamboo-messages/bamboo/codec/responses"
 	"github.com/bamboo-services/bamboo-messages/provider"
+	geminiprovider "github.com/bamboo-services/bamboo-messages/provider/gemini"
 )
 
 // newMockCachedStreamProvider 创建流式 mock provider，模拟上游分段上报 usage：
@@ -194,4 +197,102 @@ func TestRelayStream_UsageCallbackCarriesCacheStats(t *testing.T) {
 	if last.OutputTokens != 12 {
 		t.Errorf("OutputTokens = %d, want 12", last.OutputTokens)
 	}
+}
+
+// TestRelay_OpenAIToGemini_CachedContentAndExtraPassthrough 验证 Chat Completions 请求
+// 转发到 Gemini 上游时的完整链路：
+//   - forced_tool_name 在同时携带 seed 等字段时不被 ProviderExtra 覆盖；
+//   - cached_content 透传为 Gemini 顶层 cachedContent，并自动剥离冲突的 systemInstruction/tools/toolConfig。
+func TestRelay_OpenAIToGemini_CachedContentAndExtraPassthrough(t *testing.T) {
+	t.Run("forced_tool_name preserved alongside seed", func(t *testing.T) {
+		var captured map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+				t.Fatalf("decode upstream request: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":50,"candidatesTokenCount":5,"cachedContentTokenCount":30}}`))
+		}))
+		defer srv.Close()
+
+		gp := geminiprovider.NewProviderWithOptions(
+			geminiprovider.WithAPIKey("test-key"),
+			geminiprovider.WithBaseURL(srv.URL),
+		)
+
+		reqBody := []byte(`{
+			"model": "gemini-2.5-pro",
+			"messages": [{"role": "user", "content": "hello"}],
+			"tools": [{"type": "function", "function": {"name": "get_weather"}}],
+			"tool_choice": {"type": "function", "function": {"name": "get_weather"}},
+			"seed": 7
+		}`)
+
+		out, err := Relay(context.Background(), gp, reqBody, codec.FormatOpenAI, codec.FormatOpenAI)
+		if err != nil {
+			t.Fatalf("Relay() error = %v", err)
+		}
+
+		tc, ok := captured["toolConfig"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected toolConfig in upstream request, got %v", captured["toolConfig"])
+		}
+		fcc, ok := tc["functionCallingConfig"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected functionCallingConfig, got %v", tc["functionCallingConfig"])
+		}
+		allowed, ok := fcc["allowedFunctionNames"].([]any)
+		if !ok || len(allowed) != 1 || allowed[0] != "get_weather" {
+			t.Errorf("upstream allowedFunctionNames = %v, want [get_weather] (forced_tool_name must not be overwritten)", fcc["allowedFunctionNames"])
+		}
+		if !strings.Contains(string(out), `"cached_tokens":30`) {
+			t.Errorf("expected cached_tokens:30 in OpenAI response, got: %s", out)
+		}
+	})
+
+	t.Run("cached_content passthrough strips conflicting fields", func(t *testing.T) {
+		var captured map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+				t.Fatalf("decode upstream request: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":50,"candidatesTokenCount":5,"cachedContentTokenCount":30}}`))
+		}))
+		defer srv.Close()
+
+		gp := geminiprovider.NewProviderWithOptions(
+			geminiprovider.WithAPIKey("test-key"),
+			geminiprovider.WithBaseURL(srv.URL),
+		)
+
+		reqBody := []byte(`{
+			"model": "gemini-2.5-pro",
+			"messages": [
+				{"role": "system", "content": "you are helpful"},
+				{"role": "user", "content": "hello"}
+			],
+			"tools": [{"type": "function", "function": {"name": "get_weather"}}],
+			"tool_choice": {"type": "function", "function": {"name": "get_weather"}},
+			"cached_content": "cachedContents/chat-to-google-1",
+			"seed": 7
+		}`)
+
+		out, err := Relay(context.Background(), gp, reqBody, codec.FormatOpenAI, codec.FormatOpenAI)
+		if err != nil {
+			t.Fatalf("Relay() error = %v", err)
+		}
+
+		if captured["cachedContent"] != "cachedContents/chat-to-google-1" {
+			t.Errorf("upstream cachedContent = %v, want cachedContents/chat-to-google-1", captured["cachedContent"])
+		}
+		for _, forbidden := range []string{"systemInstruction", "tools", "toolConfig"} {
+			if _, exists := captured[forbidden]; exists {
+				t.Errorf("upstream %s must be stripped when cachedContent is set, got %v", forbidden, captured[forbidden])
+			}
+		}
+		if !strings.Contains(string(out), `"cached_tokens":30`) {
+			t.Errorf("expected cached_tokens:30 in OpenAI response, got: %s", out)
+		}
+	})
 }
